@@ -5,7 +5,8 @@ import { Switch as SwitchPrimitive } from "@base-ui/react/switch"
 
 import { cn } from "@/lib/utils"
 
-// Root: emerald when checked, slate when unchecked. Matches app theme.
+// Root: primary token when checked (responds to the active color theme),
+// slate when unchecked.
 function Switch({
   className,
   ...props
@@ -15,9 +16,9 @@ function Switch({
       data-slot="switch"
       className={cn(
         "inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950",
         "disabled:cursor-not-allowed disabled:opacity-50",
-        "data-[checked]:bg-violet-500 data-[unchecked]:bg-slate-700",
+        "data-[checked]:bg-primary data-[unchecked]:bg-slate-700",
         className,
       )}
       {...props}

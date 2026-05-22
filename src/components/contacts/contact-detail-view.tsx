@@ -331,7 +331,7 @@ export function ContactDetailView({
       >
         {loading || !contact ? (
           <div className="flex items-center justify-center h-full">
-            <Loader2 className="size-6 animate-spin text-violet-500" />
+            <Loader2 className="size-6 animate-spin text-primary" />
           </div>
         ) : (
           <div className="flex flex-col h-full">
@@ -339,7 +339,7 @@ export function ContactDetailView({
             <SheetHeader className="p-4 border-b border-slate-700/50">
               <div className="flex items-center gap-3">
                 <Avatar className="size-12 bg-slate-800 border border-slate-700">
-                  <AvatarFallback className="bg-violet-500/10 text-violet-400 text-sm font-medium">
+                  <AvatarFallback className="bg-primary/10 text-primary text-sm font-medium">
                     {getInitials(contact.name)}
                   </AvatarFallback>
                 </Avatar>
@@ -353,12 +353,12 @@ export function ContactDetailView({
                   <div className="flex flex-wrap items-center gap-3 mt-1.5 text-xs text-slate-400">
                     <button
                       onClick={copyPhone}
-                      className="flex items-center gap-1 hover:text-violet-400 transition-colors cursor-pointer"
+                      className="flex items-center gap-1 hover:text-primary transition-colors cursor-pointer"
                     >
                       <Phone className="size-3" />
                       {contact.phone}
                       {copiedPhone ? (
-                        <Check className="size-3 text-violet-400" />
+                        <Check className="size-3 text-primary" />
                       ) : (
                         <Copy className="size-3" />
                       )}
@@ -385,31 +385,31 @@ export function ContactDetailView({
               <TabsList className="bg-slate-800/50 border-b border-slate-700 mx-4 mt-3">
                 <TabsTrigger
                   value="details"
-                  className="data-active:bg-slate-800 data-active:text-violet-400 text-slate-400"
+                  className="data-active:bg-slate-800 data-active:text-primary text-slate-400"
                 >
                   Details
                 </TabsTrigger>
                 <TabsTrigger
                   value="tags"
-                  className="data-active:bg-slate-800 data-active:text-violet-400 text-slate-400"
+                  className="data-active:bg-slate-800 data-active:text-primary text-slate-400"
                 >
                   Tags
                 </TabsTrigger>
                 <TabsTrigger
                   value="notes"
-                  className="data-active:bg-slate-800 data-active:text-violet-400 text-slate-400"
+                  className="data-active:bg-slate-800 data-active:text-primary text-slate-400"
                 >
                   Notes
                 </TabsTrigger>
                 <TabsTrigger
                   value="custom"
-                  className="data-active:bg-slate-800 data-active:text-violet-400 text-slate-400"
+                  className="data-active:bg-slate-800 data-active:text-primary text-slate-400"
                 >
                   Custom Fields
                 </TabsTrigger>
                 <TabsTrigger
                   value="deals"
-                  className="data-active:bg-slate-800 data-active:text-violet-400 text-slate-400"
+                  className="data-active:bg-slate-800 data-active:text-primary text-slate-400"
                 >
                   Deals
                 </TabsTrigger>
@@ -455,7 +455,7 @@ export function ContactDetailView({
                   <Button
                     onClick={saveDetails}
                     disabled={savingDetails}
-                    className="bg-violet-600 hover:bg-violet-700 text-white w-full"
+                    className="bg-primary hover:bg-primary/90 text-primary-foreground w-full"
                     size="sm"
                   >
                     {savingDetails ? (
@@ -489,7 +489,7 @@ export function ContactDetailView({
                             disabled={savingTags}
                             className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-all cursor-pointer ${
                               selected
-                                ? 'ring-2 ring-violet-500 ring-offset-1 ring-offset-slate-900'
+                                ? 'ring-2 ring-primary ring-offset-1 ring-offset-slate-900'
                                 : 'opacity-50 hover:opacity-80'
                             }`}
                             style={{
@@ -519,7 +519,7 @@ export function ContactDetailView({
                   <Button
                     onClick={addNote}
                     disabled={!newNote.trim() || savingNote}
-                    className="bg-violet-600 hover:bg-violet-700 text-white"
+                    className="bg-primary hover:bg-primary/90 text-primary-foreground"
                     size="sm"
                   >
                     {savingNote ? (
@@ -605,7 +605,7 @@ export function ContactDetailView({
                     <Button
                       onClick={saveCustomFields}
                       disabled={savingCustom}
-                      className="bg-violet-600 hover:bg-violet-700 text-white w-full"
+                      className="bg-primary hover:bg-primary/90 text-primary-foreground w-full"
                       size="sm"
                     >
                       {savingCustom ? (
@@ -623,7 +623,7 @@ export function ContactDetailView({
               <TabsContent value="deals" className="flex-1 overflow-y-auto px-4 py-3">
                 {loadingDeals ? (
                   <div className="flex items-center justify-center py-8">
-                    <Loader2 className="size-5 animate-spin text-violet-500" />
+                    <Loader2 className="size-5 animate-spin text-primary" />
                   </div>
                 ) : deals.length === 0 ? (
                   <p className="text-xs text-slate-500">No deals yet</p>
@@ -663,7 +663,7 @@ export function ContactDetailView({
                             <span
                               className={
                                 deal.status === 'won'
-                                  ? 'text-violet-400'
+                                  ? 'text-primary'
                                   : 'text-red-400'
                               }
                             >

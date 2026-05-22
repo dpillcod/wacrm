@@ -107,7 +107,7 @@ export function PipelineAnalytics({ stages, deals }: PipelineAnalyticsProps) {
           tooltip="Count of every deal in this pipeline that isn't marked as Lost. Won deals are still included."
         />
         <Metric
-          icon={<DollarSign className="h-4 w-4 text-violet-400" />}
+          icon={<DollarSign className="h-4 w-4 text-primary" />}
           label="Pipeline Value"
           value={formatCurrency(stats.totalValue)}
           tooltip="Sum of the dollar values of all deals in this pipeline, excluding deals marked as Lost."
@@ -125,7 +125,7 @@ export function PipelineAnalytics({ stages, deals }: PipelineAnalyticsProps) {
           tooltip="Expected revenue: each open deal's value × its stage probability. First stage ≈ 10%, stages progress up to 90%, Won = 100%. Lost deals are excluded."
         />
         <Metric
-          icon={<Trophy className="h-4 w-4 text-violet-400" />}
+          icon={<Trophy className="h-4 w-4 text-primary" />}
           label="Won This Month"
           value={String(stats.wonThisMonth)}
           tooltip="Deals marked as Won since the first day of the current month."

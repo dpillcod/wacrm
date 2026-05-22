@@ -226,7 +226,7 @@ export default function ContactsPage() {
           </Button>
           <Button
             onClick={openAddForm}
-            className="bg-violet-600 hover:bg-violet-700 text-white"
+            className="bg-primary hover:bg-primary/90 text-primary-foreground"
           >
             <Plus className="size-4" />
             Add Contact
@@ -269,7 +269,7 @@ export default function ContactsPage() {
               <TableRow className="border-slate-800">
                 <TableCell colSpan={7} className="text-center py-12">
                   <div className="flex flex-col items-center gap-2">
-                    <Loader2 className="size-6 animate-spin text-violet-500" />
+                    <Loader2 className="size-6 animate-spin text-primary" />
                     <p className="text-sm text-slate-500">Loading contacts...</p>
                   </div>
                 </TableCell>

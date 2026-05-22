@@ -246,7 +246,7 @@ export default function BroadcastDetailPage() {
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-violet-500" />
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
       </div>
     );
   }
@@ -265,7 +265,7 @@ export default function BroadcastDetailPage() {
   const status = getBroadcastStatus(broadcast.status);
 
   const funnelSteps: FunnelStep[] = [
-    { label: 'Sent', value: broadcast.sent_count, color: 'bg-violet-500' },
+    { label: 'Sent', value: broadcast.sent_count, color: 'bg-primary' },
     { label: 'Delivered', value: broadcast.delivered_count, color: 'bg-teal-500' },
     { label: 'Read', value: broadcast.read_count, color: 'bg-blue-500' },
     { label: 'Replied', value: broadcast.replied_count, color: 'bg-indigo-500' },
@@ -361,7 +361,7 @@ export default function BroadcastDetailPage() {
           value={broadcast.sent_count}
           total={broadcast.total_recipients}
           icon={<Send className="h-4 w-4" />}
-          color="bg-violet-500/10 text-violet-400"
+          color="bg-primary/10 text-primary"
         />
         <StatCard
           label="Delivered"
@@ -423,7 +423,7 @@ export default function BroadcastDetailPage() {
                 <DropdownMenuItem
                   onClick={() => setStatusFilter('all')}
                   className={
-                    statusFilter === 'all' ? 'text-violet-400' : 'text-slate-300'
+                    statusFilter === 'all' ? 'text-primary' : 'text-slate-300'
                   }
                 >
                   All statuses
@@ -434,7 +434,7 @@ export default function BroadcastDetailPage() {
                     onClick={() => setStatusFilter(s)}
                     className={
                       statusFilter === s
-                        ? 'text-violet-400'
+                        ? 'text-primary'
                         : 'text-slate-300'
                     }
                   >

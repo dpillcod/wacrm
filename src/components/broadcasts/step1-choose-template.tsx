@@ -48,7 +48,7 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-violet-500" />
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
       </div>
     );
   }
@@ -88,7 +88,7 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
                 onClick={() => onSelect(template)}
                 className={`flex flex-col gap-3 rounded-xl border p-4 text-left transition-all ${
                   isSelected
-                    ? 'border-violet-500 bg-violet-500/5 ring-1 ring-violet-500/30'
+                    ? 'border-primary bg-primary/5 ring-1 ring-primary/30'
                     : 'border-slate-800 bg-slate-900/50 hover:border-slate-700 hover:bg-slate-900'
                 }`}
               >
@@ -123,7 +123,7 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
         <Button
           onClick={onNext}
           disabled={!selectedTemplate}
-          className="bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50"
+          className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
           Next
           <ArrowRight className="h-4 w-4" />

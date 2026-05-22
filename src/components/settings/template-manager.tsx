@@ -40,7 +40,7 @@ const categoryColors: Record<string, string> = {
 const statusColors: Record<string, string> = {
   Draft: 'bg-slate-600/20 text-slate-400 border-slate-600/30',
   Pending: 'bg-yellow-600/20 text-yellow-400 border-yellow-600/30',
-  Approved: 'bg-violet-600/20 text-violet-400 border-violet-600/30',
+  Approved: 'bg-primary/20 text-primary border-primary/30',
   Rejected: 'bg-red-600/20 text-red-400 border-red-600/30',
 };
 
@@ -246,7 +246,7 @@ export function TemplateManager() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 className="size-6 animate-spin text-violet-500" />
+        <Loader2 className="size-6 animate-spin text-primary" />
       </div>
     );
   }
@@ -280,7 +280,7 @@ export function TemplateManager() {
               setForm(emptyForm);
               setDialogOpen(true);
             }}
-            className="bg-violet-600 hover:bg-violet-700 text-white"
+            className="bg-primary hover:bg-primary/90 text-primary-foreground"
           >
             <Plus className="size-4" />
             New Template
@@ -456,7 +456,7 @@ export function TemplateManager() {
             <Button
               onClick={handleSave}
               disabled={saving}
-              className="bg-violet-600 hover:bg-violet-700 text-white"
+              className="bg-primary hover:bg-primary/90 text-primary-foreground"
             >
               {saving ? (
                 <>

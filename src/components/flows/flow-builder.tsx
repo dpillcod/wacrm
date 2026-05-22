@@ -123,7 +123,7 @@ const NODE_META: Record<
   send_buttons: {
     label: "Send buttons",
     icon: ListChecks,
-    color: "text-violet-400",
+    color: "text-primary",
   },
   send_list: {
     label: "Send list",

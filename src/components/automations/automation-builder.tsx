@@ -77,17 +77,17 @@ interface StepMeta {
 }
 
 const STEP_META: Record<AutomationStepType, StepMeta> = {
-  send_message: { label: "Send Message", icon: MessageSquare, border: "border-l-violet-500" },
-  send_template: { label: "Send Template", icon: FileText, border: "border-l-violet-500" },
-  add_tag: { label: "Add Tag", icon: Tag, border: "border-l-violet-500" },
-  remove_tag: { label: "Remove Tag", icon: TagIcon, border: "border-l-violet-500" },
-  assign_conversation: { label: "Assign Conversation", icon: UserCheck, border: "border-l-violet-500" },
-  update_contact_field: { label: "Update Contact Field", icon: PencilLine, border: "border-l-violet-500" },
-  create_deal: { label: "Create Deal", icon: Briefcase, border: "border-l-violet-500" },
+  send_message: { label: "Send Message", icon: MessageSquare, border: "border-l-primary" },
+  send_template: { label: "Send Template", icon: FileText, border: "border-l-primary" },
+  add_tag: { label: "Add Tag", icon: Tag, border: "border-l-primary" },
+  remove_tag: { label: "Remove Tag", icon: TagIcon, border: "border-l-primary" },
+  assign_conversation: { label: "Assign Conversation", icon: UserCheck, border: "border-l-primary" },
+  update_contact_field: { label: "Update Contact Field", icon: PencilLine, border: "border-l-primary" },
+  create_deal: { label: "Create Deal", icon: Briefcase, border: "border-l-primary" },
   wait: { label: "Wait", icon: Hourglass, border: "border-l-slate-500" },
   condition: { label: "Condition (If/Else)", icon: GitBranch, border: "border-l-amber-500" },
-  send_webhook: { label: "Send Webhook", icon: Webhook, border: "border-l-violet-500" },
-  close_conversation: { label: "Close Conversation", icon: CircleSlash, border: "border-l-violet-500" },
+  send_webhook: { label: "Send Webhook", icon: Webhook, border: "border-l-primary" },
+  close_conversation: { label: "Close Conversation", icon: CircleSlash, border: "border-l-primary" },
 }
 
 const ADDABLE_STEPS: AutomationStepType[] = [
@@ -275,7 +275,7 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
         <Button
           onClick={save}
           disabled={saving}
-          className="bg-violet-600 text-white hover:bg-violet-700"
+          className="bg-primary text-primary-foreground hover:bg-primary/90"
         >
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
           {isEditing ? "Save" : "Save Draft"}
@@ -356,7 +356,7 @@ function TriggerCard({
               <select
                 value={type}
                 onChange={(e) => onTypeChange(e.target.value as AutomationTriggerType)}
-                className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm text-white focus:border-violet-500 focus:outline-none"
+                className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm text-white focus:border-primary focus:outline-none"
               >
                 {TRIGGER_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>
@@ -637,7 +637,7 @@ function ConditionBranches({
     // cram each branch to ~170px which is too narrow for the nested
     // cards. Two-column grid returns on sm+.
     <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-      <BranchColumn label="Yes" color="text-violet-400">
+      <BranchColumn label="Yes" color="text-primary">
         <StepList {...props} steps={yes} parentPath={yesPath} />
       </BranchColumn>
       <BranchColumn label="No" color="text-rose-400">
@@ -670,7 +670,7 @@ function AddButton({ onPick }: { onPick: (t: AutomationStepType) => void }) {
       <div className="h-4 w-[2px] bg-slate-700" aria-hidden />
       <DropdownMenu>
         <DropdownMenuTrigger
-          className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-dashed border-slate-700 bg-slate-950 text-slate-400 transition-colors hover:border-violet-500 hover:bg-violet-500/10 hover:text-violet-400 data-[popup-open]:border-violet-500 data-[popup-open]:bg-violet-500/20 data-[popup-open]:text-violet-400"
+          className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-dashed border-slate-700 bg-slate-950 text-slate-400 transition-colors hover:border-primary hover:bg-primary/10 hover:text-primary data-[popup-open]:border-primary data-[popup-open]:bg-primary/20 data-[popup-open]:text-primary"
           aria-label="Add step"
         >
           <Plus className="h-4 w-4" />

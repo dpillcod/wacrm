@@ -142,7 +142,7 @@ export function TagManager() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 className="size-6 animate-spin text-violet-500" />
+        <Loader2 className="size-6 animate-spin text-primary" />
       </div>
     );
   }
@@ -160,7 +160,7 @@ export function TagManager() {
             setSelectedColor(PRESET_COLORS[3].value);
             setDialogOpen(true);
           }}
-          className="bg-violet-600 hover:bg-violet-700 text-white"
+          className="bg-primary hover:bg-primary/90 text-primary-foreground"
         >
           <Plus className="size-4" />
           New Tag
@@ -281,7 +281,7 @@ export function TagManager() {
             <Button
               onClick={handleCreate}
               disabled={saving}
-              className="bg-violet-600 hover:bg-violet-700 text-white"
+              className="bg-primary hover:bg-primary/90 text-primary-foreground"
             >
               {saving ? (
                 <>

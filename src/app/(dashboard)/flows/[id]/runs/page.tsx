@@ -306,7 +306,7 @@ const EVENT_COLOR: Record<string, string> = {
   started: "text-emerald-300",
   node_entered: "text-slate-300",
   message_sent: "text-sky-300",
-  reply_received: "text-violet-300",
+  reply_received: "text-primary",
   fallback_fired: "text-amber-300",
   handoff: "text-amber-300",
   timeout: "text-slate-500",

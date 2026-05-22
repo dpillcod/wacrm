@@ -196,11 +196,11 @@ export function ImportModal({ open, onOpenChange, onImported }: ImportModalProps
           {/* Upload area */}
           <div
             onClick={() => fileInputRef.current?.click()}
-            className="flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-slate-700 p-6 cursor-pointer hover:border-violet-500/50 transition-colors"
+            className="flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-slate-700 p-6 cursor-pointer hover:border-primary/50 transition-colors"
           >
             {file ? (
               <>
-                <FileText className="size-8 text-violet-400" />
+                <FileText className="size-8 text-primary" />
                 <p className="text-sm text-slate-300">{file.name}</p>
                 <p className="text-xs text-slate-500">
                   {parsedRows.length} row{parsedRows.length !== 1 ? 's' : ''} detected
@@ -269,7 +269,7 @@ export function ImportModal({ open, onOpenChange, onImported }: ImportModalProps
               <p className="text-sm font-medium text-white">Import Complete</p>
               <div className="flex items-center gap-4">
                 {result.imported > 0 && (
-                  <div className="flex items-center gap-1.5 text-violet-400 text-sm">
+                  <div className="flex items-center gap-1.5 text-primary text-sm">
                     <CheckCircle className="size-4" />
                     {result.imported} imported
                   </div>
@@ -299,7 +299,7 @@ export function ImportModal({ open, onOpenChange, onImported }: ImportModalProps
               type="button"
               disabled={parsedRows.length === 0 || importing}
               onClick={handleImport}
-              className="bg-violet-600 hover:bg-violet-700 text-white"
+              className="bg-primary hover:bg-primary/90 text-primary-foreground"
             >
               {importing && <Loader2 className="size-4 animate-spin" />}
               Import {parsedRows.length > 0 ? `${parsedRows.length} Contacts` : ''}

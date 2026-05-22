@@ -211,7 +211,7 @@ export function Step3Personalize({
                 className="rounded-xl border border-slate-800 bg-slate-900/50 p-4"
               >
                 <div className="mb-3 flex items-center gap-2">
-                  <span className="inline-flex items-center rounded-md bg-violet-500/10 px-2 py-0.5 text-xs font-mono font-medium text-violet-400">
+                  <span className="inline-flex items-center rounded-md bg-primary/10 px-2 py-0.5 text-xs font-mono font-medium text-primary">
                     {placeholder}
                   </span>
                 </div>
@@ -313,16 +313,16 @@ export function Step3Personalize({
           sees approximately what the recipient will see. */}
       <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
         <div className="mb-3 flex items-center gap-2">
-          <Eye className="h-4 w-4 text-violet-400" />
+          <Eye className="h-4 w-4 text-primary" />
           <p className="text-sm font-medium text-white">Live Preview</p>
           <span className="text-xs text-slate-500">({previewLabel})</span>
           {loadingPreview && (
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-violet-500" />
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
           )}
         </div>
         <div className="rounded-lg bg-[#0e1a12] p-3">
-          <div className="ml-auto max-w-[85%] rounded-lg bg-violet-700/30 px-3 py-2 shadow-sm">
-            <p className="whitespace-pre-wrap text-sm text-violet-50">
+          <div className="ml-auto max-w-[85%] rounded-lg bg-primary/30 px-3 py-2 shadow-sm">
+            <p className="whitespace-pre-wrap text-sm text-primary">
               {previewText}
             </p>
           </div>
@@ -351,7 +351,7 @@ export function Step3Personalize({
         <Button
           onClick={onNext}
           disabled={unmappedKeys.length > 0}
-          className="bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50"
+          className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
           Next
           <ArrowRight className="h-4 w-4" />

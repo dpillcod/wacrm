@@ -302,7 +302,7 @@ export default function PipelinesPage() {
             <DropdownMenuTrigger
               className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white hover:bg-slate-800 transition-colors data-[popup-open]:bg-slate-800"
             >
-              <GitBranch className="h-4 w-4 text-violet-500" />
+              <GitBranch className="h-4 w-4 text-primary" />
               <span className="font-semibold">
                 {selectedPipeline?.name ?? "Select Pipeline"}
               </span>
@@ -323,7 +323,7 @@ export default function PipelinesPage() {
                   onClick={() => setSelectedPipelineId(p.id)}
                   className={
                     p.id === selectedPipelineId
-                      ? "text-violet-400"
+                      ? "text-primary"
                       : "text-slate-300"
                   }
                 >
@@ -357,7 +357,7 @@ export default function PipelinesPage() {
           <Button
             onClick={() => handleAddDeal()}
             disabled={!selectedPipelineId || stages.length === 0}
-            className="bg-violet-600 text-white hover:bg-violet-700"
+            className="bg-primary text-primary-foreground hover:bg-primary/90"
           >
             <Plus className="mr-1 h-4 w-4" />
             Add Deal
@@ -377,7 +377,7 @@ export default function PipelinesPage() {
           </p>
           <Button
             onClick={() => setNewPipelineOpen(true)}
-            className="mt-4 bg-violet-600 text-white hover:bg-violet-700"
+            className="mt-4 bg-primary text-primary-foreground hover:bg-primary/90"
           >
             <Plus className="mr-1 h-4 w-4" />
             Create Pipeline
@@ -428,7 +428,7 @@ export default function PipelinesPage() {
             <Button
               onClick={handleCreatePipeline}
               disabled={creating || !newPipelineName.trim()}
-              className="bg-violet-600 text-white hover:bg-violet-700"
+              className="bg-primary text-primary-foreground hover:bg-primary/90"
             >
               {creating ? "Creating..." : "Create Pipeline"}
             </Button>

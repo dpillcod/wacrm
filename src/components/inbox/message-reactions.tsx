@@ -62,7 +62,7 @@ export function MessageReactions({
           className={cn(
             "inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[11px] leading-none transition-colors",
             g.byCurrentUser
-              ? "border-violet-500/60 bg-violet-500/15 text-violet-200 hover:bg-violet-500/25"
+              ? "border-primary/60 bg-primary/15 text-primary hover:bg-primary/25"
               : "border-slate-700 bg-slate-800/80 text-slate-200 hover:bg-slate-700",
           )}
         >
