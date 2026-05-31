@@ -287,92 +287,107 @@ export function MembersTab() {
               return (
                 <li
                   key={member.user_id}
-                  className="flex items-center gap-4 px-4 py-3"
+                  // Mobile: stack identity (avatar+name+email) above the
+                  // role/remove actions so the role dropdown's fixed
+                  // 128px width doesn't force the name into a 50-pixel
+                  // truncation. Desktop (sm+): everything inline as
+                  // before.
+                  className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:gap-4"
                 >
-                  <Avatar className="size-9 shrink-0">
-                    {member.avatar_url ? (
-                      <AvatarImage
-                        src={member.avatar_url}
-                        alt={member.full_name || 'Member'}
-                      />
-                    ) : null}
-                    <AvatarFallback className="bg-primary/10 text-sm font-medium text-primary">
-                      {(member.full_name || member.email || 'U')
-                        .charAt(0)
-                        .toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
+                  <div className="flex min-w-0 flex-1 items-center gap-4">
+                    <Avatar className="size-9 shrink-0">
+                      {member.avatar_url ? (
+                        <AvatarImage
+                          src={member.avatar_url}
+                          alt={member.full_name || 'Member'}
+                        />
+                      ) : null}
+                      <AvatarFallback className="bg-primary/10 text-sm font-medium text-primary">
+                        {(member.full_name || member.email || 'U')
+                          .charAt(0)
+                          .toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
 
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="truncate text-sm font-medium text-white">
-                        {member.full_name || 'Unnamed'}
-                      </span>
-                      {isSelf && (
-                        <Badge className="bg-slate-800 text-slate-300 border-slate-700 text-[10px] uppercase tracking-wide">
-                          You
-                        </Badge>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate text-sm font-medium text-white">
+                          {member.full_name || 'Unnamed'}
+                        </span>
+                        {isSelf && (
+                          <Badge className="bg-slate-800 text-slate-300 border-slate-700 text-[10px] uppercase tracking-wide">
+                            You
+                          </Badge>
+                        )}
+                      </div>
+                      {member.email && (
+                        <p className="truncate text-xs text-slate-500">
+                          {member.email}
+                        </p>
                       )}
                     </div>
-                    {member.email && (
-                      <p className="truncate text-xs text-slate-500">
-                        {member.email}
-                      </p>
-                    )}
                   </div>
 
+                  {/* Joined date stays desktop-only. The mobile row's
+                      vertical density makes the joined date noise. */}
                   <div className="hidden sm:block text-right text-xs text-slate-500">
                     Joined {fmtDate(member.joined_at)}
                   </div>
 
-                  {/* Role display / editor. Inline Select is admin+
-                      only AND not allowed on the owner row (owner
-                      changes go through transfer, which lands later). */}
-                  {canManageMembers && !isOwnerRow && !isSelf ? (
-                    <Select
-                      value={member.role}
-                      onValueChange={(v) =>
-                        // Base UI Select can emit null on clear. We
-                        // don't expose a clear affordance, so the
-                        // guard is defensive — but the typed
-                        // signature requires it.
-                        v && handleRoleChange(member, v as AccountRole)
-                      }
-                    >
-                      <SelectTrigger
-                        className="w-32 bg-slate-800 border-slate-700 text-slate-200"
-                        disabled={isBusy}
+                  {/* Actions cluster. On mobile this is its own row
+                      below the identity block; on desktop it sits
+                      inline. Items align to the start on mobile so the
+                      role dropdown lines up under the avatar. */}
+                  <div className="flex items-center gap-2 sm:gap-3">
+                    {/* Role display / editor. Inline Select is admin+
+                        only AND not allowed on the owner row (owner
+                        changes go through transfer, which lands later). */}
+                    {canManageMembers && !isOwnerRow && !isSelf ? (
+                      <Select
+                        value={member.role}
+                        onValueChange={(v) =>
+                          // Base UI Select can emit null on clear. We
+                          // don't expose a clear affordance, so the
+                          // guard is defensive — but the typed
+                          // signature requires it.
+                          v && handleRoleChange(member, v as AccountRole)
+                        }
                       >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {EDITABLE_ROLES.map((r) => (
-                          <SelectItem key={r.value} value={r.value}>
-                            {r.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <span className="inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs font-medium text-slate-200">
-                      <RoleIcon className="size-3.5 text-slate-400" />
-                      {ROLE_LABELS[member.role]}
-                    </span>
-                  )}
+                        <SelectTrigger
+                          className="w-32 bg-slate-800 border-slate-700 text-slate-200"
+                          disabled={isBusy}
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {EDITABLE_ROLES.map((r) => (
+                            <SelectItem key={r.value} value={r.value}>
+                              {r.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs font-medium text-slate-200">
+                        <RoleIcon className="size-3.5 text-slate-400" />
+                        {ROLE_LABELS[member.role]}
+                      </span>
+                    )}
 
-                  {/* Remove. Admin+ only; never on the owner row;
-                      never on yourself. */}
-                  {canManageMembers && !isOwnerRow && !isSelf && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setRemovingMember(member)}
-                      disabled={isBusy}
-                      className="border-slate-700 text-slate-300 hover:bg-red-500/10 hover:border-red-500/40 hover:text-red-300"
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
-                  )}
+                    {/* Remove. Admin+ only; never on the owner row;
+                        never on yourself. */}
+                    {canManageMembers && !isOwnerRow && !isSelf && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setRemovingMember(member)}
+                        disabled={isBusy}
+                        className="border-slate-700 text-slate-300 hover:bg-red-500/10 hover:border-red-500/40 hover:text-red-300"
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    )}
+                  </div>
                 </li>
               );
             })}

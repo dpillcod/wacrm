@@ -26,7 +26,14 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { toast } from 'sonner';
-import { CheckCircle, Loader2, MailX, ShieldCheck, UsersRound } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle,
+  Loader2,
+  MailX,
+  ShieldCheck,
+  UsersRound,
+} from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -36,6 +43,14 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { createClient } from '@/lib/supabase/client';
 
 interface PeekOk {
@@ -87,6 +102,12 @@ export default function JoinPage() {
     undefined, // undefined = unknown / still loading; null = signed out
   );
   const [accepting, setAccepting] = useState(false);
+  // `redeem_invitation` returns 409 when the caller's current account
+  // has domain data, or they're already a member of a shared account.
+  // A transient toast wasn't enough — the user has no actionable next
+  // step. Surface a blocking modal that walks them through it.
+  const [conflictMessage, setConflictMessage] = useState<string | null>(null);
+  const [signingOut, setSigningOut] = useState(false);
 
   // Fetch peek + auth state on mount. The peek endpoint is
   // rate-limited per-IP (30/min) so double-mounting in React 19
@@ -130,7 +151,19 @@ export default function JoinPage() {
         const payload = (await res.json().catch(() => ({}))) as {
           error?: string;
         };
-        toast.error(payload.error || 'Failed to accept invitation');
+        // 409 = caller already has data / is in another shared
+        // account. The redeem RPC's error message is descriptive
+        // enough to show directly; we open a modal so the user has
+        // a clear next-action (sign out → use different email)
+        // rather than a 3-second toast.
+        if (res.status === 409) {
+          setConflictMessage(
+            payload.error ||
+              'You are already in another account. Sign in with a different email to join this one.',
+          );
+        } else {
+          toast.error(payload.error || 'Failed to accept invitation');
+        }
         setAccepting(false);
         return;
       }
@@ -144,6 +177,21 @@ export default function JoinPage() {
       setAccepting(false);
     }
   }, [token]);
+
+  const handleSignOutAndRetry = useCallback(async () => {
+    setSigningOut(true);
+    try {
+      await createClient().auth.signOut();
+      // Hard reload so the new auth state propagates everywhere
+      // (middleware, AuthProvider). Preserves the invite token in
+      // the URL so the rebuilt page renders the signed-out CTA path.
+      window.location.reload();
+    } catch (err) {
+      console.error('[join] sign-out error:', err);
+      toast.error('Could not sign out. Try refreshing the page.');
+      setSigningOut(false);
+    }
+  }, []);
 
   // ----- Loading state (peek pending OR auth not yet resolved) -----
   if (peek === null || authedUserId === undefined) {
@@ -220,33 +268,90 @@ export default function JoinPage() {
   // ----- Authed: show Accept button -----
   if (authedUserId) {
     return (
-      <Card className="w-full max-w-md border-slate-800 bg-slate-900">
-        {inviteHeader}
-        <CardContent className="flex flex-col gap-3">
-          <Button
-            onClick={handleAccept}
-            disabled={accepting}
-            className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
-          >
-            {accepting ? (
-              <>
-                <Loader2 className="size-4 animate-spin" />
-                Accepting…
-              </>
-            ) : (
-              <>
-                <CheckCircle className="size-4" />
-                Accept invitation
-              </>
-            )}
-          </Button>
-          <p className="text-center text-xs text-slate-500">
-            Accepting moves your login into{' '}
-            <span className="text-slate-400">{peek.account_name}</span>. Your
-            empty personal account from signup will be cleaned up.
-          </p>
-        </CardContent>
-      </Card>
+      <>
+        <Card className="w-full max-w-md border-slate-800 bg-slate-900">
+          {inviteHeader}
+          <CardContent className="flex flex-col gap-3">
+            <Button
+              onClick={handleAccept}
+              disabled={accepting}
+              className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
+            >
+              {accepting ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Accepting…
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="size-4" />
+                  Accept invitation
+                </>
+              )}
+            </Button>
+            <p className="text-center text-xs text-slate-500">
+              Accepting moves your login into{' '}
+              <span className="text-slate-400">{peek.account_name}</span>. Your
+              empty personal account from signup will be cleaned up.
+            </p>
+          </CardContent>
+        </Card>
+
+        {/* Conflict modal — opens when the redeem endpoint returns 409
+            (caller already in a shared account or has domain data).
+            Blocks the flow until the user picks a recovery action so
+            they aren't stuck retrying an inevitable failure. */}
+        <Dialog
+          open={conflictMessage !== null}
+          onOpenChange={(open) => {
+            if (!open) setConflictMessage(null);
+          }}
+        >
+          <DialogContent className="bg-slate-900 border-slate-700 sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-white">
+                <AlertTriangle className="size-4 text-amber-400" />
+                Can&apos;t join {peek.account_name} with this account
+              </DialogTitle>
+              <DialogDescription className="text-slate-400">
+                {conflictMessage}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2 py-2 text-xs text-slate-500">
+              <p>
+                To join{' '}
+                <span className="text-slate-300">{peek.account_name}</span>,
+                sign out and sign up again with a different email address.
+                The invite link stays valid as long as it hasn&apos;t
+                expired.
+              </p>
+            </div>
+            <DialogFooter className="bg-slate-900 border-slate-700">
+              <Button
+                variant="outline"
+                onClick={() => setConflictMessage(null)}
+                className="border-slate-700 text-slate-300 hover:bg-slate-800"
+              >
+                Stay signed in
+              </Button>
+              <Button
+                onClick={handleSignOutAndRetry}
+                disabled={signingOut}
+                className="bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                {signingOut ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" />
+                    Signing out…
+                  </>
+                ) : (
+                  'Sign out & use a different email'
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </>
     );
   }
 

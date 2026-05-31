@@ -36,6 +36,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useAuth } from '@/hooks/use-auth';
 
 type InviteRole = 'admin' | 'agent' | 'viewer';
 
@@ -65,6 +66,9 @@ interface CreatedInvite {
   url: string;
   role: InviteRole;
   expiresInDays: number;
+  /** Snapshotted at creation time so a later account rename can't
+   *  retroactively change the wa.me message text on the result step. */
+  accountName: string;
 }
 
 export function InviteMemberDialog({
@@ -72,6 +76,7 @@ export function InviteMemberDialog({
   onOpenChange,
   onCreated,
 }: InviteMemberDialogProps) {
+  const { account } = useAuth();
   const [role, setRole] = useState<InviteRole>('agent');
   const [expiry, setExpiry] = useState<string>('7');
   const [label, setLabel] = useState('');
@@ -110,7 +115,17 @@ export function InviteMemberDialog({
         expiresInDays: number;
       };
 
-      setResult({ url: data.url, role, expiresInDays: data.expiresInDays });
+      setResult({
+        url: data.url,
+        role,
+        expiresInDays: data.expiresInDays,
+        // Snapshot the account name into the result so the wa.me
+        // share message has team context. Falls back to a generic
+        // string if `account` hasn't loaded yet (shouldn't happen
+        // — the dialog requires admin+ which requires a loaded
+        // profile — but stay safe).
+        accountName: account?.name ?? 'our wacrm account',
+      });
       onCreated();
     } catch (err) {
       console.error('[InviteMemberDialog] create error:', err);
@@ -134,7 +149,12 @@ export function InviteMemberDialog({
   }
 
   function whatsappShareUrl(url: string): string {
-    const message = `Join our wacrm account using this link (valid for ${result?.expiresInDays} days): ${url}`;
+    // Include the account name so the recipient knows which team
+    // they're being invited to before clicking through. This matters
+    // for users in multi-team contexts where "our wacrm account"
+    // wouldn't be enough to disambiguate.
+    const accountName = result?.accountName ?? 'our wacrm account';
+    const message = `Join ${accountName} on wacrm using this link (valid for ${result?.expiresInDays} days): ${url}`;
     return `https://wa.me/?text=${encodeURIComponent(message)}`;
   }
 
