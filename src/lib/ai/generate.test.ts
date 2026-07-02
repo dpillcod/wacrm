@@ -11,6 +11,7 @@ function config(overrides: Partial<AiConfig> = {}): AiConfig {
     isActive: true,
     autoReplyEnabled: false,
     autoReplyMaxPerConversation: 3,
+    embeddingsApiKey: null,
     ...overrides,
   }
 }

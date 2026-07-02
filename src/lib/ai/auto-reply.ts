@@ -1,8 +1,10 @@
 import { supabaseAdmin } from './admin-client'
 import { loadAiConfig } from './config'
 import { buildConversationContext } from './context'
+import { retrieveKnowledge } from './knowledge'
 import { generateReply } from './generate'
 import { buildSystemPrompt } from './defaults'
+import { latestUserMessage } from './query'
 import { engineSendText } from '@/lib/flows/meta-send'
 
 interface DispatchArgs {
@@ -77,9 +79,18 @@ export async function dispatchInboundToAiReply(
     const messages = await buildConversationContext(db, conversationId)
     if (messages.length === 0) return
 
+    // Ground the reply in the account's knowledge base (best-effort).
+    const knowledge = await retrieveKnowledge(
+      db,
+      accountId,
+      config,
+      latestUserMessage(messages),
+    )
+
     const systemPrompt = buildSystemPrompt({
       userPrompt: config.systemPrompt,
       mode: 'auto_reply',
+      knowledge,
     })
 
     const { text, handoff } = await generateReply({

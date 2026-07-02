@@ -9,6 +9,30 @@ Versions follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Pre-1.0, `MINOR` bumps cover new modules; `PATCH` bumps cover bug fixes
 and polish.
 
+## [0.6.0] — 2026-07-02
+
+Adds an **AI knowledge base** so the assistant (0.5.0) can answer from
+your own content instead of handing off. Paste FAQs, policies, or
+product details under **Settings → AI Assistant → Knowledge base**; the
+relevant excerpts are retrieved into every draft and auto-reply.
+
+### Added
+
+- **Knowledge base with hybrid retrieval.** Lexical Postgres full-text
+  search works for every account with no extra credentials. Optional
+  **semantic search** (pgvector, OpenAI `text-embedding-3-small`) turns
+  on when you add an **embeddings key** — semantic-primary, topped up
+  with lexical to fill the result set. Anthropic-only accounts (Anthropic
+  has no embeddings API) keep the lexical path with zero extra setup.
+- **Knowledge base manager** in Settings — add/edit/delete documents and
+  a **Reindex** action to backfill embeddings after adding a key. Both
+  drafts and the auto-reply bot are grounded in the retrieved excerpts,
+  and the prompt still instructs the model to hand off (auto-reply) or
+  say it will follow up (draft) when the KB doesn't cover the question.
+  **Migration required:** apply `supabase/migrations/030_ai_knowledge.sql`
+  (enables `pgvector`; adds `ai_knowledge_documents` + `ai_knowledge_chunks`
+  and an `embeddings_api_key` column on `ai_configs`).
+
 ## [0.5.0] — 2026-07-02
 
 Adds the **AI reply assistant** — bring-your-own-key. Each account

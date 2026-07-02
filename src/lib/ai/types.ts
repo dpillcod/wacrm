@@ -21,6 +21,10 @@ export interface AiConfig {
   isActive: boolean
   autoReplyEnabled: boolean
   autoReplyMaxPerConversation: number
+  /** Optional OpenAI-compatible key for embeddings. When set, the
+   *  knowledge base is embedded and semantic retrieval turns on; when
+   *  null, retrieval falls back to lexical full-text search. */
+  embeddingsApiKey: string | null
 }
 
 /** A single conversation turn in the shape both providers accept. */

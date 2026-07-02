@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { SettingsPanelHead } from './settings-panel-head';
+import { AiKnowledgeCard } from './ai-knowledge';
 import { AI_PROVIDER_DEFAULT_MODEL } from '@/lib/ai/defaults';
 import type { AiProvider } from '@/lib/ai/types';
 
@@ -56,6 +57,9 @@ export function AiConfig() {
   const [keyEdited, setKeyEdited] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [hasStoredKey, setHasStoredKey] = useState(false);
+  const [embeddingsKey, setEmbeddingsKey] = useState('');
+  const [embeddingsKeyEdited, setEmbeddingsKeyEdited] = useState(false);
+  const [hasStoredEmbeddingsKey, setHasStoredEmbeddingsKey] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState('');
   const [isActive, setIsActive] = useState(false);
   const [autoReplyEnabled, setAutoReplyEnabled] = useState(false);
@@ -87,6 +91,9 @@ export function AiConfig() {
         setHasStoredKey(Boolean(data.has_key));
         setApiKey(data.has_key ? MASKED_KEY : '');
         setKeyEdited(false);
+        setHasStoredEmbeddingsKey(Boolean(data.has_embeddings_key));
+        setEmbeddingsKey(data.has_embeddings_key ? MASKED_KEY : '');
+        setEmbeddingsKeyEdited(false);
       }
     } catch {
       toast.error('Failed to load AI configuration');
@@ -114,10 +121,15 @@ export function AiConfig() {
 
   const keyPayload = () => (keyEdited ? apiKey.trim() : undefined);
 
+  // undefined = leave unchanged; '' typed = null (clear); text = set.
+  const embeddingsKeyPayload = () =>
+    embeddingsKeyEdited ? embeddingsKey.trim() || null : undefined;
+
   const buildBody = () => ({
     provider,
     model: model.trim(),
     api_key: keyPayload(),
+    embeddings_api_key: embeddingsKeyPayload(),
     system_prompt: systemPrompt.trim() || null,
     is_active: isActive,
     auto_reply_enabled: autoReplyEnabled,
@@ -316,6 +328,40 @@ export function AiConfig() {
                 </Button>
               </div>
             </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="ai-embeddings-key">
+                Embeddings key{' '}
+                <span className="font-normal text-muted-foreground">
+                  (optional — enables semantic knowledge-base search)
+                </span>
+              </Label>
+              <Input
+                id="ai-embeddings-key"
+                type="password"
+                value={embeddingsKey}
+                onChange={(e) => {
+                  setEmbeddingsKey(e.target.value);
+                  setEmbeddingsKeyEdited(true);
+                }}
+                onFocus={() => {
+                  if (!embeddingsKeyEdited && hasStoredEmbeddingsKey) {
+                    setEmbeddingsKey('');
+                    setEmbeddingsKeyEdited(true);
+                  }
+                }}
+                placeholder="sk-... (OpenAI)"
+                disabled={disabled}
+                autoComplete="off"
+              />
+              <p className="text-xs text-muted-foreground">
+                An OpenAI key used only to embed your knowledge base
+                (text-embedding-3-small)
+                {provider === 'openai' ? ' — can be the same key as above' : ''}.
+                Leave blank to use keyword search instead. Clear it to turn
+                semantic search off.
+              </p>
+            </div>
           </CardContent>
         </Card>
 
@@ -400,6 +446,16 @@ export function AiConfig() {
             </div>
           </CardContent>
         </Card>
+
+        <AiKnowledgeCard
+          accountId={accountId}
+          canEdit={canEdit}
+          hasEmbeddingsKey={
+            embeddingsKeyEdited
+              ? embeddingsKey.trim().length > 0
+              : hasStoredEmbeddingsKey
+          }
+        />
 
         <div className="flex items-center justify-between">
           {configured ? (

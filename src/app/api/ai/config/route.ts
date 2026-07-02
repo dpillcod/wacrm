@@ -7,6 +7,7 @@ import {
 import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
 import { encrypt, decrypt } from '@/lib/whatsapp/encryption'
 import { validateAiCredentials } from '@/lib/ai/validate'
+import { embedTexts } from '@/lib/ai/embeddings'
 import { AiError, type AiProvider } from '@/lib/ai/types'
 
 function bad(message: string) {
@@ -29,7 +30,7 @@ export async function GET() {
       // `api_key` is selected only to derive `has_key` — it is stripped
       // out below and never returned to the client.
       .select(
-        'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, api_key',
+        'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, api_key, embeddings_api_key',
       )
       .eq('account_id', accountId)
       .maybeSingle()
@@ -43,8 +44,15 @@ export async function GET() {
     }
 
     if (!data) return NextResponse.json({ configured: false })
-    const { api_key, ...safe } = data
-    return NextResponse.json({ configured: true, has_key: !!api_key, ...safe })
+    // The keys are selected only to derive the has_* flags; neither is
+    // returned to the client.
+    const { api_key, embeddings_api_key, ...safe } = data
+    return NextResponse.json({
+      configured: true,
+      has_key: !!api_key,
+      has_embeddings_key: !!embeddings_api_key,
+      ...safe,
+    })
   } catch (err) {
     return toErrorResponse(err)
   }
@@ -89,6 +97,15 @@ export async function POST(request: Request) {
 
     const rawKey = typeof body.api_key === 'string' ? body.api_key.trim() : ''
 
+    // Embeddings key (optional, for semantic KB search): a non-empty
+    // string sets/replaces it; an explicit null clears it; absent leaves
+    // it unchanged. The form only sends it when the admin edits it.
+    const rawEmbeddingsKey =
+      typeof body.embeddings_api_key === 'string'
+        ? body.embeddings_api_key.trim()
+        : ''
+    const clearEmbeddingsKey = body.embeddings_api_key === null
+
     // Reuse the stored key when the form didn't send a fresh one.
     const { data: existing } = await supabase
       .from('ai_configs')
@@ -129,6 +146,7 @@ export async function POST(request: Request) {
           isActive,
           autoReplyEnabled,
           autoReplyMaxPerConversation: maxPer,
+          embeddingsApiKey: null,
         })
       } catch (err) {
         if (err instanceof AiError) {
@@ -142,14 +160,36 @@ export async function POST(request: Request) {
       }
     }
 
+    // Validate a new embeddings key before storing (a cheap 1-input
+    // embed), same "verify before save" discipline as the chat key.
+    if (rawEmbeddingsKey) {
+      try {
+        await embedTexts(rawEmbeddingsKey, ['ping'])
+      } catch (err) {
+        if (err instanceof AiError) {
+          return NextResponse.json(
+            { error: `Embeddings key: ${err.message}`, code: err.code },
+            { status: 400 },
+          )
+        }
+        console.error('[ai/config POST] embeddings validation error:', err)
+        return bad('Could not validate the embeddings key.')
+      }
+    }
+
     const encryptedKey = rawKey ? encrypt(rawKey) : null
-    const shared = {
+    const shared: Record<string, unknown> = {
       provider,
       model,
       system_prompt: systemPrompt,
       is_active: isActive,
       auto_reply_enabled: autoReplyEnabled,
       auto_reply_max_per_conversation: maxPer,
+    }
+    if (rawEmbeddingsKey) {
+      shared.embeddings_api_key = encrypt(rawEmbeddingsKey)
+    } else if (clearEmbeddingsKey) {
+      shared.embeddings_api_key = null
     }
 
     if (existing) {
