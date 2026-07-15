@@ -64,6 +64,10 @@ const SECURITY_HEADERS = [
 ] as const;
 
 const nextConfig: NextConfig = {
+  // Self-contained server bundle (only the files a request actually
+  // needs) — required for the Docker image, see Dockerfile.
+  output: "standalone",
+
   /**
    * Cache-Control policy.
    *
