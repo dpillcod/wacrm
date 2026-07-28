@@ -185,7 +185,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { phone_number_id, waba_id, access_token, verify_token, pin } = body
+    const { phone_number_id, waba_id, access_token, verify_token, pin, catalog_id } = body
 
     if (!access_token || !phone_number_id) {
       return NextResponse.json(
@@ -356,6 +356,7 @@ export async function POST(request: Request) {
     const baseRow = {
       phone_number_id,
       waba_id: waba_id || null,
+      catalog_id: catalog_id || null,
       access_token: encryptedAccessToken,
       verify_token: encryptedVerifyToken,
       status: registrationError ? 'disconnected' : 'connected',

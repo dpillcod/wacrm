@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { Loader2, Sparkles, CheckCircle2, Trash2, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { canEditSettings } from '@/lib/auth/roles';
+import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -75,6 +76,11 @@ export function AiConfig() {
   // Empty string = leave unassigned (shared queue).
   const [handoffAgentId, setHandoffAgentId] = useState('');
   const [members, setMembers] = useState<AccountMember[]>([]);
+  const [productSuggestionsEnabled, setProductSuggestionsEnabled] = useState(false);
+  // Gates the product-suggestions toggle — recommending products needs
+  // a connected catalog, so the switch stays off/disabled until one is
+  // configured in the WhatsApp settings panel.
+  const [hasCatalogId, setHasCatalogId] = useState(false);
 
   // Guard keyed on the account (not a bare boolean) so an in-place
   // account switch — ownership transfer, multi-account membership —
@@ -100,6 +106,7 @@ export function AiConfig() {
         setAutoReplyEnabled(data.auto_reply_enabled);
         setMaxPerConversation(data.auto_reply_max_per_conversation ?? 3);
         setHandoffAgentId(data.handoff_agent_id ?? '');
+        setProductSuggestionsEnabled(Boolean(data.product_suggestions_enabled));
         setHasStoredKey(Boolean(data.has_key));
         setApiKey(data.has_key ? MASKED_KEY : '');
         setKeyEdited(false);
@@ -122,6 +129,16 @@ export function AiConfig() {
     // older deployment without the endpoint the picker just shows the
     // queue option.
     void fetchAccountMembers().then(setMembers);
+    // Best-effort: whether a catalog is connected gates the product-
+    // suggestions toggle below. A failure here just leaves it hidden,
+    // same "degrade quietly" approach as the members fetch above.
+    const supabase = createClient();
+    void supabase
+      .from('whatsapp_config')
+      .select('catalog_id')
+      .eq('account_id', accountId)
+      .maybeSingle()
+      .then(({ data }) => setHasCatalogId(Boolean(data?.catalog_id)));
   }, [accountId, fetchConfig]);
 
   // Swap the model default when the provider changes, unless the user
@@ -151,6 +168,7 @@ export function AiConfig() {
     auto_reply_enabled: autoReplyEnabled,
     auto_reply_max_per_conversation: maxPerConversation,
     handoff_agent_id: handoffAgentId || null,
+    product_suggestions_enabled: productSuggestionsEnabled,
   });
 
   const handleTest = async () => {
@@ -219,6 +237,7 @@ export function AiConfig() {
         setAutoReplyEnabled(false);
         setSystemPrompt('');
         setHandoffAgentId('');
+        setProductSuggestionsEnabled(false);
       } else {
         const data = await res.json();
         toast.error(data.error ?? t('removeFailed'));
@@ -430,6 +449,24 @@ export function AiConfig() {
                 checked={autoReplyEnabled}
                 onCheckedChange={setAutoReplyEnabled}
                 disabled={disabled || !isActive}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-4 rounded-md border border-border p-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">
+                  {t('productSuggestions')}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {hasCatalogId
+                    ? t('productSuggestionsDesc')
+                    : t('productSuggestionsNeedsCatalog')}
+                </p>
+              </div>
+              <Switch
+                checked={productSuggestionsEnabled}
+                onCheckedChange={setProductSuggestionsEnabled}
+                disabled={disabled || !isActive || !hasCatalogId}
               />
             </div>
 

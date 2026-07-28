@@ -8,6 +8,9 @@ export type {
   InteractiveButton,
   InteractiveListRow,
   InteractiveListSection,
+  InteractiveProductPayload,
+  InteractiveProductListPayload,
+  InteractiveProductListSection,
 } from "@/lib/whatsapp/interactive";
 
 export interface Profile {
@@ -271,6 +274,8 @@ export interface WhatsAppConfig {
   user_id: string;
   phone_number_id: string;
   waba_id?: string;
+  /** Meta Commerce Manager catalog id connected to this WABA, if any. */
+  catalog_id?: string;
   access_token: string;
   verify_token?: string;
   status: 'connected' | 'disconnected';
@@ -285,6 +290,23 @@ export interface WhatsAppConfig {
   subscribed_apps_at?: string;
   /** Last error from /register; cleared on success. */
   last_registration_error?: string;
+}
+
+/** A product synced from the account's Meta Commerce Catalog. */
+export interface CatalogProduct {
+  id: string;
+  account_id: string;
+  retailer_id: string;
+  meta_product_id: string | null;
+  name: string;
+  description: string | null;
+  price: number | null;
+  currency: string | null;
+  availability: string | null;
+  image_url: string | null;
+  is_stale: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 // Raw Meta status enum. We persist this verbatim from Meta (sync + webhook)

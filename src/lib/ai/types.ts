@@ -29,6 +29,11 @@ export interface AiConfig {
    *  knowledge base is embedded and semantic retrieval turns on; when
    *  null, retrieval falls back to lexical full-text search. */
   embeddingsApiKey: string | null
+  /** Opt-in: let the assistant recommend a catalog product (draft
+   *  suggestion + auto-reply product card) when one clearly matches
+   *  the conversation. Independent of `isActive`/`autoReplyEnabled` —
+   *  the settings UI keeps this off until a catalog is connected. */
+  productSuggestionsEnabled: boolean
 }
 
 /** A single conversation turn in the shape both providers accept. */
@@ -62,6 +67,11 @@ export interface GenerateResult {
   handoff: boolean
   /** Provider token usage for this call, or null when unavailable. */
   usage: AiUsage | null
+  /** Catalog `retailer_id` the model recommended via the `[[PRODUCT:...]]`
+   *  sentinel, or null if it didn't recommend one. Unvalidated — the
+   *  caller must confirm this id exists in `catalog_products` before
+   *  trusting it (the model can hallucinate one). */
+  recommendedRetailerId: string | null
 }
 
 /**

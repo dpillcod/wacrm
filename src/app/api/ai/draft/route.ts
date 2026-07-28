@@ -4,6 +4,7 @@ import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit
 import { loadAiConfig } from '@/lib/ai/config'
 import { buildConversationContext } from '@/lib/ai/context'
 import { retrieveKnowledge } from '@/lib/ai/knowledge'
+import { retrieveCatalogProducts, resolveCatalogProduct } from '@/lib/ai/catalog'
 import { generateReply } from '@/lib/ai/generate'
 import { buildSystemPrompt } from '@/lib/ai/defaults'
 import { latestUserMessage } from '@/lib/ai/query'
@@ -15,10 +16,14 @@ import { AiError } from '@/lib/ai/types'
  * POST /api/ai/draft  (agent+)
  *
  * Body: { conversation_id }
- * Returns: { draft } — a suggested reply for the agent to edit + send.
+ * Returns: { draft, suggestedProduct } — a suggested reply for the agent
+ * to edit + send, plus (only when `product_suggestions_enabled` and the
+ * model recommended one) a validated catalog product the agent can
+ * attach with one click. `suggestedProduct` is null otherwise.
  *
  * Uses the account's configured provider/key (BYO). Read-only: it never
- * sends or stores anything, just hands text back to the composer.
+ * sends or stores anything, just hands text (and the suggestion) back
+ * to the composer.
  */
 export async function POST(request: Request) {
   try {
@@ -91,20 +96,55 @@ export async function POST(request: Request) {
 
     // Ground the draft in the account's knowledge base (best-effort —
     // returns [] when there's no KB or retrieval fails).
-    const knowledge = await retrieveKnowledge(
-      supabase,
-      accountId,
-      config,
-      latestUserMessage(messages),
-    )
+    const question = latestUserMessage(messages)
+    const knowledge = await retrieveKnowledge(supabase, accountId, config, question)
+
+    const catalogCandidates = config.productSuggestionsEnabled
+      ? await retrieveCatalogProducts(supabase, accountId, question)
+      : []
 
     const systemPrompt = buildSystemPrompt({
       userPrompt: config.systemPrompt,
       mode: 'draft',
       knowledge,
+      catalogCandidates: catalogCandidates.map((p) => ({
+        retailerId: p.retailerId,
+        name: p.name,
+        price: p.price,
+        currency: p.currency,
+      })),
     })
 
-    const { text, usage } = await generateReply({ config, systemPrompt, messages })
+    const { text, usage, recommendedRetailerId } = await generateReply({
+      config,
+      systemPrompt,
+      messages,
+    })
+
+    // Resolve (never trust the model's id outright) but never send —
+    // this route stays side-effect-free, the agent reviews and attaches
+    // the suggestion themselves.
+    let suggestedProduct = null as Awaited<ReturnType<typeof resolveCatalogProduct>>
+    let catalogId: string | null = null
+    if (config.productSuggestionsEnabled && recommendedRetailerId) {
+      suggestedProduct = await resolveCatalogProduct(
+        supabase,
+        accountId,
+        recommendedRetailerId,
+      )
+      if (suggestedProduct) {
+        const { data: waConfig } = await supabase
+          .from('whatsapp_config')
+          .select('catalog_id')
+          .eq('account_id', accountId)
+          .maybeSingle()
+        catalogId = waConfig?.catalog_id ?? null
+        // No catalog_id configured (shouldn't normally happen if
+        // suggestions are enabled) — drop the suggestion rather than
+        // hand the composer something it can't attach.
+        if (!catalogId) suggestedProduct = null
+      }
+    }
 
     // Record spend on the account's BYO key. Best-effort + via the
     // service role (the log has no `authenticated` INSERT policy). This
@@ -126,7 +166,10 @@ export async function POST(request: Request) {
       console.error('[ai/draft] usage log skipped:', logErr)
     }
 
-    return NextResponse.json({ draft: text })
+    return NextResponse.json({
+      draft: text,
+      suggestedProduct: suggestedProduct ? { ...suggestedProduct, catalogId } : null,
+    })
   } catch (err) {
     if (err instanceof AiError) {
       return NextResponse.json(

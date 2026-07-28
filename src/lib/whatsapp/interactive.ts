@@ -21,7 +21,7 @@
 // mid-conversation.
 // ============================================================
 
-import { INTERACTIVE_LIMITS } from './meta-api'
+import { INTERACTIVE_LIMITS, PRODUCT_LIMITS } from './meta-api'
 
 export interface InteractiveButton {
   /** Stable id echoed back in the webhook when tapped. */
@@ -68,9 +68,39 @@ export interface InteractiveListPayload {
   sections: InteractiveListSection[]
 }
 
+export interface InteractiveProductPayload {
+  kind: 'product'
+  /** Meta Commerce catalog this WABA has connected. */
+  catalog_id: string
+  /** The product's `retailer_id` (SKU) inside that catalog. */
+  product_retailer_id: string
+  /** Optional — unlike buttons/list, a single product card needs no body. */
+  body?: string
+  footer?: string
+}
+
+export interface InteractiveProductListSection {
+  title?: string
+  /** `retailer_id`s of the products in this section. */
+  product_retailer_ids: string[]
+}
+
+export interface InteractiveProductListPayload {
+  kind: 'product_list'
+  catalog_id: string
+  /** Required for product_list (unlike the single-product message). */
+  header: string
+  body: string
+  footer?: string
+  /** Up to 10 sections / 30 products total. */
+  sections: InteractiveProductListSection[]
+}
+
 export type InteractiveMessagePayload =
   | InteractiveButtonsPayload
   | InteractiveListPayload
+  | InteractiveProductPayload
+  | InteractiveProductListPayload
 
 export type InteractiveValidation =
   | { ok: true }
@@ -115,18 +145,58 @@ export function validateInteractivePayload(
   if (!payload || typeof payload !== 'object') {
     return fail('Interactive message payload is required.')
   }
-  const p = payload as Partial<InteractiveMessagePayload>
+  // Loosely typed on purpose: the four payload kinds don't all share the
+  // same optional fields (a `product` card has no `header`, for
+  // instance), so a `Partial<InteractiveMessagePayload>` intersection
+  // type would reject valid accesses below. Each branch casts to its
+  // specific payload type instead, same as the buttons/list branches
+  // already did before product/product_list existed.
+  const p = payload as { kind?: string; body?: unknown; footer?: unknown }
 
-  if (typeof p.body !== 'string' || p.body.trim() === '') {
-    return fail('Interactive message body text is required.')
-  }
-  if (p.body.length > INTERACTIVE_LIMITS.bodyMaxLength) {
+  // Body is required for buttons/list/product_list, but optional for a
+  // single product card (Meta renders the card even with no body text).
+  if (p.kind !== 'product') {
+    if (typeof p.body !== 'string' || p.body.trim() === '') {
+      return fail('Interactive message body text is required.')
+    }
+    if (p.body.length > INTERACTIVE_LIMITS.bodyMaxLength) {
+      return fail(
+        `Body text exceeds the ${INTERACTIVE_LIMITS.bodyMaxLength}-character limit.`,
+      )
+    }
+  } else if (
+    typeof p.body === 'string' &&
+    p.body.length > INTERACTIVE_LIMITS.bodyMaxLength
+  ) {
     return fail(
       `Body text exceeds the ${INTERACTIVE_LIMITS.bodyMaxLength}-character limit.`,
     )
   }
-  const hf = validateHeaderFooter(p.header, p.footer)
-  if (!hf.ok) return hf
+
+  if (p.kind === 'buttons' || p.kind === 'list') {
+    const withHeader = p as { header?: string; footer?: string }
+    const hf = validateHeaderFooter(withHeader.header, withHeader.footer)
+    if (!hf.ok) return hf
+  } else if (p.kind === 'product') {
+    // No header for a single product card — only the footer applies.
+    if (
+      typeof p.footer === 'string' &&
+      p.footer.length > INTERACTIVE_LIMITS.footerMaxLength
+    ) {
+      return fail(
+        `Footer exceeds the ${INTERACTIVE_LIMITS.footerMaxLength}-character limit.`,
+      )
+    }
+  } else if (p.kind === 'product_list') {
+    if (
+      typeof p.footer === 'string' &&
+      p.footer.length > INTERACTIVE_LIMITS.footerMaxLength
+    ) {
+      return fail(
+        `Footer exceeds the ${INTERACTIVE_LIMITS.footerMaxLength}-character limit.`,
+      )
+    }
+  }
 
   if (p.kind === 'buttons') {
     const buttons = (p as InteractiveButtonsPayload).buttons
@@ -223,7 +293,67 @@ export function validateInteractivePayload(
     return ok()
   }
 
-  return fail('Interactive message must be reply buttons or a list.')
+  if (p.kind === 'product') {
+    const product = p as InteractiveProductPayload
+    if (typeof product.catalog_id !== 'string' || !product.catalog_id.trim()) {
+      return fail('A product message needs a catalog id.')
+    }
+    if (
+      typeof product.product_retailer_id !== 'string' ||
+      !product.product_retailer_id.trim()
+    ) {
+      return fail('Select a product to send.')
+    }
+    return ok()
+  }
+
+  if (p.kind === 'product_list') {
+    const list = p as InteractiveProductListPayload
+    if (typeof list.catalog_id !== 'string' || !list.catalog_id.trim()) {
+      return fail('A product list needs a catalog id.')
+    }
+    if (typeof list.header !== 'string' || list.header.trim() === '') {
+      return fail('A product list needs a header.')
+    }
+    if (list.header.length > INTERACTIVE_LIMITS.headerTextMaxLength) {
+      return fail(
+        `Header exceeds the ${INTERACTIVE_LIMITS.headerTextMaxLength}-character limit.`,
+      )
+    }
+    if (!Array.isArray(list.sections) || list.sections.length < 1) {
+      return fail('Add at least one product section.')
+    }
+    if (list.sections.length > PRODUCT_LIMITS.maxProductListSections) {
+      return fail(
+        `A product list allows at most ${PRODUCT_LIMITS.maxProductListSections} sections.`,
+      )
+    }
+    let total = 0
+    for (const section of list.sections) {
+      if (!section || !Array.isArray(section.product_retailer_ids)) {
+        return fail('Every product section needs at least one product.')
+      }
+      if (section.product_retailer_ids.length < 1) {
+        return fail('Every product section needs at least one product.')
+      }
+      for (const id of section.product_retailer_ids) {
+        total++
+        if (!id || typeof id !== 'string') {
+          return fail('Every product needs an id.')
+        }
+      }
+    }
+    if (total > PRODUCT_LIMITS.maxProductListItems) {
+      return fail(
+        `A product list allows at most ${PRODUCT_LIMITS.maxProductListItems} products in total.`,
+      )
+    }
+    return ok()
+  }
+
+  return fail(
+    'Interactive message must be reply buttons, a list, a product, or a product list.',
+  )
 }
 
 /**
@@ -235,5 +365,14 @@ export function interactivePayloadPreviewText(
 ): string {
   const body = payload.body?.trim()
   if (body) return body
-  return payload.kind === 'buttons' ? '[buttons]' : '[list]'
+  switch (payload.kind) {
+    case 'buttons':
+      return '[buttons]'
+    case 'product':
+      return '[product]'
+    case 'product_list':
+      return '[product list]'
+    default:
+      return '[list]'
+  }
 }

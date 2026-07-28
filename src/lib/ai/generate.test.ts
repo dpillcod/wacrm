@@ -13,6 +13,7 @@ function config(overrides: Partial<AiConfig> = {}): AiConfig {
     autoReplyMaxPerConversation: 3,
     handoffAgentId: null,
     embeddingsApiKey: null,
+    productSuggestionsEnabled: false,
     ...overrides,
   }
 }
@@ -44,6 +45,7 @@ describe('parseGeneration', () => {
       text: 'Hello there',
       handoff: false,
       usage: null,
+      recommendedRetailerId: null,
     })
   })
 
@@ -52,11 +54,13 @@ describe('parseGeneration', () => {
       text: '',
       handoff: true,
       usage: null,
+      recommendedRetailerId: null,
     })
     expect(parseGeneration('Let me get a human [[HANDOFF]]')).toEqual({
       text: 'Let me get a human',
       handoff: true,
       usage: null,
+      recommendedRetailerId: null,
     })
   })
 
@@ -66,7 +70,30 @@ describe('parseGeneration', () => {
       text: 'Hi',
       handoff: false,
       usage,
+      recommendedRetailerId: null,
     })
+  })
+
+  it('detects + strips the product sentinel', () => {
+    expect(parseGeneration('Here you go [[PRODUCT:sku-123]]')).toEqual({
+      text: 'Here you go',
+      handoff: false,
+      usage: null,
+      recommendedRetailerId: 'sku-123',
+    })
+  })
+
+  it('tolerates whitespace inside the product sentinel', () => {
+    expect(parseGeneration('[[PRODUCT: sku-123 ]]')).toEqual({
+      text: '',
+      handoff: false,
+      usage: null,
+      recommendedRetailerId: 'sku-123',
+    })
+  })
+
+  it('returns null recommendedRetailerId when no product sentinel is present', () => {
+    expect(parseGeneration('Just a normal reply').recommendedRetailerId).toBeNull()
   })
 })
 
@@ -90,6 +117,7 @@ describe('generateReply — OpenAI', () => {
       text: 'Sure — happy to help!',
       handoff: false,
       usage: { promptTokens: 42, completionTokens: 8, totalTokens: 50 },
+      recommendedRetailerId: null,
     })
     const [url, opts] = fetchMock.mock.calls[0]
     expect(url).toContain('api.openai.com')
@@ -149,6 +177,7 @@ describe('generateReply — Anthropic', () => {
       text: 'Hi there!',
       handoff: false,
       usage: { promptTokens: 30, completionTokens: 6, totalTokens: 36 },
+      recommendedRetailerId: null,
     })
     const [url, opts] = fetchMock.mock.calls[0]
     expect(url).toContain('api.anthropic.com')

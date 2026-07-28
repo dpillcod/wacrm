@@ -27,6 +27,8 @@ import {
   sendMediaMessage,
   sendInteractiveButtons,
   sendInteractiveList,
+  sendInteractiveProduct,
+  sendInteractiveProductList,
   type MediaKind,
 } from '@/lib/whatsapp/meta-api';
 import {
@@ -372,18 +374,59 @@ export async function sendMessageToConversation(
         });
         return result.messageId;
       }
-      const result = await sendInteractiveList({
-        phoneNumberId: config.phone_number_id,
-        accessToken,
-        to: phone,
-        bodyText: p.body,
-        buttonLabel: p.button_label,
-        headerText: p.header || undefined,
-        footerText: p.footer || undefined,
-        sections: p.sections,
-        contextMessageId,
-      });
-      return result.messageId;
+      if (p.kind === 'list') {
+        const result = await sendInteractiveList({
+          phoneNumberId: config.phone_number_id,
+          accessToken,
+          to: phone,
+          bodyText: p.body,
+          buttonLabel: p.button_label,
+          headerText: p.header || undefined,
+          footerText: p.footer || undefined,
+          sections: p.sections,
+          contextMessageId,
+        });
+        return result.messageId;
+      }
+      if (p.kind === 'product') {
+        const result = await sendInteractiveProduct({
+          phoneNumberId: config.phone_number_id,
+          accessToken,
+          to: phone,
+          catalogId: p.catalog_id,
+          productRetailerId: p.product_retailer_id,
+          bodyText: p.body || undefined,
+          footerText: p.footer || undefined,
+          contextMessageId,
+        });
+        return result.messageId;
+      }
+      if (p.kind === 'product_list') {
+        const result = await sendInteractiveProductList({
+          phoneNumberId: config.phone_number_id,
+          accessToken,
+          to: phone,
+          catalogId: p.catalog_id,
+          headerText: p.header,
+          bodyText: p.body,
+          footerText: p.footer || undefined,
+          sections: p.sections.map((s) => ({
+            title: s.title,
+            productRetailerIds: s.product_retailer_ids,
+          })),
+          contextMessageId,
+        });
+        return result.messageId;
+      }
+      // Exhaustive by construction (validateSendMessageParams already
+      // rejected anything else) — throw rather than silently falling
+      // through to a different message type if a new kind is ever added
+      // here without a matching branch.
+      throw new SendMessageError(
+        'bad_request',
+        `Unsupported interactive kind "${(p as { kind: string }).kind}"`,
+        400
+      );
     }
     const result = await sendTextMessage({
       phoneNumberId: config.phone_number_id,

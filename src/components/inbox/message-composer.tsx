@@ -21,6 +21,7 @@ import {
   Sparkles,
   Plus,
   MessageSquareDashed,
+  ShoppingBag,
   Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -53,8 +54,9 @@ import {
   blankButtonsPayload,
 } from "@/components/interactive/interactive-builder";
 import { validateInteractivePayload } from "@/lib/whatsapp/interactive";
-import type { InteractiveMessagePayload, QuickReply } from "@/types";
+import type { InteractiveMessagePayload, InteractiveProductPayload, QuickReply } from "@/types";
 import { QuickReplyPicker } from "./quick-reply-picker";
+import { ProductPicker } from "./product-picker";
 
 /** Media content types an agent can send from the composer. */
 export type ComposerMediaKind = "image" | "video" | "document" | "audio";
@@ -148,12 +150,23 @@ export function MessageComposer({
   const [drafting, setDrafting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Product the AI draft suggested attaching (only set when the account
+  // has product suggestions enabled and the model recommended one).
+  const [suggestedProduct, setSuggestedProduct] = useState<{
+    retailerId: string;
+    name: string;
+    price: number | null;
+    currency: string | null;
+    catalogId: string;
+  } | null>(null);
+
   // Interactive-message builder dialog + quick-reply picker.
   const [interactiveOpen, setInteractiveOpen] = useState(false);
   const [interactivePayload, setInteractivePayload] =
     useState<InteractiveMessagePayload>(blankButtonsPayload);
   const [savingQuickReply, setSavingQuickReply] = useState(false);
   const [quickReplyOpen, setQuickReplyOpen] = useState(false);
+  const [catalogOpen, setCatalogOpen] = useState(false);
 
   // Media attachment state. `draft` holds an uploaded-but-not-yet-sent
   // attachment; `busy` covers the upload/transcode window.
@@ -228,6 +241,7 @@ export function MessageComposer({
     try {
       onSend(trimmed, replyTo?.id);
       setText("");
+      setSuggestedProduct(null);
       if (textareaRef.current) {
         textareaRef.current.style.height = "auto";
       }
@@ -260,6 +274,7 @@ export function MessageComposer({
   const handleDraft = useCallback(async () => {
     if (drafting) return;
     setDrafting(true);
+    setSuggestedProduct(null);
     try {
       const res = await fetch("/api/ai/draft", {
         method: "POST",
@@ -279,6 +294,9 @@ export function MessageComposer({
       if (!draftText) {
         toast.error("The assistant didn't return a reply.");
         return;
+      }
+      if (data.suggestedProduct && typeof data.suggestedProduct.retailerId === "string") {
+        setSuggestedProduct(data.suggestedProduct);
       }
       setText(draftText);
       // Let the textarea grow to fit and drop the cursor at the end so
@@ -318,6 +336,14 @@ export function MessageComposer({
     setInteractiveOpen(false);
     onClearReply?.();
   }, [interactivePayload, onSendInteractive, replyTo?.id, onClearReply]);
+
+  const handleSendProduct = useCallback(
+    (payload: InteractiveProductPayload) => {
+      onSendInteractive(payload, replyTo?.id);
+      onClearReply?.();
+    },
+    [onSendInteractive, replyTo?.id, onClearReply],
+  );
 
   // Persist the current builder payload as a reusable interactive snippet.
   const saveAsQuickReply = useCallback(async () => {
@@ -690,6 +716,10 @@ export function MessageComposer({
                 <MessageSquareDashed className="mr-2 h-4 w-4" />
                 {t("interactiveMessage")}
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setCatalogOpen(true)}>
+                <ShoppingBag className="mr-2 h-4 w-4" />
+                {t("catalogProduct")}
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setQuickReplyOpen(true)}>
                 <Zap className="mr-2 h-4 w-4" />
                 {t("quickReplies")}
@@ -772,6 +802,43 @@ export function MessageComposer({
         </p>
       )}
 
+      {/* AI-suggested product — reviewed by the agent, never sent
+          automatically (that only happens in auto-reply mode). */}
+      {suggestedProduct && (
+        <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2">
+          <div className="min-w-0 flex-1 text-xs">
+            <span className="font-medium text-foreground">
+              {t("suggestedProduct")}
+            </span>{" "}
+            <span className="truncate text-muted-foreground">
+              {suggestedProduct.name}
+              {suggestedProduct.price != null
+                ? ` — ${suggestedProduct.price}${suggestedProduct.currency ? ` ${suggestedProduct.currency}` : ""}`
+                : ""}
+            </span>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                handleSendProduct({
+                  kind: "product",
+                  catalog_id: suggestedProduct.catalogId,
+                  product_retailer_id: suggestedProduct.retailerId,
+                });
+                setSuggestedProduct(null);
+              }}
+            >
+              {t("attach")}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setSuggestedProduct(null)}>
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Interactive-message builder dialog. */}
       <Dialog open={interactiveOpen} onOpenChange={setInteractiveOpen}>
         <DialogContent className="sm:max-w-2xl">
@@ -810,6 +877,13 @@ export function MessageComposer({
         open={quickReplyOpen}
         onOpenChange={setQuickReplyOpen}
         onPick={handlePickQuickReply}
+      />
+
+      {/* Catalog product picker. */}
+      <ProductPicker
+        open={catalogOpen}
+        onOpenChange={setCatalogOpen}
+        onSelect={handleSendProduct}
       />
     </div>
   );

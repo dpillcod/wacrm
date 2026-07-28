@@ -196,6 +196,9 @@
       "removeAttachment": "Remove attachment",
       "moreActions": "More",
       "interactiveMessage": "Interactive message",
+      "catalogProduct": "Catalog product",
+      "suggestedProduct": "Suggested product:",
+      "attach": "Attach",
       "quickReplies": "Quick replies",
       "quickRepliesEmpty": "No quick replies yet. Add some in Settings → Quick replies.",
       "saveAsQuickReply": "Save as quick reply",
@@ -253,6 +256,20 @@
       "back": "Back",
       "cancel": "Cancel",
       "send": "Send template"
+    },
+    "productPicker": {
+      "sendProduct": "Send product",
+      "pickProduct": "Pick a product from your connected catalog to send to this contact.",
+      "addCaption": "Optionally add a short caption for the product card.",
+      "noCatalog": "No catalog connected",
+      "noCatalogHint": "Add your Commerce Catalog ID in Settings → WhatsApp, then sync it in Settings → Catalog products.",
+      "noProducts": "No products synced yet",
+      "noProductsHint": "Sync your catalog in Settings → Catalog products.",
+      "caption": "Caption",
+      "captionPlaceholder": "Optional message above the product card",
+      "back": "Back",
+      "cancel": "Cancel",
+      "send": "Send product"
     },
     "sidebar": {
       "contactInfo": "Contact info",
@@ -1311,6 +1328,23 @@
         "pink": "Pink"
       }
     },
+    "catalog": {
+      "title": "Catalog products",
+      "description": "Sync products from your connected Meta Commerce Catalog so agents (and, if enabled, the AI assistant) can send native product cards from the inbox.",
+      "syncFromMeta": "Sync from Meta",
+      "syncing": "Syncing…",
+      "syncTitle": "Pull products from your connected Commerce Catalog",
+      "noCatalog": "No catalog connected yet.",
+      "noCatalogHint": "Add your Commerce Catalog ID in WhatsApp settings, then sync.",
+      "noProducts": "No products synced yet.",
+      "noProductsHint": "Click \"Sync from Meta\" to pull your catalog's products.",
+      "stale": "Removed from catalog",
+      "toastSyncCount": "Synced {total} products.",
+      "toastSyncDetails": " ({inserted} new, {updated} updated)",
+      "toastSyncFailed": "Some products failed to sync: {preview}",
+      "toastSyncError": "Failed to sync catalog products.",
+      "toastSyncTruncated": "Catalog has more products than could be synced in one pass — run Sync again to continue."
+    },
     "templates": {
       "title": "Message templates",
       "description": "Create templates and submit them to Meta for approval. Use \"Sync from Meta\" to pull templates approved elsewhere.",
@@ -1452,6 +1486,8 @@
       "apiCredentialsDesc": "Enter your Meta WhatsApp Business API credentials.",
       "phoneNumberId": "Phone Number ID",
       "wabaId": "WhatsApp Business Account ID",
+      "catalogId": "Commerce Catalog ID",
+      "catalogIdHint": "From Meta Commerce Manager — connects your product catalog so you (and, if enabled, the AI assistant) can send native product cards from the inbox.",
       "accessToken": "Permanent Access Token",
       "accessTokenPlaceholder": "Enter your access token",
       "tokenHidden": "Token is hidden for security. Re-enter it to update configuration.",
@@ -1651,6 +1687,9 @@
       "enableAssistantDesc": "Master switch. Turns on the “Draft with AI” button in the inbox.",
       "autoReply": "Auto-reply to inbound messages",
       "autoReplyDesc": "The bot answers new inbound messages automatically (only when no flow handles them and no agent is assigned). Hands off to a human when it can’t help.",
+      "productSuggestions": "Suggest catalog products",
+      "productSuggestionsDesc": "When a customer's question clearly matches a product, the assistant can recommend it — sending a native WhatsApp product card alongside its reply (auto-reply) or offering it as a one-click attachment (drafts).",
+      "productSuggestionsNeedsCatalog": "Connect a Commerce Catalog ID in WhatsApp settings first.",
       "maxAutoReplies": "Max auto-replies per conversation",
       "maxAutoRepliesDesc": "After this many bot replies in one thread, the bot goes quiet.",
       "handoffTo": "Hand off to",

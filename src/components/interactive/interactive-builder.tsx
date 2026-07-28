@@ -67,15 +67,23 @@ interface InteractiveBuilderProps {
  * composer, the automation Send node, and the quick-replies manager.
  */
 export function InteractiveBuilder({
-  value,
+  value: rawValue,
   onChange,
   showPreview = true,
 }: InteractiveBuilderProps) {
+  // This builder only ever produces reply-buttons or list messages —
+  // catalog products are sent through the dedicated ProductPicker
+  // instead, never built here. Narrow once so the field access below
+  // doesn't need a cast per line: `InteractiveMessagePayload` is a
+  // 4-kind union now that catalog products exist, but only these two
+  // kinds are ever passed into this component.
+  const value = rawValue as InteractiveButtonsPayload | InteractiveListPayload;
   const [advanced, setAdvanced] = useState(false);
   const validation = validateInteractivePayload(value);
 
-  const setField = (patch: Partial<InteractiveMessagePayload>) =>
-    onChange({ ...value, ...patch } as InteractiveMessagePayload);
+  const setField = (
+    patch: Partial<InteractiveButtonsPayload | InteractiveListPayload>,
+  ) => onChange({ ...value, ...patch } as InteractiveMessagePayload);
 
   const switchKind = (kind: "buttons" | "list") => {
     if (kind === value.kind) return;

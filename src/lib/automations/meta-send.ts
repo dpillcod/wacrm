@@ -3,6 +3,7 @@ import type { InteractiveMessagePayload } from '@/lib/whatsapp/interactive'
 import {
   engineSendInteractiveButtons,
   engineSendInteractiveList,
+  engineSendProduct,
 } from '@/lib/flows/meta-send'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import {
@@ -91,14 +92,28 @@ export async function engineSendInteractive(
       buttons: payload.buttons,
     })
   }
-  return engineSendInteractiveList({
-    ...common,
-    bodyText: payload.body,
-    buttonLabel: payload.button_label,
-    headerText: payload.header,
-    footerText: payload.footer,
-    sections: payload.sections,
-  })
+  if (payload.kind === 'list') {
+    return engineSendInteractiveList({
+      ...common,
+      bodyText: payload.body,
+      buttonLabel: payload.button_label,
+      headerText: payload.header,
+      footerText: payload.footer,
+      sections: payload.sections,
+    })
+  }
+  if (payload.kind === 'product') {
+    return engineSendProduct({
+      ...common,
+      catalogId: payload.catalog_id,
+      productRetailerId: payload.product_retailer_id,
+      bodyText: payload.body,
+    })
+  }
+  // Catalog product lists aren't configurable from the automation
+  // builder yet (only single products, via the inbox's product
+  // picker) — no engine sender exists for this combination.
+  throw new Error('Product-list interactive messages are not supported in automations yet.')
 }
 
 type SendInput =
