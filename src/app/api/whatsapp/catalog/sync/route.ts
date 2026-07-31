@@ -120,59 +120,52 @@ export async function POST() {
       nextUrl = metaBody.paging?.next ?? null
     }
 
+    const errors: { retailer_id: string; message: string }[] = []
+    const syncedRetailerIds = products.map((p) => p.retailer_id ?? p.id)
+
+    // Know insert-vs-update counts up front with a single query, since
+    // a bulk upsert doesn't report per-row outcome.
+    const { data: preExistingRows } = await supabase
+      .from('catalog_products')
+      .select('retailer_id')
+      .eq('account_id', accountId)
+    const preExistingSet = new Set(
+      (preExistingRows ?? []).map((row) => row.retailer_id),
+    )
     let inserted = 0
     let updated = 0
-    const errors: { retailer_id: string; message: string }[] = []
-    const syncedRetailerIds: string[] = []
+    for (const id of syncedRetailerIds) {
+      if (preExistingSet.has(id)) updated++
+      else inserted++
+    }
 
-    for (const p of products) {
-      const retailerId = p.retailer_id ?? p.id
-      syncedRetailerIds.push(retailerId)
+    const rows = products.map((p) => ({
+      account_id: accountId,
+      retailer_id: p.retailer_id ?? p.id,
+      meta_product_id: p.id,
+      name: p.name,
+      description: p.description ?? null,
+      price: parsePrice(p.price),
+      currency: p.currency ?? null,
+      availability: p.availability ?? null,
+      image_url: p.image_url ?? null,
+      is_stale: false,
+      updated_at: new Date().toISOString(),
+    }))
 
-      const row = {
-        account_id: accountId,
-        retailer_id: retailerId,
-        meta_product_id: p.id,
-        name: p.name,
-        description: p.description ?? null,
-        price: parsePrice(p.price),
-        currency: p.currency ?? null,
-        availability: p.availability ?? null,
-        image_url: p.image_url ?? null,
-        is_stale: false,
-        updated_at: new Date().toISOString(),
-      }
-
-      const { data: existing, error: lookupErr } = await supabase
+    // Batched (not one giant upsert) to keep each request body/latency
+    // reasonable for large catalogs.
+    const BATCH_SIZE = 500
+    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+      const batch = rows.slice(i, i + BATCH_SIZE)
+      const { error: upsertErr } = await supabase
         .from('catalog_products')
-        .select('id')
-        .eq('account_id', accountId)
-        .eq('retailer_id', retailerId)
-        .maybeSingle()
-
-      if (lookupErr) {
-        errors.push({ retailer_id: retailerId, message: lookupErr.message })
-        continue
-      }
-
-      if (existing?.id) {
-        const { error: updErr } = await supabase
-          .from('catalog_products')
-          .update(row)
-          .eq('id', existing.id)
-        if (updErr) {
-          errors.push({ retailer_id: retailerId, message: updErr.message })
-        } else {
-          updated++
-        }
-      } else {
-        const { error: insErr } = await supabase
-          .from('catalog_products')
-          .insert(row)
-        if (insErr) {
-          errors.push({ retailer_id: retailerId, message: insErr.message })
-        } else {
-          inserted++
+        .upsert(batch, { onConflict: 'account_id,retailer_id' })
+      if (upsertErr) {
+        for (const row of batch) {
+          errors.push({ retailer_id: row.retailer_id, message: upsertErr.message })
+          if (preExistingSet.has(row.retailer_id)) updated--
+          else inserted--
         }
       }
     }
