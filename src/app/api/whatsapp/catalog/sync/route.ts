@@ -88,11 +88,19 @@ export async function POST() {
 
     const accessToken = decrypt(config.access_token)
 
+    // Resume a prior run's pagination instead of restarting at page 1
+    // every time — large catalogs need many calls to fully walk, since
+    // PAGE_CAP bounds how much one request does.
+    const isResuming = Boolean(config.catalog_sync_cursor)
+    const syncStartedAt = isResuming
+      ? (config.catalog_sync_started_at as string)
+      : new Date().toISOString()
+
     const products: MetaCatalogProduct[] = []
-    let nextUrl:
-      | string
-      | null = `${META_API_BASE}/${config.catalog_id}/products?limit=100&fields=id,retailer_id,name,description,price,currency,availability,image_url`
-    const PAGE_CAP = 20
+    let nextUrl: string | null =
+      (config.catalog_sync_cursor as string | null) ??
+      `${META_API_BASE}/${config.catalog_id}/products?limit=100&fields=id,retailer_id,name,description,price,currency,availability,image_url`
+    const PAGE_CAP = 100
     let pageCount = 0
 
     while (nextUrl && pageCount < PAGE_CAP) {
@@ -174,24 +182,43 @@ export async function POST() {
       }
     }
 
-    // Mark anything not seen in this sync as stale, rather than
-    // deleting it — a message already sent still references its id.
-    // Diffed client-side (not a `.not(..., 'in', ...)` filter) so an
-    // arbitrary retailer_id from Meta can never be mis-parsed as
-    // PostgREST filter syntax.
-    const { data: existingRows } = await supabase
-      .from('catalog_products')
-      .select('id, retailer_id')
-      .eq('account_id', accountId)
-    const syncedSet = new Set(syncedRetailerIds)
-    const staleIds = (existingRows ?? [])
-      .filter((row) => !syncedSet.has(row.retailer_id))
-      .map((row) => row.id)
-    if (staleIds.length > 0) {
+    const truncated = nextUrl !== null
+
+    if (truncated) {
+      // More pages remain — save where we left off so the next call
+      // resumes instead of restarting at page 1. Stale-marking waits
+      // until the whole catalog has been walked (see below), since a
+      // product merely queued in a not-yet-fetched page isn't gone.
       await supabase
+        .from('whatsapp_config')
+        .update({
+          catalog_sync_cursor: nextUrl,
+          catalog_sync_started_at: syncStartedAt,
+        })
+        .eq('account_id', accountId)
+    } else {
+      // Reached the end of pagination — this was the last leg of the
+      // (possibly multi-request) sync. Anything not touched since
+      // syncStartedAt wasn't seen in any page this run, so it's gone
+      // from the catalog. Marked stale, never hard-deleted — a message
+      // already sent still references its id.
+      const { data: staleRows } = await supabase
         .from('catalog_products')
-        .update({ is_stale: true })
-        .in('id', staleIds)
+        .select('id')
+        .eq('account_id', accountId)
+        .lt('updated_at', syncStartedAt)
+      const staleIds = (staleRows ?? []).map((row) => row.id)
+      if (staleIds.length > 0) {
+        await supabase
+          .from('catalog_products')
+          .update({ is_stale: true })
+          .in('id', staleIds)
+      }
+
+      await supabase
+        .from('whatsapp_config')
+        .update({ catalog_sync_cursor: null, catalog_sync_started_at: null })
+        .eq('account_id', accountId)
     }
 
     return NextResponse.json({
@@ -200,7 +227,7 @@ export async function POST() {
       inserted,
       updated,
       errors,
-      truncated: pageCount >= PAGE_CAP && nextUrl !== null,
+      truncated,
     })
   } catch (error) {
     console.error('Error syncing WhatsApp catalog products:', error)
