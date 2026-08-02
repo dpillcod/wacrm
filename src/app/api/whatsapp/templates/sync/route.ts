@@ -199,7 +199,11 @@ export async function POST() {
         } catch {
           // response wasn't JSON — keep the fallback
         }
-        return NextResponse.json({ error: metaErr }, { status: 502 })
+        // Not 502: that status code gets intercepted by some reverse
+        // proxies (e.g. Traefik/EasyPanel) and replaced with a generic
+        // HTML "Bad Gateway" page, hiding the real Meta error message
+        // from the client.
+        return NextResponse.json({ error: metaErr }, { status: 400 })
       }
 
       const metaBody: {
