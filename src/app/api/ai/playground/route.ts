@@ -3,6 +3,7 @@ import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
 import { loadAiConfig } from '@/lib/ai/config'
 import { retrieveKnowledge } from '@/lib/ai/knowledge'
+import { retrieveCatalogProducts, resolveCatalogProduct } from '@/lib/ai/catalog'
 import { generateReply } from '@/lib/ai/generate'
 import { buildSystemPrompt } from '@/lib/ai/defaults'
 import { latestUserMessage } from '@/lib/ai/query'
@@ -72,20 +73,46 @@ export async function POST(request: Request) {
       )
     }
 
-    const knowledge = await retrieveKnowledge(
-      supabase,
-      accountId,
-      config,
-      latestUserMessage(messages),
-    )
+    const question = latestUserMessage(messages)
+    const knowledge = await retrieveKnowledge(supabase, accountId, config, question)
+
+    // Mirrors dispatchInboundToAiReply / the draft route: only fetch
+    // candidates when suggestions are actually enabled, and show the
+    // tester the same product-recommendation behavior a real customer
+    // would get (previously missing here, so the Playground silently
+    // never surfaced catalog matches).
+    const catalogCandidates = config.productSuggestionsEnabled
+      ? await retrieveCatalogProducts(supabase, accountId, question)
+      : []
+
     const systemPrompt = buildSystemPrompt({
       userPrompt: config.systemPrompt,
       mode: 'auto_reply',
       knowledge,
+      catalogCandidates: catalogCandidates.map((p) => ({
+        retailerId: p.retailerId,
+        name: p.name,
+        price: p.price,
+        currency: p.currency,
+      })),
     })
 
-    const { text, handoff } = await generateReply({ config, systemPrompt, messages })
-    return NextResponse.json({ reply: text, handoff })
+    const { text, handoff, recommendedRetailerId } = await generateReply({
+      config,
+      systemPrompt,
+      messages,
+    })
+
+    let recommendedProduct = null as Awaited<ReturnType<typeof resolveCatalogProduct>>
+    if (config.productSuggestionsEnabled && recommendedRetailerId) {
+      recommendedProduct = await resolveCatalogProduct(
+        supabase,
+        accountId,
+        recommendedRetailerId,
+      )
+    }
+
+    return NextResponse.json({ reply: text, handoff, recommendedProduct })
   } catch (err) {
     if (err instanceof AiError) {
       return NextResponse.json(

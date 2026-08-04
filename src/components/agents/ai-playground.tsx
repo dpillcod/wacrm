@@ -2,15 +2,23 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Bot, RotateCcw, Send, Loader2, UserCircle2, ArrowRight } from 'lucide-react';
+import { Bot, RotateCcw, Send, Loader2, UserCircle2, ArrowRight, Package } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+
+interface RecommendedProduct {
+  name: string;
+  price: number | null;
+  currency: string | null;
+}
 
 interface Turn {
   role: 'user' | 'assistant';
   content: string;
   /** assistant-only: the agent signalled a human handoff on this turn. */
   handoff?: boolean;
+  /** assistant-only: a catalog product the agent recommended, if any. */
+  recommendedProduct?: RecommendedProduct | null;
 }
 
 export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
@@ -61,6 +69,7 @@ export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
               ? data.reply
               : '',
           handoff: Boolean(data.handoff),
+          recommendedProduct: data.recommendedProduct ?? null,
         },
       ]);
     } catch {
@@ -144,6 +153,25 @@ export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
               )}
             >
               {t.content && <p className="whitespace-pre-wrap">{t.content}</p>}
+              {t.role === 'assistant' && t.recommendedProduct && (
+                <div
+                  className={cn(
+                    'flex items-center gap-2 rounded-lg border border-border/50 bg-background/50 px-2.5 py-1.5 text-xs',
+                    t.content && 'mt-1.5',
+                  )}
+                >
+                  <Package className="h-3.5 w-3.5 shrink-0 text-primary" />
+                  <span className="font-medium text-foreground">
+                    {t.recommendedProduct.name}
+                  </span>
+                  {t.recommendedProduct.price != null && (
+                    <span className="text-muted-foreground">
+                      {t.recommendedProduct.currency ?? 'USD'}{' '}
+                      {t.recommendedProduct.price.toFixed(2)}
+                    </span>
+                  )}
+                </div>
+              )}
               {t.role === 'assistant' && t.handoff && (
                 <p
                   className={cn(
