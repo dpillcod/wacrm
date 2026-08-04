@@ -66,7 +66,23 @@ export async function retrieveCatalogProducts(
       .slice(0, 8)
     if (words.length === 0) return []
 
+    // Naive Spanish singular/plural folding (camarones <-> camaron,
+    // papeles <-> papel) so a customer's plural phrasing still matches
+    // singular product names, and vice versa. Best-effort, not a real
+    // stemmer — only strips/adds the common "-es"/"-s" plural suffixes.
+    const variantsFor = (w: string): string[] => {
+      const variants = new Set([w])
+      if (w.length > 4 && w.endsWith('es')) variants.add(w.slice(0, -2))
+      else if (w.length > 3 && w.endsWith('s')) variants.add(w.slice(0, -1))
+      else {
+        variants.add(`${w}s`)
+        variants.add(`${w}es`)
+      }
+      return [...variants]
+    }
+
     const orFilter = words
+      .flatMap(variantsFor)
       .map((w) => {
         const escaped = w.replace(/[%_]/g, '\\$&')
         return `name.ilike.%${escaped}%,description.ilike.%${escaped}%`
