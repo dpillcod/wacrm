@@ -17,8 +17,9 @@ interface Turn {
   content: string;
   /** assistant-only: the agent signalled a human handoff on this turn. */
   handoff?: boolean;
-  /** assistant-only: a catalog product the agent recommended, if any. */
-  recommendedProduct?: RecommendedProduct | null;
+  /** assistant-only: catalog products the agent recommended, if any —
+   *  one entry for a single-product card, several for a product list. */
+  recommendedProducts?: RecommendedProduct[];
 }
 
 export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
@@ -69,7 +70,9 @@ export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
               ? data.reply
               : '',
           handoff: Boolean(data.handoff),
-          recommendedProduct: data.recommendedProduct ?? null,
+          recommendedProducts: Array.isArray(data.recommendedProducts)
+            ? data.recommendedProducts
+            : [],
         },
       ]);
     } catch {
@@ -153,25 +156,31 @@ export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
               )}
             >
               {t.content && <p className="whitespace-pre-wrap">{t.content}</p>}
-              {t.role === 'assistant' && t.recommendedProduct && (
-                <div
-                  className={cn(
-                    'flex items-center gap-2 rounded-lg border border-border/50 bg-background/50 px-2.5 py-1.5 text-xs',
-                    t.content && 'mt-1.5',
-                  )}
-                >
-                  <Package className="h-3.5 w-3.5 shrink-0 text-primary" />
-                  <span className="font-medium text-foreground">
-                    {t.recommendedProduct.name}
-                  </span>
-                  {t.recommendedProduct.price != null && (
-                    <span className="text-muted-foreground">
-                      {t.recommendedProduct.currency ?? 'USD'}{' '}
-                      {t.recommendedProduct.price.toFixed(2)}
-                    </span>
-                  )}
-                </div>
-              )}
+              {t.role === 'assistant' &&
+                t.recommendedProducts &&
+                t.recommendedProducts.length > 0 && (
+                  <div className={cn('space-y-1', t.content && 'mt-1.5')}>
+                    {t.recommendedProducts.length > 1 && (
+                      <p className="text-[11px] text-muted-foreground">
+                        Product list ({t.recommendedProducts.length} options)
+                      </p>
+                    )}
+                    {t.recommendedProducts.map((p, j) => (
+                      <div
+                        key={j}
+                        className="flex items-center gap-2 rounded-lg border border-border/50 bg-background/50 px-2.5 py-1.5 text-xs"
+                      >
+                        <Package className="h-3.5 w-3.5 shrink-0 text-primary" />
+                        <span className="font-medium text-foreground">{p.name}</span>
+                        {p.price != null && (
+                          <span className="text-muted-foreground">
+                            {p.currency ?? 'USD'} {p.price.toFixed(2)}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               {t.role === 'assistant' && t.handoff && (
                 <p
                   className={cn(

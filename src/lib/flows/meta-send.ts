@@ -2,10 +2,12 @@ import {
   sendInteractiveButtons,
   sendInteractiveList,
   sendInteractiveProduct,
+  sendInteractiveProductList,
   sendMediaMessage,
   sendTextMessage,
   type InteractiveButton,
   type InteractiveListSection,
+  type InteractiveProductListSection,
   type MediaKind,
 } from '@/lib/whatsapp/meta-api'
 import type { InteractiveMessagePayload } from '@/lib/whatsapp/interactive'
@@ -262,6 +264,135 @@ export async function engineSendProduct(
     .from('conversations')
     .update({
       last_message_text: args.bodyText?.trim() || '[product]',
+      last_message_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', args.conversationId)
+
+  return { whatsapp_message_id: waMessageId }
+}
+
+interface SendProductListEngineArgs {
+  accountId: string
+  userId: string
+  conversationId: string
+  contactId: string
+  catalogId: string
+  headerText: string
+  bodyText: string
+  footerText?: string
+  sections: InteractiveProductListSection[]
+  /** Marks the persisted message `ai_generated = true` — set by the
+   *  auto-reply bot; unset for a manual agent send. */
+  aiGenerated?: boolean
+}
+
+/**
+ * Send a native WhatsApp Business Catalog product LIST — several
+ * products grouped into sections, so the customer can pick one instead
+ * of the business guessing which single item they meant.
+ *
+ * Used by the AI auto-reply bot when several catalog candidates all
+ * plausibly match an ambiguous request. Same phone-variant retry + DB
+ * persistence pattern as `engineSendProduct`.
+ */
+export async function engineSendProductList(
+  args: SendProductListEngineArgs,
+): Promise<{ whatsapp_message_id: string }> {
+  const db = supabaseAdmin()
+
+  const { data: contact, error: contactErr } = await db
+    .from('contacts')
+    .select('id, phone')
+    .eq('id', args.contactId)
+    .eq('account_id', args.accountId)
+    .maybeSingle()
+  if (contactErr || !contact?.phone) {
+    throw new Error('contact not found for this account')
+  }
+
+  const sanitized = sanitizePhoneForMeta(contact.phone)
+  if (!isValidE164(sanitized)) {
+    throw new Error(`contact phone invalid: ${contact.phone}`)
+  }
+
+  const { data: config, error: configErr } = await db
+    .from('whatsapp_config')
+    .select('*')
+    .eq('account_id', args.accountId)
+    .single()
+  if (configErr || !config) {
+    throw new Error('WhatsApp not configured for this account')
+  }
+
+  const accessToken = decrypt(config.access_token)
+
+  const attempt = async (phone: string): Promise<string> => {
+    const r = await sendInteractiveProductList({
+      phoneNumberId: config.phone_number_id,
+      accessToken,
+      to: phone,
+      catalogId: args.catalogId,
+      headerText: args.headerText,
+      bodyText: args.bodyText,
+      footerText: args.footerText,
+      sections: args.sections,
+    })
+    return r.messageId
+  }
+
+  const variants = phoneVariants(sanitized)
+  let workingPhone = sanitized
+  let waMessageId = ''
+  let lastError: unknown = null
+  for (const v of variants) {
+    try {
+      waMessageId = await attempt(v)
+      workingPhone = v
+      lastError = null
+      break
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (!isRecipientNotAllowedError(msg)) throw err
+      lastError = err
+    }
+  }
+  if (lastError) throw lastError
+
+  if (workingPhone !== sanitized) {
+    await db.from('contacts').update({ phone: workingPhone }).eq('id', contact.id)
+  }
+
+  const interactivePayload: InteractiveMessagePayload = {
+    kind: 'product_list',
+    catalog_id: args.catalogId,
+    header: args.headerText,
+    body: args.bodyText,
+    footer: args.footerText,
+    sections: args.sections.map((s) => ({
+      title: s.title,
+      product_retailer_ids: s.productRetailerIds,
+    })),
+  }
+
+  const { error: msgErr } = await db.from('messages').insert({
+    conversation_id: args.conversationId,
+    sender_type: 'bot',
+    content_type: 'interactive',
+    content_text: args.bodyText,
+    interactive_payload: interactivePayload,
+    message_id: waMessageId,
+    status: 'sent',
+    ai_generated: args.aiGenerated ?? false,
+  })
+  if (msgErr) {
+    throw new Error(`sent to Meta but DB insert failed: ${msgErr.message}`)
+  }
+
+  await db
+    .from('conversations')
+    .update({
+      last_message_text: args.bodyText,
       last_message_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })

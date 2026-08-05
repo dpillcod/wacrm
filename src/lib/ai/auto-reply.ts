@@ -2,13 +2,13 @@ import { supabaseAdmin } from './admin-client'
 import { loadAiConfig } from './config'
 import { buildConversationContext } from './context'
 import { retrieveKnowledge } from './knowledge'
-import { retrieveCatalogProducts, resolveCatalogProduct } from './catalog'
+import { retrieveCatalogProducts, resolveCatalogProduct, resolveCatalogProducts } from './catalog'
 import { generateReply } from './generate'
 import { buildSystemPrompt } from './defaults'
 import { buildHandoffSummary } from './handoff'
 import { logAiUsage } from './usage'
 import { latestUserMessage } from './query'
-import { engineSendText, engineSendProduct } from '@/lib/flows/meta-send'
+import { engineSendText, engineSendProduct, engineSendProductList } from '@/lib/flows/meta-send'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 
 interface DispatchArgs {
@@ -122,7 +122,7 @@ export async function dispatchInboundToAiReply(
       })),
     })
 
-    const { text, handoff, usage, recommendedRetailerId } = await generateReply({
+    const { text, handoff, usage, recommendedRetailerIds } = await generateReply({
       config,
       systemPrompt,
       messages,
@@ -198,37 +198,63 @@ export async function dispatchInboundToAiReply(
       aiGenerated: true,
     })
 
-    // Product card sends alongside the text reply, not instead of it,
-    // and does NOT consume its own reply-cap slot — the cap already
+    // Product card/list sends alongside the text reply, not instead of
+    // it, and does NOT consume its own reply-cap slot — the cap already
     // ran above and only bounds how many times the bot answers, not
     // how many messages one answer produces. Wrapped in its own
     // try/catch so a Meta/catalog failure here can never undo or mask
     // the text reply that already landed.
-    if (config.productSuggestionsEnabled && recommendedRetailerId) {
+    if (config.productSuggestionsEnabled && recommendedRetailerIds.length > 0) {
       try {
-        const product = await resolveCatalogProduct(
-          db,
-          accountId,
-          recommendedRetailerId,
-        )
         const { data: waConfig } = await db
           .from('whatsapp_config')
           .select('catalog_id')
           .eq('account_id', accountId)
           .maybeSingle()
-        if (product && waConfig?.catalog_id) {
-          await engineSendProduct({
-            accountId,
-            userId: configOwnerUserId,
-            conversationId,
-            contactId,
-            catalogId: waConfig.catalog_id,
-            productRetailerId: product.retailerId,
-            aiGenerated: true,
-          })
+
+        if (waConfig?.catalog_id) {
+          if (recommendedRetailerIds.length === 1) {
+            const product = await resolveCatalogProduct(
+              db,
+              accountId,
+              recommendedRetailerIds[0],
+            )
+            if (product) {
+              await engineSendProduct({
+                accountId,
+                userId: configOwnerUserId,
+                conversationId,
+                contactId,
+                catalogId: waConfig.catalog_id,
+                productRetailerId: product.retailerId,
+                aiGenerated: true,
+              })
+            }
+          } else {
+            const products = await resolveCatalogProducts(
+              db,
+              accountId,
+              recommendedRetailerIds,
+            )
+            if (products.length > 0) {
+              await engineSendProductList({
+                accountId,
+                userId: configOwnerUserId,
+                conversationId,
+                contactId,
+                catalogId: waConfig.catalog_id,
+                headerText: 'Opciones disponibles',
+                bodyText: 'Elige la que te interese:',
+                sections: [
+                  { productRetailerIds: products.map((p) => p.retailerId) },
+                ],
+                aiGenerated: true,
+              })
+            }
+          }
         }
       } catch (err) {
-        console.error('[ai auto-reply] product card send failed:', err)
+        console.error('[ai auto-reply] product card/list send failed:', err)
       }
     }
   } catch (err) {

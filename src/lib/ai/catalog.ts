@@ -75,6 +75,35 @@ export async function retrieveCatalogProducts(
 }
 
 /**
+ * Validate several `retailer_id`s the model recommended via the
+ * `[[PRODUCTS:...]]` sentinel — same trust model as
+ * `resolveCatalogProduct`, batched into one query. Silently drops any
+ * id that doesn't resolve (hallucinated or since-removed) rather than
+ * failing the whole list.
+ */
+export async function resolveCatalogProducts(
+  db: SupabaseClient,
+  accountId: string,
+  retailerIds: string[],
+): Promise<CatalogProductCandidate[]> {
+  const ids = retailerIds.map((id) => id.trim()).filter(Boolean)
+  if (ids.length === 0) return []
+  try {
+    const { data, error } = await db
+      .from('catalog_products')
+      .select('retailer_id, name, description, price, currency, image_url')
+      .eq('account_id', accountId)
+      .eq('is_stale', false)
+      .in('retailer_id', ids)
+    if (error || !Array.isArray(data)) return []
+    return (data as CatalogProductRow[]).map(toCandidate)
+  } catch (err) {
+    console.error('[ai catalog] batch resolve failed:', err)
+    return []
+  }
+}
+
+/**
  * Validate a `retailer_id` the model recommended via the `[[PRODUCT:...]]`
  * sentinel against the account's synced catalog before trusting it — the
  * model can hallucinate an id or reference a since-removed product.

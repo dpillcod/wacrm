@@ -5,7 +5,12 @@ import {
   type ChatMessage,
   type GenerateResult,
 } from './types'
-import { HANDOFF_SENTINEL, PRODUCT_SENTINEL_REGEX, aiRequestTimeoutMs } from './defaults'
+import {
+  HANDOFF_SENTINEL,
+  PRODUCT_SENTINEL_REGEX,
+  PRODUCT_LIST_SENTINEL_REGEX,
+  aiRequestTimeoutMs,
+} from './defaults'
 import { generateOpenAi } from './providers/openai'
 import { generateAnthropic } from './providers/anthropic'
 
@@ -53,25 +58,37 @@ export async function generateReply(args: GenerateArgs): Promise<GenerateResult>
 
 /**
  * Split the raw model output into `{ text, handoff, usage,
- * recommendedRetailerId }`. The handoff sentinel can appear alone or
+ * recommendedRetailerIds }`. The handoff sentinel can appear alone or
  * trailing a partial reply; either way we treat the turn as a handoff
- * and strip the marker from any remaining text. The product sentinel
- * (if present) is extracted and stripped the same way — its id is
- * returned as-is, UNVALIDATED; the caller must confirm it exists in
- * `catalog_products` before trusting it. `usage` is passed straight
- * through (null when the provider didn't report it).
+ * and strip the marker from any remaining text. Exactly one of the two
+ * product sentinels is expected (single `[[PRODUCT:id]]` or list
+ * `[[PRODUCTS:id1,id2]]`) — the list form wins if the model mistakenly
+ * emits both. Ids are returned as-is, UNVALIDATED; the caller must
+ * confirm each exists in `catalog_products` before trusting it. `usage`
+ * is passed straight through (null when the provider didn't report it).
  */
 export function parseGeneration(
   raw: string,
   usage: AiUsage | null = null,
 ): GenerateResult {
   const handoff = raw.includes(HANDOFF_SENTINEL)
-  const productMatch = raw.match(PRODUCT_SENTINEL_REGEX)
-  const recommendedRetailerId = productMatch ? productMatch[1] : null
+
+  const listMatch = raw.match(PRODUCT_LIST_SENTINEL_REGEX)
+  const singleMatch = raw.match(PRODUCT_SENTINEL_REGEX)
+  const recommendedRetailerIds = listMatch
+    ? listMatch[1]
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean)
+    : singleMatch
+      ? [singleMatch[1]]
+      : []
+
   const text = raw
     .split(HANDOFF_SENTINEL)
     .join('')
+    .replace(PRODUCT_LIST_SENTINEL_REGEX, '')
     .replace(PRODUCT_SENTINEL_REGEX, '')
     .trim()
-  return { text, handoff, usage, recommendedRetailerId }
+  return { text, handoff, usage, recommendedRetailerIds }
 }

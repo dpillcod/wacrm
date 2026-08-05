@@ -32,6 +32,17 @@ export const HANDOFF_SENTINEL = '[[HANDOFF]]'
  */
 export const PRODUCT_SENTINEL_REGEX = /\[\[PRODUCT:\s*([^\]]+?)\s*\]\]/
 
+/**
+ * Sentinel for recommending SEVERAL catalog products at once, e.g.
+ * `[[PRODUCTS:sku-1,sku-2,sku-3]]` — used when more than one candidate
+ * clearly matches an ambiguous request ("¿qué camarón tienen?") so the
+ * customer can pick from a native WhatsApp product list instead of the
+ * single-product card. Same trust model as `PRODUCT_SENTINEL_REGEX`:
+ * parsed and stripped by `generateReply`, ids unvalidated until the
+ * caller checks them against the synced catalog.
+ */
+export const PRODUCT_LIST_SENTINEL_REGEX = /\[\[PRODUCTS:\s*([^\]]+?)\s*\]\]/
+
 /** Cap on generated reply length — keeps WhatsApp replies short and
  *  bounds token spend on the caller's own key. */
 export const MAX_OUTPUT_TOKENS = 1024
@@ -114,9 +125,13 @@ export function buildSystemPrompt(args: {
     parts.push(
       'Product catalog — candidates that may be relevant to this conversation, retrieved from the business\'s own catalog:\n\n' +
         `${list}\n\n` +
-        'If (and only if) one of these clearly matches what the customer is asking about, end your reply with ' +
+        'If exactly ONE of these clearly matches what the customer is asking about, end your reply with ' +
         'exactly `[[PRODUCT:<retailer_id>]]` using the exact retailer_id from the list above (nothing else on that line). ' +
-        'Never invent a retailer_id, and never use one that is not in this list. Omit this entirely if nothing here matches.',
+        'If the request is broader and SEVERAL of these are relevant options for the customer to choose between ' +
+        '(e.g. they asked about a type of product and multiple variants match), end your reply instead with ' +
+        'exactly `[[PRODUCTS:<retailer_id_1>,<retailer_id_2>,...]]` listing 2 or more exact retailer_ids from above, comma-separated, nothing else on that line. ' +
+        'Use only one of the two sentinels, never both. Never invent a retailer_id, and never use one that is not in this list. ' +
+        'Omit both entirely if nothing here matches.',
     )
   }
 

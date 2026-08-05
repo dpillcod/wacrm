@@ -67,11 +67,12 @@ export interface GenerateResult {
   handoff: boolean
   /** Provider token usage for this call, or null when unavailable. */
   usage: AiUsage | null
-  /** Catalog `retailer_id` the model recommended via the `[[PRODUCT:...]]`
-   *  sentinel, or null if it didn't recommend one. Unvalidated — the
-   *  caller must confirm this id exists in `catalog_products` before
-   *  trusting it (the model can hallucinate one). */
-  recommendedRetailerId: string | null
+  /** Catalog `retailer_id`s the model recommended via the `[[PRODUCT:...]]`
+   *  (single) or `[[PRODUCTS:...]]` (several) sentinel — empty if it
+   *  didn't recommend any. Unvalidated — the caller must confirm each id
+   *  exists in `catalog_products` before trusting it (the model can
+   *  hallucinate one). */
+  recommendedRetailerIds: string[]
 }
 
 /**

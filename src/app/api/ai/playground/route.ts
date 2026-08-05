@@ -3,7 +3,7 @@ import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
 import { loadAiConfig } from '@/lib/ai/config'
 import { retrieveKnowledge } from '@/lib/ai/knowledge'
-import { retrieveCatalogProducts, resolveCatalogProduct } from '@/lib/ai/catalog'
+import { retrieveCatalogProducts, resolveCatalogProducts } from '@/lib/ai/catalog'
 import { generateReply } from '@/lib/ai/generate'
 import { buildSystemPrompt } from '@/lib/ai/defaults'
 import { latestUserMessage } from '@/lib/ai/query'
@@ -97,22 +97,22 @@ export async function POST(request: Request) {
       })),
     })
 
-    const { text, handoff, recommendedRetailerId } = await generateReply({
+    const { text, handoff, recommendedRetailerIds } = await generateReply({
       config,
       systemPrompt,
       messages,
     })
 
-    let recommendedProduct = null as Awaited<ReturnType<typeof resolveCatalogProduct>>
-    if (config.productSuggestionsEnabled && recommendedRetailerId) {
-      recommendedProduct = await resolveCatalogProduct(
+    let recommendedProducts: Awaited<ReturnType<typeof resolveCatalogProducts>> = []
+    if (config.productSuggestionsEnabled && recommendedRetailerIds.length > 0) {
+      recommendedProducts = await resolveCatalogProducts(
         supabase,
         accountId,
-        recommendedRetailerId,
+        recommendedRetailerIds,
       )
     }
 
-    return NextResponse.json({ reply: text, handoff, recommendedProduct })
+    return NextResponse.json({ reply: text, handoff, recommendedProducts })
   } catch (err) {
     if (err instanceof AiError) {
       return NextResponse.json(

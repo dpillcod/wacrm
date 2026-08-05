@@ -45,7 +45,7 @@ describe('parseGeneration', () => {
       text: 'Hello there',
       handoff: false,
       usage: null,
-      recommendedRetailerId: null,
+      recommendedRetailerIds: [],
     })
   })
 
@@ -54,13 +54,13 @@ describe('parseGeneration', () => {
       text: '',
       handoff: true,
       usage: null,
-      recommendedRetailerId: null,
+      recommendedRetailerIds: [],
     })
     expect(parseGeneration('Let me get a human [[HANDOFF]]')).toEqual({
       text: 'Let me get a human',
       handoff: true,
       usage: null,
-      recommendedRetailerId: null,
+      recommendedRetailerIds: [],
     })
   })
 
@@ -70,7 +70,7 @@ describe('parseGeneration', () => {
       text: 'Hi',
       handoff: false,
       usage,
-      recommendedRetailerId: null,
+      recommendedRetailerIds: [],
     })
   })
 
@@ -79,7 +79,7 @@ describe('parseGeneration', () => {
       text: 'Here you go',
       handoff: false,
       usage: null,
-      recommendedRetailerId: 'sku-123',
+      recommendedRetailerIds: ['sku-123'],
     })
   })
 
@@ -88,12 +88,36 @@ describe('parseGeneration', () => {
       text: '',
       handoff: false,
       usage: null,
-      recommendedRetailerId: 'sku-123',
+      recommendedRetailerIds: ['sku-123'],
     })
   })
 
-  it('returns null recommendedRetailerId when no product sentinel is present', () => {
-    expect(parseGeneration('Just a normal reply').recommendedRetailerId).toBeNull()
+  it('returns an empty list when no product sentinel is present', () => {
+    expect(parseGeneration('Just a normal reply').recommendedRetailerIds).toEqual([])
+  })
+
+  it('detects + strips the product list sentinel', () => {
+    expect(
+      parseGeneration('Here are some options [[PRODUCTS:sku-1,sku-2,sku-3]]'),
+    ).toEqual({
+      text: 'Here are some options',
+      handoff: false,
+      usage: null,
+      recommendedRetailerIds: ['sku-1', 'sku-2', 'sku-3'],
+    })
+  })
+
+  it('trims whitespace around each id in the product list sentinel', () => {
+    expect(parseGeneration('[[PRODUCTS: sku-1 , sku-2 ]]').recommendedRetailerIds).toEqual([
+      'sku-1',
+      'sku-2',
+    ])
+  })
+
+  it('prefers the list sentinel when the model emits both by mistake', () => {
+    expect(
+      parseGeneration('[[PRODUCT:sku-1]] [[PRODUCTS:sku-1,sku-2]]').recommendedRetailerIds,
+    ).toEqual(['sku-1', 'sku-2'])
   })
 })
 
@@ -117,7 +141,7 @@ describe('generateReply — OpenAI', () => {
       text: 'Sure — happy to help!',
       handoff: false,
       usage: { promptTokens: 42, completionTokens: 8, totalTokens: 50 },
-      recommendedRetailerId: null,
+      recommendedRetailerIds: [],
     })
     const [url, opts] = fetchMock.mock.calls[0]
     expect(url).toContain('api.openai.com')
@@ -177,7 +201,7 @@ describe('generateReply — Anthropic', () => {
       text: 'Hi there!',
       handoff: false,
       usage: { promptTokens: 30, completionTokens: 6, totalTokens: 36 },
-      recommendedRetailerId: null,
+      recommendedRetailerIds: [],
     })
     const [url, opts] = fetchMock.mock.calls[0]
     expect(url).toContain('api.anthropic.com')

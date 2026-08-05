@@ -115,7 +115,7 @@ export async function POST(request: Request) {
       })),
     })
 
-    const { text, usage, recommendedRetailerId } = await generateReply({
+    const { text, usage, recommendedRetailerIds } = await generateReply({
       config,
       systemPrompt,
       messages,
@@ -123,14 +123,17 @@ export async function POST(request: Request) {
 
     // Resolve (never trust the model's id outright) but never send —
     // this route stays side-effect-free, the agent reviews and attaches
-    // the suggestion themselves.
+    // the suggestion themselves. The composer's one-click attach only
+    // handles a single product; when the model recommended several
+    // (an ambiguous request), surface just the top candidate here — the
+    // agent can still open the full picker for the rest.
     let suggestedProduct = null as Awaited<ReturnType<typeof resolveCatalogProduct>>
     let catalogId: string | null = null
-    if (config.productSuggestionsEnabled && recommendedRetailerId) {
+    if (config.productSuggestionsEnabled && recommendedRetailerIds.length > 0) {
       suggestedProduct = await resolveCatalogProduct(
         supabase,
         accountId,
-        recommendedRetailerId,
+        recommendedRetailerIds[0],
       )
       if (suggestedProduct) {
         const { data: waConfig } = await supabase
