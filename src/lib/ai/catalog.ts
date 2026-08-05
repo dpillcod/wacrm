@@ -39,6 +39,37 @@ function toCandidate(row: CatalogProductRow): CatalogProductCandidate {
   }
 }
 
+// Common Spanish filler words that show up in a customer's phrasing
+// but never in a product name — searching the whole message ("tiene
+// arrocillo?") against a short product name via trigram similarity
+// dilutes the score enough that a real match can fall under the
+// threshold. Stripping these before searching per-word (see below)
+// keeps the signal on the actual product term.
+const SPANISH_STOPWORDS = new Set([
+  'el', 'la', 'los', 'las', 'de', 'del', 'con', 'por', 'para', 'un', 'una',
+  'unos', 'unas', 'si', 'sí', 'no', 'me', 'te', 'se', 'en', 'y', 'o', 'que',
+  'tiene', 'tienen', 'hay', 'cuanto', 'cuánto', 'cuanta', 'cuánta', 'cuesta',
+  'vale', 'precio', 'quiero', 'necesito', 'dame', 'podria', 'podría',
+  'puede', 'puedo', 'porfa', 'favor', 'gracias', 'hola', 'buenas', 'buenos',
+  'dias', 'días', 'tardes', 'noches', 'algo', 'como', 'cómo', 'ese', 'esa',
+  'esos', 'esas', 'aun', 'aún', 'todavia', 'todavía', 'tambien', 'también',
+])
+
+async function searchOnce(
+  db: SupabaseClient,
+  accountId: string,
+  query: string,
+  k: number,
+): Promise<CatalogProductCandidate[]> {
+  const { data, error } = await db.rpc('search_catalog_products', {
+    p_account_id: accountId,
+    p_query: query,
+    p_limit: k,
+  })
+  if (error || !Array.isArray(data)) return []
+  return (data as CatalogProductRow[]).map(toCandidate)
+}
+
 /**
  * Retrieve up to `k` catalog products whose name/description match
  * `queryText`. Best-effort: any failure (no catalog synced, DB error)
@@ -60,14 +91,35 @@ export async function retrieveCatalogProducts(
     // tokenization ("Nutrileche" vs "NUTRI LECHE") and Spanish
     // singular/plural variants ("camarones" vs "CAMARON") both still
     // match without hand-rolled word-splitting heuristics.
-    const { data, error } = await db.rpc('search_catalog_products', {
-      p_account_id: accountId,
-      p_query: query,
-      p_limit: k,
-    })
+    //
+    // Also searched per significant word (stopwords/short words
+    // dropped): a whole sentence like "tiene arrocillo?" scores lower
+    // against a short product name than the bare word "arrocillo"
+    // does, since the filler words dilute the trigram overlap — this
+    // caused the same product to be found on one turn and missed on
+    // another depending on how the customer phrased the question.
+    const words = query
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length >= 4 && !SPANISH_STOPWORDS.has(w))
 
-    if (error || !Array.isArray(data)) return []
-    return (data as CatalogProductRow[]).map(toCandidate)
+    const queries = [query, ...new Set(words)]
+    const results = await Promise.all(
+      queries.map((q) => searchOnce(db, accountId, q, k)),
+    )
+
+    const seen = new Set<string>()
+    const merged: CatalogProductCandidate[] = []
+    for (const batch of results) {
+      for (const candidate of batch) {
+        if (seen.has(candidate.retailerId)) continue
+        seen.add(candidate.retailerId)
+        merged.push(candidate)
+        if (merged.length >= k) return merged
+      }
+    }
+    return merged
   } catch (err) {
     console.error('[ai catalog] retrieval failed:', err)
     return []

@@ -25,12 +25,31 @@ interface MetaCatalogProduct {
   image_url?: string
 }
 
-/** Meta returns price as a formatted string (e.g. "12.99 USD" or "1299"). */
+/**
+ * Meta returns price as a locale-formatted string — e.g. "12.99 USD"
+ * for an English-locale catalog, but "$6,20" (comma decimal
+ * separator) for a Spanish-locale one. A naive `[\d.]+` match on the
+ * latter silently truncated at the comma, dropping the cents
+ * entirely (6,20 -> 6). Handles both single-separator cases and the
+ * "thousands + decimal" case by treating whichever of , or . appears
+ * LAST as the decimal separator.
+ */
 function parsePrice(raw: string | undefined): number | null {
   if (!raw) return null
-  const match = raw.match(/[\d.]+/)
+  const match = raw.match(/[\d.,]+/)
   if (!match) return null
-  const value = Number.parseFloat(match[0])
+  let numStr = match[0]
+  const hasComma = numStr.includes(',')
+  const hasDot = numStr.includes('.')
+  if (hasComma && hasDot) {
+    numStr =
+      numStr.lastIndexOf(',') > numStr.lastIndexOf('.')
+        ? numStr.replace(/\./g, '').replace(',', '.')
+        : numStr.replace(/,/g, '')
+  } else if (hasComma) {
+    numStr = numStr.replace(',', '.')
+  }
+  const value = Number.parseFloat(numStr)
   return Number.isFinite(value) ? value : null
 }
 

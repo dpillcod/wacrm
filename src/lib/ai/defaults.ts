@@ -146,13 +146,16 @@ export function buildSystemPrompt(args: {
     const list = catalogCandidates
       .map((p) => {
         const price =
-          p.price != null ? ` — ${p.price}${p.currency ? ` ${p.currency}` : ''}` : ''
+          p.price != null
+            ? ` — ${p.price.toFixed(2)}${p.currency ? ` ${p.currency}` : ''}`
+            : ''
         return `- retailer_id: ${p.retailerId} | ${p.name}${price}`
       })
       .join('\n')
     parts.push(
       'Product catalog — candidates that may be relevant to this conversation, retrieved from the business\'s own catalog:\n\n' +
         `${list}\n\n` +
+        'When you mention a price to the customer, state it EXACTLY as written above, including both decimal digits (e.g. "6.20", never round or truncate to "6"). ' +
         'If exactly ONE of these clearly matches what the customer is asking about, end your reply with ' +
         'exactly `[[PRODUCT:<retailer_id>]]` using the exact retailer_id from the list above (nothing else on that line). ' +
         'If the request is broader and SEVERAL of these are relevant options for the customer to choose between ' +
