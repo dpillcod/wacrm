@@ -172,7 +172,9 @@ export function buildSystemPrompt(args: {
         '- If the customer clearly states they want to ORDER a specific quantity of an item from the product catalog list above ' +
         '(not just asking about it), add a `[[CART_ADD:<retailer_id>:<quantity>]]` line for each such item, using the exact retailer_id from the catalog list. ' +
         'quantity is a whole number and must be the TOTAL quantity the customer now wants of that item (not how many more to add). ' +
-        'You can include several CART_ADD sentinels in one reply if they ordered several items at once. Never use a retailer_id not in the catalog list.\n' +
+        'You can include several CART_ADD sentinels in one reply if they ordered several items at once (whether they listed them all in one message or one at a time) — never use a retailer_id not in the catalog list.\n' +
+        '- Whenever you add item(s) with CART_ADD, your visible reply text MUST restate exactly what you understood — each product name and quantity (and price, with both decimal digits) — before the sentinel(s), ' +
+        'so the customer can immediately correct you if a quantity or item was misread, especially when they listed several products in one message. Never add an item silently.\n' +
         '- If the customer asks for their total / "cuánto sería" / "cuánto es la cuenta" / how much they owe so far, ' +
         `do NOT state or compute any number yourself — never guess a total. Instead say something like "dame un momento, calculo tu pedido" and end the reply with exactly ${CART_TOTAL_SENTINEL} on its own; ` +
         'the real total (computed from actual catalog prices) will be sent right after as a follow-up message.\n' +
