@@ -801,6 +801,11 @@ async function processMessage(
   // the account has enabled it. Awaited inside `after()` (same reason as
   // the webhook dispatch below); `dispatchInboundToAiReply` owns its
   // eligibility gates + try/catch and never throws.
+  console.log('[webhook] ai auto-reply gate check', {
+    flowConsumed,
+    interactiveReplyId,
+    inboundTextLength: inboundText.trim().length,
+  })
   if (!flowConsumed && !interactiveReplyId && inboundText.trim()) {
     await dispatchInboundToAiReply({
       accountId,

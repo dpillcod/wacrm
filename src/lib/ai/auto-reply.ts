@@ -44,12 +44,19 @@ export async function dispatchInboundToAiReply(
   args: DispatchArgs,
 ): Promise<void> {
   const { accountId, conversationId, contactId, configOwnerUserId } = args
+  console.log(`[ai auto-reply] dispatch invoked for conversation ${conversationId}`)
 
   try {
     const db = supabaseAdmin()
 
     const config = await loadAiConfig(db, accountId)
-    if (!config || !config.autoReplyEnabled) return
+    if (!config || !config.autoReplyEnabled) {
+      console.log('[ai auto-reply] skipped: not configured or disabled', {
+        hasConfig: !!config,
+        autoReplyEnabled: config?.autoReplyEnabled,
+      })
+      return
+    }
 
     // Deterministic, user-configured responders win over the LLM — the
     // caller already excludes messages a Flow consumed. Message-level
@@ -66,22 +73,40 @@ export async function dispatchInboundToAiReply(
       .eq('is_active', true)
       .in('trigger_type', ['new_message_received', 'keyword_match'])
       .limit(1)
-    if (autoResponders && autoResponders.length > 0) return
+    if (autoResponders && autoResponders.length > 0) {
+      console.log('[ai auto-reply] skipped: an active new_message_received/keyword_match automation exists')
+      return
+    }
 
     const { data: conv, error: convErr } = await db
       .from('conversations')
       .select('assigned_agent_id, ai_autoreply_disabled, ai_reply_count')
       .eq('id', conversationId)
       .maybeSingle()
-    if (convErr || !conv) return
-    if (conv.assigned_agent_id) return // a human owns this thread
-    if (conv.ai_autoreply_disabled) return // handed off / turned off here
+    if (convErr || !conv) {
+      console.log('[ai auto-reply] skipped: conversation lookup failed', convErr)
+      return
+    }
+    if (conv.assigned_agent_id) {
+      console.log('[ai auto-reply] skipped: conversation has a human assigned_agent_id')
+      return // a human owns this thread
+    }
+    if (conv.ai_autoreply_disabled) {
+      console.log('[ai auto-reply] skipped: ai_autoreply_disabled is true')
+      return // handed off / turned off here
+    }
     // Cheap early-out; the authoritative cap check is the atomic claim
     // below (this read can race a concurrent inbound).
-    if (conv.ai_reply_count >= config.autoReplyMaxPerConversation) return
+    if (conv.ai_reply_count >= config.autoReplyMaxPerConversation) {
+      console.log('[ai auto-reply] skipped: per-conversation reply cap reached', conv.ai_reply_count)
+      return
+    }
 
     const messages = await buildConversationContext(db, conversationId)
-    if (messages.length === 0) return
+    if (messages.length === 0) {
+      console.log('[ai auto-reply] skipped: buildConversationContext returned no messages')
+      return
+    }
 
     // Account-wide throttle on the shared BYO key. The per-conversation
     // cap bounds one thread; this bounds a burst across many threads (a
@@ -122,11 +147,13 @@ export async function dispatchInboundToAiReply(
       })),
     })
 
+    console.log('[ai auto-reply] calling provider', { provider: config.provider, model: config.model })
     const { text, handoff, usage, recommendedRetailerIds } = await generateReply({
       config,
       systemPrompt,
       messages,
     })
+    console.log('[ai auto-reply] provider responded', { handoff, textLength: text?.length ?? 0 })
 
     // Record token spend on the account's BYO key. Fire-and-forget so it
     // never adds latency to the customer-facing send: `logAiUsage`
@@ -187,8 +214,12 @@ export async function dispatchInboundToAiReply(
       console.error('[ai auto-reply] claim_ai_reply_slot failed:', claimErr)
       return
     }
-    if (claimed !== true) return // lost the per-conversation cap race
+    if (claimed !== true) {
+      console.log('[ai auto-reply] skipped: lost claim_ai_reply_slot race', { claimed })
+      return
+    }
 
+    console.log('[ai auto-reply] sending text reply to Meta')
     await engineSendText({
       accountId,
       userId: configOwnerUserId,
