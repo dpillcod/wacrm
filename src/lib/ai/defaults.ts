@@ -43,6 +43,27 @@ export const PRODUCT_SENTINEL_REGEX = /\[\[PRODUCT:\s*([^\]]+?)\s*\]\]/
  */
 export const PRODUCT_LIST_SENTINEL_REGEX = /\[\[PRODUCTS:\s*([^\]]+?)\s*\]\]/
 
+/**
+ * Sentinel the model emits to add/update a line item in the
+ * conversation's order cart, e.g. `[[CART_ADD:sku-123:2]]` for 2 units
+ * of that product. A reply can contain several of these (one per item
+ * the customer just ordered) — matched with a global regex, unlike
+ * the single-shot product sentinels above. The quantity is the
+ * customer's TOTAL desired quantity of that item, not a delta.
+ * Ids/quantities are UNVALIDATED here — `addCartItem` (cart.ts) checks
+ * the id against the synced catalog and computes the real price;
+ * nothing here is ever trusted as a price.
+ */
+export const CART_ADD_SENTINEL_REGEX = /\[\[CART_ADD:\s*([^:\]]+?)\s*:\s*(\d+)\s*\]\]/g
+
+/**
+ * Sentinel the model emits when the customer asks for their order
+ * total / cuenta / cuánto sería. Signals the caller to compute the
+ * real total from the cart (never from the model's own arithmetic)
+ * and send it as a follow-up message.
+ */
+export const CART_TOTAL_SENTINEL = '[[CART_TOTAL]]'
+
 /** Cap on generated reply length — keeps WhatsApp replies short and
  *  bounds token spend on the caller's own key. */
 export const MAX_OUTPUT_TOKENS = 1024
@@ -78,8 +99,14 @@ export function buildSystemPrompt(args: {
   /** Catalog products relevant to the current question — only passed
    *  when the account has opted into product suggestions. */
   catalogCandidates?: { retailerId: string; name: string; price: number | null; currency: string | null }[]
+  /** Whether the account has product suggestions (and therefore cart
+   *  tracking) enabled at all — independent of whether THIS turn's
+   *  question happened to retrieve any catalog candidates, since a
+   *  customer asking "how much is my total?" won't match any product
+   *  by name but still needs to be able to trigger CART_TOTAL. */
+  cartEnabled?: boolean
 }): string {
-  const { userPrompt, mode, knowledge, catalogCandidates } = args
+  const { userPrompt, mode, knowledge, catalogCandidates, cartEnabled } = args
   const parts: string[] = [
     'You are a customer-messaging assistant for a business that uses a WhatsApp CRM. ' +
       'You are shown the recent WhatsApp conversation between the business (assistant) and a customer (user). ' +
@@ -132,6 +159,21 @@ export function buildSystemPrompt(args: {
         'exactly `[[PRODUCTS:<retailer_id_1>,<retailer_id_2>,...]]` listing 2 or more exact retailer_ids from above, comma-separated, nothing else on that line. ' +
         'Use only one of the two sentinels, never both. Never invent a retailer_id, and never use one that is not in this list. ' +
         'Omit both entirely if nothing here matches.',
+    )
+  }
+
+  if (cartEnabled) {
+    parts.push(
+      'Order cart — you can track what the customer wants to buy across the conversation, so their total is computed for real instead of guessed:\n\n' +
+        '- If the customer clearly states they want to ORDER a specific quantity of an item from the product catalog list above ' +
+        '(not just asking about it), add a `[[CART_ADD:<retailer_id>:<quantity>]]` line for each such item, using the exact retailer_id from the catalog list. ' +
+        'quantity is a whole number and must be the TOTAL quantity the customer now wants of that item (not how many more to add). ' +
+        'You can include several CART_ADD sentinels in one reply if they ordered several items at once. Never use a retailer_id not in the catalog list.\n' +
+        '- If the customer asks for their total / "cuánto sería" / "cuánto es la cuenta" / how much they owe so far, ' +
+        `do NOT state or compute any number yourself — never guess a total. Instead say something like "dame un momento, calculo tu pedido" and end the reply with exactly ${CART_TOTAL_SENTINEL} on its own; ` +
+        'the real total (computed from actual catalog prices) will be sent right after as a follow-up message.\n' +
+        '- These are independent of the single/multi product-recommendation sentinels above — use CART_ADD when the customer is ordering, ' +
+        'the product sentinels when they are browsing or asking what is available.',
     )
   }
 

@@ -73,6 +73,15 @@ export interface GenerateResult {
    *  exists in `catalog_products` before trusting it (the model can
    *  hallucinate one). */
   recommendedRetailerIds: string[]
+  /** Cart line items the model asked to add/update via
+   *  `[[CART_ADD:id:qty]]`, one entry per sentinel found. Unvalidated —
+   *  `addCartItem` (cart.ts) checks each id against the synced catalog
+   *  before writing it; nothing here is a trusted price. */
+  cartAdds: { retailerId: string; quantity: number }[]
+  /** True when the model signalled `[[CART_TOTAL]]` — the customer
+   *  asked for their order total and the caller should compute and
+   *  send the real one from the cart. */
+  wantsCartTotal: boolean
 }
 
 /**

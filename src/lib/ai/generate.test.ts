@@ -46,6 +46,8 @@ describe('parseGeneration', () => {
       handoff: false,
       usage: null,
       recommendedRetailerIds: [],
+      cartAdds: [],
+      wantsCartTotal: false,
     })
   })
 
@@ -55,12 +57,16 @@ describe('parseGeneration', () => {
       handoff: true,
       usage: null,
       recommendedRetailerIds: [],
+      cartAdds: [],
+      wantsCartTotal: false,
     })
     expect(parseGeneration('Let me get a human [[HANDOFF]]')).toEqual({
       text: 'Let me get a human',
       handoff: true,
       usage: null,
       recommendedRetailerIds: [],
+      cartAdds: [],
+      wantsCartTotal: false,
     })
   })
 
@@ -71,6 +77,8 @@ describe('parseGeneration', () => {
       handoff: false,
       usage,
       recommendedRetailerIds: [],
+      cartAdds: [],
+      wantsCartTotal: false,
     })
   })
 
@@ -80,6 +88,8 @@ describe('parseGeneration', () => {
       handoff: false,
       usage: null,
       recommendedRetailerIds: ['sku-123'],
+      cartAdds: [],
+      wantsCartTotal: false,
     })
   })
 
@@ -89,6 +99,8 @@ describe('parseGeneration', () => {
       handoff: false,
       usage: null,
       recommendedRetailerIds: ['sku-123'],
+      cartAdds: [],
+      wantsCartTotal: false,
     })
   })
 
@@ -104,6 +116,8 @@ describe('parseGeneration', () => {
       handoff: false,
       usage: null,
       recommendedRetailerIds: ['sku-1', 'sku-2', 'sku-3'],
+      cartAdds: [],
+      wantsCartTotal: false,
     })
   })
 
@@ -118,6 +132,45 @@ describe('parseGeneration', () => {
     expect(
       parseGeneration('[[PRODUCT:sku-1]] [[PRODUCTS:sku-1,sku-2]]').recommendedRetailerIds,
     ).toEqual(['sku-1', 'sku-2'])
+  })
+
+  it('detects + strips a single cart-add sentinel', () => {
+    expect(parseGeneration('Listo, agregado [[CART_ADD:sku-1:2]]')).toEqual({
+      text: 'Listo, agregado',
+      handoff: false,
+      usage: null,
+      recommendedRetailerIds: [],
+      cartAdds: [{ retailerId: 'sku-1', quantity: 2 }],
+      wantsCartTotal: false,
+    })
+  })
+
+  it('collects several cart-add sentinels from one reply', () => {
+    const result = parseGeneration(
+      'Perfecto [[CART_ADD:sku-1:2]] [[CART_ADD:sku-2:1]]',
+    )
+    expect(result.text).toBe('Perfecto')
+    expect(result.cartAdds).toEqual([
+      { retailerId: 'sku-1', quantity: 2 },
+      { retailerId: 'sku-2', quantity: 1 },
+    ])
+  })
+
+  it('detects + strips the cart-total sentinel', () => {
+    expect(parseGeneration('Un momento, calculo su pedido [[CART_TOTAL]]')).toEqual({
+      text: 'Un momento, calculo su pedido',
+      handoff: false,
+      usage: null,
+      recommendedRetailerIds: [],
+      cartAdds: [],
+      wantsCartTotal: true,
+    })
+  })
+
+  it('returns false for wantsCartTotal and [] for cartAdds by default', () => {
+    const result = parseGeneration('Just a normal reply')
+    expect(result.wantsCartTotal).toBe(false)
+    expect(result.cartAdds).toEqual([])
   })
 })
 
@@ -142,6 +195,8 @@ describe('generateReply — OpenAI', () => {
       handoff: false,
       usage: { promptTokens: 42, completionTokens: 8, totalTokens: 50 },
       recommendedRetailerIds: [],
+      cartAdds: [],
+      wantsCartTotal: false,
     })
     const [url, opts] = fetchMock.mock.calls[0]
     expect(url).toContain('api.openai.com')
@@ -202,6 +257,8 @@ describe('generateReply — Anthropic', () => {
       handoff: false,
       usage: { promptTokens: 30, completionTokens: 6, totalTokens: 36 },
       recommendedRetailerIds: [],
+      cartAdds: [],
+      wantsCartTotal: false,
     })
     const [url, opts] = fetchMock.mock.calls[0]
     expect(url).toContain('api.anthropic.com')

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Bot, RotateCcw, Send, Loader2, UserCircle2, ArrowRight, Package } from 'lucide-react';
+import { Bot, RotateCcw, Send, Loader2, UserCircle2, ArrowRight, Package, ShoppingCart } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 
@@ -10,6 +10,10 @@ interface RecommendedProduct {
   name: string;
   price: number | null;
   currency: string | null;
+}
+
+interface CartAddPreviewItem extends RecommendedProduct {
+  quantity: number;
 }
 
 interface Turn {
@@ -20,6 +24,13 @@ interface Turn {
   /** assistant-only: catalog products the agent recommended, if any —
    *  one entry for a single-product card, several for a product list. */
   recommendedProducts?: RecommendedProduct[];
+  /** assistant-only: items the agent would add to the order cart on
+   *  this turn. Preview only — the Playground has no real conversation
+   *  to persist a cart against. */
+  cartAddPreview?: CartAddPreviewItem[];
+  cartAddPreviewTotal?: { total: number; currency: string | null } | null;
+  /** assistant-only: the customer asked for their order total. */
+  wantsCartTotal?: boolean;
 }
 
 export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
@@ -73,6 +84,9 @@ export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
           recommendedProducts: Array.isArray(data.recommendedProducts)
             ? data.recommendedProducts
             : [],
+          cartAddPreview: Array.isArray(data.cartAddPreview) ? data.cartAddPreview : [],
+          cartAddPreviewTotal: data.cartAddPreviewTotal ?? null,
+          wantsCartTotal: Boolean(data.wantsCartTotal),
         },
       ]);
     } catch {
@@ -181,6 +195,47 @@ export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
                     ))}
                   </div>
                 )}
+              {t.role === 'assistant' &&
+                t.cartAddPreview &&
+                t.cartAddPreview.length > 0 && (
+                  <div
+                    className={cn(
+                      'space-y-1',
+                      (t.content || (t.recommendedProducts?.length ?? 0) > 0) && 'mt-1.5',
+                    )}
+                  >
+                    <p className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                      <ShoppingCart className="h-3 w-3" /> Would add to order cart:
+                    </p>
+                    {t.cartAddPreview.map((p, j) => (
+                      <div
+                        key={j}
+                        className="flex items-center gap-2 rounded-lg border border-border/50 bg-background/50 px-2.5 py-1.5 text-xs"
+                      >
+                        <span className="font-medium text-foreground">
+                          {p.quantity} x {p.name}
+                        </span>
+                        {p.price != null && (
+                          <span className="text-muted-foreground">
+                            {(p.price * p.quantity).toFixed(2)} {p.currency ?? 'USD'}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                    {t.cartAddPreviewTotal && (
+                      <p className="text-[11px] text-muted-foreground">
+                        Preview total: {t.cartAddPreviewTotal.total.toFixed(2)}{' '}
+                        {t.cartAddPreviewTotal.currency ?? 'USD'}
+                      </p>
+                    )}
+                  </div>
+                )}
+              {t.role === 'assistant' && t.wantsCartTotal && (
+                <p className="mt-1.5 flex items-center gap-1 text-xs text-primary">
+                  <ShoppingCart className="h-3.5 w-3.5" />
+                  Would send the real cart total here (needs a live conversation)
+                </p>
+              )}
               {t.role === 'assistant' && t.handoff && (
                 <p
                   className={cn(

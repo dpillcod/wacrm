@@ -9,6 +9,8 @@ import {
   HANDOFF_SENTINEL,
   PRODUCT_SENTINEL_REGEX,
   PRODUCT_LIST_SENTINEL_REGEX,
+  CART_ADD_SENTINEL_REGEX,
+  CART_TOTAL_SENTINEL,
   aiRequestTimeoutMs,
 } from './defaults'
 import { generateOpenAi } from './providers/openai'
@@ -58,14 +60,17 @@ export async function generateReply(args: GenerateArgs): Promise<GenerateResult>
 
 /**
  * Split the raw model output into `{ text, handoff, usage,
- * recommendedRetailerIds }`. The handoff sentinel can appear alone or
- * trailing a partial reply; either way we treat the turn as a handoff
- * and strip the marker from any remaining text. Exactly one of the two
- * product sentinels is expected (single `[[PRODUCT:id]]` or list
- * `[[PRODUCTS:id1,id2]]`) — the list form wins if the model mistakenly
- * emits both. Ids are returned as-is, UNVALIDATED; the caller must
- * confirm each exists in `catalog_products` before trusting it. `usage`
- * is passed straight through (null when the provider didn't report it).
+ * recommendedRetailerIds, cartAdds, wantsCartTotal }`. The handoff
+ * sentinel can appear alone or trailing a partial reply; either way we
+ * treat the turn as a handoff and strip the marker from any remaining
+ * text. Exactly one of the two product sentinels is expected (single
+ * `[[PRODUCT:id]]` or list `[[PRODUCTS:id1,id2]]`) — the list form
+ * wins if the model mistakenly emits both. `[[CART_ADD:id:qty]]` may
+ * appear multiple times (one per ordered item). All ids/quantities are
+ * returned as-is, UNVALIDATED; the caller must confirm each id exists
+ * in `catalog_products` (and never trust a price from here) before
+ * acting on it. `usage` is passed straight through (null when the
+ * provider didn't report it).
  */
 export function parseGeneration(
   raw: string,
@@ -84,11 +89,20 @@ export function parseGeneration(
       ? [singleMatch[1]]
       : []
 
+  const cartAdds = [...raw.matchAll(CART_ADD_SENTINEL_REGEX)].map((m) => ({
+    retailerId: m[1].trim(),
+    quantity: Number.parseInt(m[2], 10),
+  }))
+  const wantsCartTotal = raw.includes(CART_TOTAL_SENTINEL)
+
   const text = raw
     .split(HANDOFF_SENTINEL)
     .join('')
     .replace(PRODUCT_LIST_SENTINEL_REGEX, '')
     .replace(PRODUCT_SENTINEL_REGEX, '')
+    .replace(CART_ADD_SENTINEL_REGEX, '')
+    .split(CART_TOTAL_SENTINEL)
+    .join('')
     .trim()
-  return { text, handoff, usage, recommendedRetailerIds }
+  return { text, handoff, usage, recommendedRetailerIds, cartAdds, wantsCartTotal }
 }

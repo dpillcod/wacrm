@@ -4,6 +4,7 @@ import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit
 import { loadAiConfig } from '@/lib/ai/config'
 import { retrieveKnowledge } from '@/lib/ai/knowledge'
 import { retrieveCatalogProducts, resolveCatalogProducts } from '@/lib/ai/catalog'
+import { computeCartTotal } from '@/lib/ai/cart'
 import { generateReply } from '@/lib/ai/generate'
 import { buildSystemPrompt } from '@/lib/ai/defaults'
 import { latestUserMessage } from '@/lib/ai/query'
@@ -95,9 +96,10 @@ export async function POST(request: Request) {
         price: p.price,
         currency: p.currency,
       })),
+      cartEnabled: config.productSuggestionsEnabled,
     })
 
-    const { text, handoff, recommendedRetailerIds } = await generateReply({
+    const { text, handoff, recommendedRetailerIds, cartAdds, wantsCartTotal } = await generateReply({
       config,
       systemPrompt,
       messages,
@@ -112,7 +114,38 @@ export async function POST(request: Request) {
       )
     }
 
-    return NextResponse.json({ reply: text, handoff, recommendedProducts })
+    // The Playground has no real conversation to persist a cart
+    // against (it's stateless — see the docstring), so cart intent is
+    // shown informationally rather than actually accumulated: what the
+    // model WOULD add, resolved against the real catalog so a
+    // hallucinated id shows up as empty rather than a fake product.
+    type CartAddPreviewItem = Awaited<
+      ReturnType<typeof resolveCatalogProducts>
+    >[number] & { quantity: number }
+    let cartAddPreview: CartAddPreviewItem[] = []
+    if (config.productSuggestionsEnabled && cartAdds.length > 0) {
+      const resolved = await resolveCatalogProducts(
+        supabase,
+        accountId,
+        cartAdds.map((a) => a.retailerId),
+      )
+      cartAddPreview = cartAdds
+        .map((a) => {
+          const product = resolved.find((p) => p.retailerId === a.retailerId)
+          return product ? { ...product, quantity: a.quantity } : null
+        })
+        .filter((p): p is CartAddPreviewItem => p !== null)
+    }
+    const cartAddPreviewTotal = computeCartTotal(cartAddPreview)
+
+    return NextResponse.json({
+      reply: text,
+      handoff,
+      recommendedProducts,
+      cartAddPreview,
+      wantsCartTotal,
+      cartAddPreviewTotal: cartAddPreview.length > 0 ? cartAddPreviewTotal : null,
+    })
   } catch (err) {
     if (err instanceof AiError) {
       return NextResponse.json(

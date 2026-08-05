@@ -3,6 +3,7 @@ import { loadAiConfig } from './config'
 import { buildConversationContext } from './context'
 import { retrieveKnowledge } from './knowledge'
 import { retrieveCatalogProducts, resolveCatalogProduct, resolveCatalogProducts } from './catalog'
+import { addCartItem, getCartItems, formatCartSummary } from './cart'
 import { generateReply } from './generate'
 import { buildSystemPrompt } from './defaults'
 import { buildHandoffSummary } from './handoff'
@@ -184,10 +185,11 @@ export async function dispatchInboundToAiReply(
         price: p.price,
         currency: p.currency,
       })),
+      cartEnabled: config.productSuggestionsEnabled,
     })
 
     console.log('[ai auto-reply] calling provider', { provider: config.provider, model: config.model })
-    const { text, handoff, usage, recommendedRetailerIds } = await generateReply({
+    const { text, handoff, usage, recommendedRetailerIds, cartAdds, wantsCartTotal } = await generateReply({
       config,
       systemPrompt,
       messages,
@@ -313,6 +315,30 @@ export async function dispatchInboundToAiReply(
         }
       } catch (err) {
         console.error('[ai auto-reply] product card/list send failed:', err)
+      }
+    }
+
+    // Cart bookkeeping — also alongside the text reply, also not
+    // counted against the reply cap. Adds land first so a total
+    // requested in the same message already reflects them.
+    if (config.productSuggestionsEnabled && (cartAdds.length > 0 || wantsCartTotal)) {
+      try {
+        for (const add of cartAdds) {
+          await addCartItem(db, accountId, conversationId, add.retailerId, add.quantity)
+        }
+        if (wantsCartTotal) {
+          const items = await getCartItems(db, conversationId)
+          await engineSendText({
+            accountId,
+            userId: configOwnerUserId,
+            conversationId,
+            contactId,
+            text: formatCartSummary(items),
+            aiGenerated: true,
+          })
+        }
+      } catch (err) {
+        console.error('[ai auto-reply] cart bookkeeping failed:', err)
       }
     }
   } catch (err) {
