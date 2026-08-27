@@ -946,8 +946,17 @@ async function handleReplyForActiveRun(
     const cfg = currentNode.config as unknown as CollectInputNodeConfig;
     const captured = message.text.trim();
     if (captured.length > 0 && cfg.var_key) {
+      // append: newline-join onto whatever this var already holds, so a
+      // flow that loops back to this same node (e.g. "add another
+      // item?") builds up a running multi-line answer instead of each
+      // pass discarding the customer's earlier lines.
+      const existing = run.vars[cfg.var_key];
+      const newValue =
+        cfg.append && typeof existing === "string" && existing.length > 0
+          ? `${existing}\n${captured}`
+          : captured;
       // Persist captured value + reset reprompt count atomically.
-      const newVars = { ...run.vars, [cfg.var_key]: captured };
+      const newVars = { ...run.vars, [cfg.var_key]: newValue };
       const { error: capErr } = await db
         .from("flow_runs")
         .update({

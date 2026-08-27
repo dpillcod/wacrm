@@ -132,6 +132,16 @@ export interface CollectInputNodeConfig {
   validation?: "any" | "email" | "phone" | "regex";
   /** Used only when `validation === 'regex'`. */
   regex?: string;
+  /**
+   * When true, a new capture is appended (newline-joined) to any
+   * existing value at `var_key` instead of overwriting it — lets a
+   * flow loop back to the same collect_input node to build up a
+   * multi-line answer across several customer messages (e.g. "add
+   * another item?" looping back to re-collect), rather than each pass
+   * discarding what came before. Defaults to false (overwrite), the
+   * v1 behavior every existing flow already relies on.
+   */
+  append?: boolean;
   /** Node to advance to after capture. */
   next_node_key: string;
 }
