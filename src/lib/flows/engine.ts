@@ -363,9 +363,14 @@ async function sendButtonsAndSuspend(
     userId: run.user_id,
     conversationId: run.conversation_id!,
     contactId: run.contact_id!,
-    bodyText: cfg.text,
-    headerText: cfg.header_text,
-    footerText: cfg.footer_text,
+    // interpolateVars: send_message/collect_input already ran captured
+    // vars (and now vars.contact_name) through this — send_buttons never
+    // did, so "{{vars.contact_name}}" rendered literally instead of
+    // resolving, the one node type in the "suspend and wait" family that
+    // skipped it.
+    bodyText: interpolateVars(cfg.text, run.vars),
+    headerText: cfg.header_text ? interpolateVars(cfg.header_text, run.vars) : cfg.header_text,
+    footerText: cfg.footer_text ? interpolateVars(cfg.footer_text, run.vars) : cfg.footer_text,
     buttons: cfg.buttons.map((b) => ({ id: b.reply_id, title: b.title })),
   });
   await logEvent(db, run.id, "message_sent", node.node_key, {
@@ -399,10 +404,11 @@ async function sendListAndSuspend(
     userId: run.user_id,
     conversationId: run.conversation_id!,
     contactId: run.contact_id!,
-    bodyText: cfg.text,
+    // Same gap as send_buttons (see comment there) — never interpolated.
+    bodyText: interpolateVars(cfg.text, run.vars),
     buttonLabel: cfg.button_label,
-    headerText: cfg.header_text,
-    footerText: cfg.footer_text,
+    headerText: cfg.header_text ? interpolateVars(cfg.header_text, run.vars) : cfg.header_text,
+    footerText: cfg.footer_text ? interpolateVars(cfg.footer_text, run.vars) : cfg.footer_text,
     sections: cfg.sections.map((s) => ({
       title: s.title,
       rows: s.rows.map((r) => ({
