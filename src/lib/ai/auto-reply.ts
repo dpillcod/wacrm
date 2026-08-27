@@ -7,6 +7,7 @@ import { addCartItem, getCartItems, formatCartSummary } from './cart'
 import { generateReply } from './generate'
 import { buildSystemPrompt } from './defaults'
 import { buildHandoffSummary } from './handoff'
+import { pickCrossSellSuggestion } from './cross-sell'
 import { logAiUsage } from './usage'
 import { latestUserMessage } from './query'
 import { engineSendText, engineSendProduct, engineSendProductList } from '@/lib/flows/meta-send'
@@ -188,11 +189,12 @@ export async function dispatchInboundToAiReply(
     })
 
     console.log('[ai auto-reply] calling provider', { provider: config.provider, model: config.model })
-    const { text, handoff, usage, recommendedRetailerIds, cartAdds, wantsCartTotal } = await generateReply({
+    const { text: generatedText, handoff, usage, recommendedRetailerIds, cartAdds, wantsCartTotal } = await generateReply({
       config,
       systemPrompt,
       messages,
     })
+    let text = generatedText
     console.log('[ai auto-reply] provider responded', { handoff, textLength: text?.length ?? 0 })
 
     // Record token spend on the account's BYO key. Fire-and-forget so it
@@ -220,6 +222,15 @@ export async function dispatchInboundToAiReply(
         buildHandoffSummary({ messages, replyCount: conv.ai_reply_count ?? 0 }),
       )
       return
+    }
+
+    // Curated cross-sell aside — only on a normal (non-handoff) reply,
+    // never competing with a "your order is complete" or handoff
+    // message. Deterministic keyword match, not the model's call — see
+    // cross-sell.ts for why.
+    const crossSell = pickCrossSellSuggestion(question ?? '', messages)
+    if (crossSell) {
+      text = `${text}\n\n${crossSell}`
     }
 
     // Atomically claim a reply slot: the cap check + increment happen in
