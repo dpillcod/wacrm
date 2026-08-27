@@ -454,7 +454,10 @@ async function executeHandoff(
       .eq("id", run.conversation_id);
   }
   await logEvent(db, run.id, "handoff", node.node_key, {
-    note: cfg.note ?? null,
+    // Same gap as send_buttons/send_list (see comments there) — a note
+    // like "Pedido: {{vars.order_text}}" needs the captured var resolved
+    // here, or the agent sees the literal template instead of the order.
+    note: cfg.note ? interpolateVars(cfg.note, run.vars) : null,
     assigned_to: cfg.assign_to ?? null,
   });
   await endRun(db, run.id, "handed_off", "handoff_node");
