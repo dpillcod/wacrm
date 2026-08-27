@@ -61,6 +61,8 @@ export interface SendButtonsNodeConfig {
   text_fallback?: {
     var_key: string;
     append?: boolean;
+    /** See CollectInputNodeConfig.lowercase — same rationale. */
+    lowercase?: boolean;
     next_node_key: string;
   };
 }
@@ -157,6 +159,17 @@ export interface CollectInputNodeConfig {
    * v1 behavior every existing flow already relies on.
    */
   append?: boolean;
+  /**
+   * When true, the captured text is lowercased before storing — for a
+   * value a downstream `condition` node will substring-match (e.g.
+   * "did they say transferencia?"), since customers freely mix case
+   * (including ALL CAPS) and `contains` is case-sensitive. Leave unset
+   * for values meant to be read as-is by a human (e.g. a free-text
+   * order list), where preserving the customer's own casing is more
+   * natural. Applied before `append`, so an appended multi-line value
+   * is lowercased consistently rather than only on later turns.
+   */
+  lowercase?: boolean;
   /** Node to advance to after capture. */
   next_node_key: string;
 }

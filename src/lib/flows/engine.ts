@@ -902,10 +902,19 @@ async function captureTextIntoVar(
   db: AdminClient,
   run: FlowRunRow,
   fromNodeKey: string,
-  args: { var_key: string; append: boolean | undefined; next_node_key: string; text: string },
+  args: {
+    var_key: string;
+    append: boolean | undefined;
+    lowercase: boolean | undefined;
+    next_node_key: string;
+    text: string;
+  },
 ): Promise<string | null> {
-  const captured = args.text.trim();
-  if (captured.length === 0 || !args.var_key) return null;
+  const trimmed = args.text.trim();
+  if (trimmed.length === 0 || !args.var_key) return null;
+  // Applied before append, so a multi-line accumulated value stays
+  // consistently-cased across every turn rather than only new ones.
+  const captured = args.lowercase ? trimmed.toLowerCase() : trimmed;
 
   const existing = run.vars[args.var_key];
   const newValue =
@@ -987,6 +996,7 @@ async function handleReplyForActiveRun(
     matched = await captureTextIntoVar(db, run, currentNode.node_key, {
       var_key: cfg.var_key,
       append: cfg.append,
+      lowercase: cfg.lowercase,
       next_node_key: cfg.next_node_key,
       text: message.text,
     });
@@ -1006,6 +1016,7 @@ async function handleReplyForActiveRun(
     matched = await captureTextIntoVar(db, run, currentNode.node_key, {
       var_key: fallbackCfg.var_key,
       append: fallbackCfg.append,
+      lowercase: fallbackCfg.lowercase,
       next_node_key: fallbackCfg.next_node_key,
       text: message.text,
     });
