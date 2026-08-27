@@ -119,6 +119,13 @@ export function buildSystemPrompt(args: {
       `You are replying automatically with no human in the loop. If you cannot confidently and safely help — the customer explicitly asks for a human, is upset or complaining, or the request needs information you do not have — reply with exactly ${HANDOFF_SENTINEL} and nothing else. A human agent will then take over. Prefer handing off over guessing.\n\n` +
         'A plain greeting or small talk with no specific question (e.g. "hola", "buenos días", "buenas tardes") is NEVER a reason to hand off — always reply with a warm, brief greeting back and, if relevant, ask how you can help. This applies even if an earlier message in this conversation already promised a human would follow up on something else — that promise does not make every later message a handoff case; keep greeting/chatting normally unless THIS message itself needs a human.',
     )
+
+    parts.push(
+      "Closing an order you've been building up across the conversation (a running list of items the customer asked for, item by item):\n\n" +
+        '- Recognize when the customer signals they are done adding items — phrases like "eso es todo", "eso sería", "eso no más", "nada más", "ya", "listo", "es todo", "mi pedido" (said on its own, after a list), or equivalents in whatever language they are writing — as a firm stop, even if you would have liked to double-check something else. Do not keep re-asking about an item once the customer has already answered it earlier in the conversation, even loosely (e.g. "leche nutro roja" answers a brand question about leche — do not ask that same brand question again).\n' +
+        '- Once the customer signals they are done, and only if you have not already asked this in this conversation, ask exactly one more question: how they want to pay — cash on delivery ("contra entrega") or bank transfer ("transferencia"). Nothing else in that message.\n' +
+        `- Once they answer the payment question, send ONE final message: a plain-text bullet list of the full order (items, quantities, chosen variants — still no prices) plus the payment method they chose, then end that same message with exactly ${HANDOFF_SENTINEL} on its own line so a human closes the sale. Do this handoff only once.`,
+    )
   }
 
   if (userPrompt && userPrompt.trim()) {
@@ -153,10 +160,8 @@ export function buildSystemPrompt(args: {
         'Wrong (lists catalog names): "¿Cuál leche prefiere?\\n- Leche Miel\\n- Jet Leche\\n- Leche Nutri F. 1L". ' +
         'Right (asks about the attribute, in prose): "¿La leche la prefieres light, deslactosada o entera, y de qué marca?" or simply "¿de qué marca prefieres la leche?" if brand is the only thing that varies. ' +
         'Ask about no more than one or two ambiguous items per message — do not interrogate the customer about their whole order at once.\n' +
-        '- Once you have unambiguous clarity on an item (or it was never ambiguous to begin with), do not re-ask about it again this conversation.\n' +
-        '- As soon as EVERY item the customer has mentioned so far is unambiguous, reply with a plain-text bullet list restating the full order — ' +
-        `item, quantity, and chosen variant, still with no prices — then end that same reply with exactly ${HANDOFF_SENTINEL} on its own line, ` +
-        'so a human can confirm price, availability, and finalize the order. Do this handoff only once, when the list is actually complete.',
+        '- Once you have unambiguous clarity on an item (or it was never ambiguous to begin with), do not re-ask about it again this conversation. ' +
+        'Do NOT hand off just because everything mentioned so far is unambiguous, though — the customer may still add more items. Wait for them to signal they are done (see the order-closing instructions above) before moving to payment method and handoff.',
     )
   }
 
