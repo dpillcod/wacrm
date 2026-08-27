@@ -1054,6 +1054,30 @@ async function startNewRun(
   input: DispatchInboundInput,
   nodes: Map<string, FlowNodeRow>,
 ): Promise<DispatchInboundResult> {
+  // Seed `vars.contact_name` up front so any node's `{{vars.contact_name}}`
+  // (send_message/send_buttons text, prompt_text, etc.) can greet the
+  // customer by name without every flow author needing a collect_input
+  // step just to ask for a name we already have on file. Leading space
+  // is baked into the value itself (" Juan" vs "") rather than the
+  // template, so "¡Hola{{vars.contact_name}}!" reads naturally as
+  // either "¡Hola Juan!" or "¡Hola!" without a second no-name template.
+  // Best-effort: a lookup failure just means an unpersonalized greeting,
+  // never a reason to fail the run.
+  let contactName = "";
+  try {
+    const { data: contactRow } = await db
+      .from("contacts")
+      .select("name")
+      .eq("id", input.contactId)
+      .maybeSingle();
+    const rawName = (contactRow as { name?: string | null } | null)?.name;
+    if (typeof rawName === "string" && rawName.trim().length > 0) {
+      contactName = ` ${rawName.trim().split(/\s+/)[0]}`;
+    }
+  } catch (err) {
+    console.error("[flows] contact name lookup failed:", err);
+  }
+
   // INSERT — partial unique index `idx_one_active_run_per_contact`
   // catches concurrent inserts with 23505. We catch and return as
   // consumed:true (the parallel webhook handles it).
@@ -1073,6 +1097,7 @@ async function startNewRun(
       conversation_id: input.conversationId,
       status: "active",
       current_node_key: flow.entry_node_id,
+      vars: { contact_name: contactName },
     })
     .select("*")
     .maybeSingle();
@@ -1091,6 +1116,30 @@ async function startNewRun(
     trigger_type: flow.trigger_type,
     meta_message_id: input.message.meta_message_id,
   });
+
+  // A keyword trigger is the customer explicitly typing a command
+  // ("menu"/"ayuda"/"inicio") to reclaim self-service — most commonly
+  // the "back to menu" escape hatch. If an earlier `handoff` node (e.g.
+  // "hablar con alguien") left this conversation assigned to a human
+  // and the AI permanently muted, that assignment would otherwise
+  // outlive the customer's change of mind: every later free-text
+  // message (an actual order) silently gets zero reply forever, since
+  // `dispatchInboundToAiReply` bails out the moment `assigned_agent_id`
+  // is set — the customer only ever sees this flow's own scripted
+  // replies and never realizes the bot's LLM half died hours earlier.
+  // Typing the keyword again is an unambiguous signal they want the
+  // bot back, so clear the human handoff here rather than leaving it
+  // sticky until an agent notices and manually reopens it.
+  if (flow.trigger_type === "keyword" && input.conversationId) {
+    await db
+      .from("conversations")
+      .update({
+        assigned_agent_id: null,
+        ai_autoreply_disabled: false,
+        ai_handoff_summary: null,
+      })
+      .eq("id", input.conversationId);
+  }
   // Bump the flow's execution counter — used by the builder UI to
   // surface "X runs since activation" on the flow card.
   //
