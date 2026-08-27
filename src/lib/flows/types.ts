@@ -48,6 +48,21 @@ export interface SendButtonsNodeConfig {
     /** node_key the runner advances to when this button is tapped. */
     next_node_key: string;
   }>;
+  /**
+   * Optional escape hatch for when the customer types a plain-text
+   * reply instead of tapping a button — very common in practice
+   * (customers keep listing items instead of tapping "add more").
+   * Without this, free text at a send_buttons node just triggers the
+   * fallback policy's reprompt/handoff, silently dropping whatever
+   * they typed. When set, the text is captured into `var_key` (same
+   * append semantics as collect_input) and the run advances to
+   * `next_node_key` instead of reprompting.
+   */
+  text_fallback?: {
+    var_key: string;
+    append?: boolean;
+    next_node_key: string;
+  };
 }
 
 export interface SendListNodeConfig {

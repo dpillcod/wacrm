@@ -890,6 +890,46 @@ export async function dispatchInboundToFlows(
   }
 }
 
+/**
+ * Shared by collect_input's own capture and send_buttons' text_fallback
+ * (see SendButtonsNodeConfig.text_fallback) — both need the identical
+ * "trim, append-or-overwrite, persist, mirror in-memory, log" sequence,
+ * just triggered from a different node type. Returns the next node_key
+ * on success, or null if the text was empty/blank (caller falls
+ * through to the fallback policy in that case) or the write failed.
+ */
+async function captureTextIntoVar(
+  db: AdminClient,
+  run: FlowRunRow,
+  fromNodeKey: string,
+  args: { var_key: string; append: boolean | undefined; next_node_key: string; text: string },
+): Promise<string | null> {
+  const captured = args.text.trim();
+  if (captured.length === 0 || !args.var_key) return null;
+
+  const existing = run.vars[args.var_key];
+  const newValue =
+    args.append && typeof existing === "string" && existing.length > 0
+      ? `${existing}\n${captured}`
+      : captured;
+  const newVars = { ...run.vars, [args.var_key]: newValue };
+  const { error: capErr } = await db
+    .from("flow_runs")
+    .update({ vars: newVars, reprompt_count: 0 })
+    .eq("id", run.id);
+  if (capErr) return null;
+
+  // Mirror the UPDATE in-memory so downstream interpolation in the
+  // advance loop sees the captured var without re-SELECTing the row.
+  run.vars = newVars;
+  run.reprompt_count = 0;
+  await logEvent(db, run.id, "node_entered", fromNodeKey, {
+    captured_key: args.var_key,
+    captured_length: captured.length,
+  });
+  return args.next_node_key;
+}
+
 async function handleReplyForActiveRun(
   db: AdminClient,
   run: FlowRunRow,
@@ -944,39 +984,31 @@ async function handleReplyForActiveRun(
     currentNode.node_type === "collect_input"
   ) {
     const cfg = currentNode.config as unknown as CollectInputNodeConfig;
-    const captured = message.text.trim();
-    if (captured.length > 0 && cfg.var_key) {
-      // append: newline-join onto whatever this var already holds, so a
-      // flow that loops back to this same node (e.g. "add another
-      // item?") builds up a running multi-line answer instead of each
-      // pass discarding the customer's earlier lines.
-      const existing = run.vars[cfg.var_key];
-      const newValue =
-        cfg.append && typeof existing === "string" && existing.length > 0
-          ? `${existing}\n${captured}`
-          : captured;
-      // Persist captured value + reset reprompt count atomically.
-      const newVars = { ...run.vars, [cfg.var_key]: newValue };
-      const { error: capErr } = await db
-        .from("flow_runs")
-        .update({
-          vars: newVars,
-          reprompt_count: 0,
-        })
-        .eq("id", run.id);
-      if (!capErr) {
-        // Mirror the UPDATE in-memory so downstream interpolation in
-        // the advance loop sees the captured var without us having to
-        // re-SELECT the whole row.
-        run.vars = newVars;
-        run.reprompt_count = 0;
-        await logEvent(db, run.id, "node_entered", currentNode.node_key, {
-          captured_key: cfg.var_key,
-          captured_length: captured.length,
-        });
-        matched = cfg.next_node_key;
-      }
-    }
+    matched = await captureTextIntoVar(db, run, currentNode.node_key, {
+      var_key: cfg.var_key,
+      append: cfg.append,
+      next_node_key: cfg.next_node_key,
+      text: message.text,
+    });
+  } else if (
+    message.kind === "text" &&
+    currentNode.node_type === "send_buttons" &&
+    (currentNode.config as unknown as SendButtonsNodeConfig).text_fallback
+  ) {
+    // Customers reliably keep typing instead of tapping a button —
+    // most commonly to list another item after "¿algo más?". Route
+    // that text into the configured var/next node (see
+    // SendButtonsNodeConfig.text_fallback) instead of letting it fall
+    // to the fallback policy's reprompt, which would silently discard
+    // whatever they just said.
+    const fallbackCfg = (currentNode.config as unknown as SendButtonsNodeConfig)
+      .text_fallback!;
+    matched = await captureTextIntoVar(db, run, currentNode.node_key, {
+      var_key: fallbackCfg.var_key,
+      append: fallbackCfg.append,
+      next_node_key: fallbackCfg.next_node_key,
+      text: message.text,
+    });
   }
 
   if (matched) {
