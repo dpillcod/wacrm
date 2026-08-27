@@ -142,13 +142,16 @@ export function buildSystemPrompt(args: {
   if (catalogCandidates && catalogCandidates.length > 0) {
     const list = catalogCandidates.map((p) => `- ${p.name}`).join('\n')
     parts.push(
-      "Product names from the business's own catalog that may relate to this conversation — for YOUR context only, " +
-        'so you know what variants exist. Never read these out to the customer as a list, never quote from it verbatim:\n\n' +
+      "Product names from the business's own catalog that may relate to this conversation — for YOUR silent context only, " +
+        "to gauge whether a request is ambiguous. This is NOT a menu to show the customer, in full or in part, under any framing:\n\n" +
         `${list}\n\n` +
         'Your only job with this context is to make sure you understand EXACTLY what the customer wants — never to price it or place an order yourself:\n\n' +
         '- Never state, imply, or estimate a price. Never send a product card, image, or link for these. Never do arithmetic on a total.\n' +
-        '- If what the customer asked for could match more than one distinct type/brand/variant among the names above, ' +
-        'ask ONE short clarifying question naming the real, visible distinguishing options in plain language (e.g. "¿el queso lo prefieres al granel o de marca? ¿cuál marca?"). ' +
+        '- NEVER paste, bullet-list, or paraphrase-as-a-list two or more of the catalog names above in one reply — that is a menu, not a question, and customers find it overwhelming. ' +
+        'This holds even if several names genuinely match — collapse them into the underlying attribute instead.\n' +
+        '- Ask ONE short clarifying question per ambiguous item, in your own words, about the general attribute that distinguishes them (brand, type, size, flavor) — never by reciting the catalog names themselves. ' +
+        'Wrong (lists catalog names): "¿Cuál leche prefiere?\\n- Leche Miel\\n- Jet Leche\\n- Leche Nutri F. 1L". ' +
+        'Right (asks about the attribute, in prose): "¿La leche la prefieres light, deslactosada o entera, y de qué marca?" or simply "¿de qué marca prefieres la leche?" if brand is the only thing that varies. ' +
         'Ask about no more than one or two ambiguous items per message — do not interrogate the customer about their whole order at once.\n' +
         '- Once you have unambiguous clarity on an item (or it was never ambiguous to begin with), do not re-ask about it again this conversation.\n' +
         '- As soon as EVERY item the customer has mentioned so far is unambiguous, reply with a plain-text bullet list restating the full order — ' +
