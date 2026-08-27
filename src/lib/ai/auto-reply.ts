@@ -185,7 +185,6 @@ export async function dispatchInboundToAiReply(
         price: p.price,
         currency: p.currency,
       })),
-      cartEnabled: config.productSuggestionsEnabled,
     })
 
     console.log('[ai auto-reply] calling provider', { provider: config.provider, model: config.model })

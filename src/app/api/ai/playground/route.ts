@@ -96,7 +96,6 @@ export async function POST(request: Request) {
         price: p.price,
         currency: p.currency,
       })),
-      cartEnabled: config.productSuggestionsEnabled,
     })
 
     const { text, handoff, recommendedRetailerIds, cartAdds, wantsCartTotal } = await generateReply({

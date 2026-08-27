@@ -97,16 +97,13 @@ export function buildSystemPrompt(args: {
   /** Knowledge-base excerpts retrieved for the current question. */
   knowledge?: string[]
   /** Catalog products relevant to the current question — only passed
-   *  when the account has opted into product suggestions. */
+   *  when the account has opted into product suggestions. Name only:
+   *  this context is for disambiguating WHICH variant the customer
+   *  means, never for the model to quote a price or place an order
+   *  itself — see the instructions built from it below. */
   catalogCandidates?: { retailerId: string; name: string; price: number | null; currency: string | null }[]
-  /** Whether the account has product suggestions (and therefore cart
-   *  tracking) enabled at all — independent of whether THIS turn's
-   *  question happened to retrieve any catalog candidates, since a
-   *  customer asking "how much is my total?" won't match any product
-   *  by name but still needs to be able to trigger CART_TOTAL. */
-  cartEnabled?: boolean
 }): string {
-  const { userPrompt, mode, knowledge, catalogCandidates, cartEnabled } = args
+  const { userPrompt, mode, knowledge, catalogCandidates } = args
   const parts: string[] = [
     'You are a customer-messaging assistant for a business that uses a WhatsApp CRM. ' +
       'You are shown the recent WhatsApp conversation between the business (assistant) and a customer (user). ' +
@@ -143,43 +140,20 @@ export function buildSystemPrompt(args: {
   }
 
   if (catalogCandidates && catalogCandidates.length > 0) {
-    const list = catalogCandidates
-      .map((p) => {
-        const price =
-          p.price != null
-            ? ` — ${p.price.toFixed(2)}${p.currency ? ` ${p.currency}` : ''}`
-            : ''
-        return `- retailer_id: ${p.retailerId} | ${p.name}${price}`
-      })
-      .join('\n')
+    const list = catalogCandidates.map((p) => `- ${p.name}`).join('\n')
     parts.push(
-      'Product catalog — candidates that may be relevant to this conversation, retrieved from the business\'s own catalog:\n\n' +
+      "Product names from the business's own catalog that may relate to this conversation — for YOUR context only, " +
+        'so you know what variants exist. Never read these out to the customer as a list, never quote from it verbatim:\n\n' +
         `${list}\n\n` +
-        'When you mention a price to the customer, state it EXACTLY as written above, including both decimal digits (e.g. "6.20", never round or truncate to "6"). ' +
-        'If exactly ONE of these clearly matches what the customer is asking about, end your reply with ' +
-        'exactly `[[PRODUCT:<retailer_id>]]` using the exact retailer_id from the list above (nothing else on that line). ' +
-        'If the request is broader and SEVERAL of these are relevant options for the customer to choose between ' +
-        '(e.g. they asked about a type of product and multiple variants match), end your reply instead with ' +
-        'exactly `[[PRODUCTS:<retailer_id_1>,<retailer_id_2>,...]]` listing 2 or more exact retailer_ids from above, comma-separated, nothing else on that line. ' +
-        'Use only one of the two sentinels, never both. Never invent a retailer_id, and never use one that is not in this list. ' +
-        'Omit both entirely if nothing here matches.',
-    )
-  }
-
-  if (cartEnabled) {
-    parts.push(
-      'Order cart — you can track what the customer wants to buy across the conversation, so their total is computed for real instead of guessed:\n\n' +
-        '- If the customer clearly states they want to ORDER a specific quantity of an item from the product catalog list above ' +
-        '(not just asking about it), add a `[[CART_ADD:<retailer_id>:<quantity>]]` line for each such item, using the exact retailer_id from the catalog list. ' +
-        'quantity is a whole number and must be the TOTAL quantity the customer now wants of that item (not how many more to add). ' +
-        'You can include several CART_ADD sentinels in one reply if they ordered several items at once (whether they listed them all in one message or one at a time) — never use a retailer_id not in the catalog list.\n' +
-        '- Whenever you add item(s) with CART_ADD, your visible reply text MUST restate exactly what you understood — each product name and quantity (and price, with both decimal digits) — before the sentinel(s), ' +
-        'so the customer can immediately correct you if a quantity or item was misread, especially when they listed several products in one message. Never add an item silently.\n' +
-        '- If the customer asks for their total / "cuánto sería" / "cuánto es la cuenta" / how much they owe so far, ' +
-        `do NOT state or compute any number yourself — never guess a total. Instead say something like "dame un momento, calculo tu pedido" and end the reply with exactly ${CART_TOTAL_SENTINEL} on its own; ` +
-        'the real total (computed from actual catalog prices) will be sent right after as a follow-up message.\n' +
-        '- These are independent of the single/multi product-recommendation sentinels above — use CART_ADD when the customer is ordering, ' +
-        'the product sentinels when they are browsing or asking what is available.',
+        'Your only job with this context is to make sure you understand EXACTLY what the customer wants — never to price it or place an order yourself:\n\n' +
+        '- Never state, imply, or estimate a price. Never send a product card, image, or link for these. Never do arithmetic on a total.\n' +
+        '- If what the customer asked for could match more than one distinct type/brand/variant among the names above, ' +
+        'ask ONE short clarifying question naming the real, visible distinguishing options in plain language (e.g. "¿el queso lo prefieres al granel o de marca? ¿cuál marca?"). ' +
+        'Ask about no more than one or two ambiguous items per message — do not interrogate the customer about their whole order at once.\n' +
+        '- Once you have unambiguous clarity on an item (or it was never ambiguous to begin with), do not re-ask about it again this conversation.\n' +
+        '- As soon as EVERY item the customer has mentioned so far is unambiguous, reply with a plain-text bullet list restating the full order — ' +
+        `item, quantity, and chosen variant, still with no prices — then end that same reply with exactly ${HANDOFF_SENTINEL} on its own line, ` +
+        'so a human can confirm price, availability, and finalize the order. Do this handoff only once, when the list is actually complete.',
     )
   }
 
