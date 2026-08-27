@@ -309,6 +309,7 @@ function validateNode(
           title?: string;
           next_node_key?: string;
         }>;
+        text_fallback?: { var_key?: string; next_node_key?: string };
       };
       if (!cfg.text?.trim()) {
         issues.push({
@@ -396,6 +397,35 @@ function validateNode(
           });
         }
       });
+
+      if (cfg.text_fallback) {
+        if (!cfg.text_fallback.var_key?.trim()) {
+          issues.push({
+            severity: "error",
+            scope: "node",
+            node_key: node.node_key,
+            field: "text_fallback.var_key",
+            message: "text_fallback needs a var_key to capture into.",
+          });
+        }
+        if (!cfg.text_fallback.next_node_key) {
+          issues.push({
+            severity: "error",
+            scope: "node",
+            node_key: node.node_key,
+            field: "text_fallback.next_node_key",
+            message: "text_fallback needs a next node.",
+          });
+        } else if (!knownKeys.has(cfg.text_fallback.next_node_key)) {
+          issues.push({
+            severity: "error",
+            scope: "node",
+            node_key: node.node_key,
+            field: "text_fallback.next_node_key",
+            message: `text_fallback points to non-existent node "${cfg.text_fallback.next_node_key}".`,
+          });
+        }
+      }
       break;
     }
 
@@ -768,10 +798,15 @@ function outgoingEdges(node: NodeInput): string[] {
     case "send_buttons": {
       const cfg = node.config as {
         buttons?: Array<{ next_node_key?: string }>;
+        text_fallback?: { next_node_key?: string };
       };
-      return (cfg.buttons ?? [])
+      const edges = (cfg.buttons ?? [])
         .map((b) => b.next_node_key)
         .filter((k): k is string => !!k);
+      if (cfg.text_fallback?.next_node_key) {
+        edges.push(cfg.text_fallback.next_node_key);
+      }
+      return edges;
     }
     case "send_list": {
       const cfg = node.config as {
