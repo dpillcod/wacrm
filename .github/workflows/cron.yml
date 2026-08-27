@@ -1,0 +1,45 @@
+name: Scheduled maintenance cron
+
+# Hits the app's two cron-only endpoints on a schedule, since this
+# deployment (EasyPanel) has no built-in scheduler of its own:
+#
+#   /api/flows/cron        - marks abandoned flow runs "timed_out"
+#                             after their fallback_policy.on_timeout_hours
+#                             (24h default). Without this, a customer who
+#                             leaves a conversation mid-flow (or never
+#                             replies past the greeting) keeps a
+#                             permanently "active" run, which blocks any
+#                             new keyword-triggered flow for them forever
+#                             (idx_one_active_run_per_contact) — "hola"
+#                             would silently do nothing if they came back
+#                             weeks later.
+#
+#   /api/automations/cron  - drains due automation_pending_executions
+#                             rows (delayed automation steps, e.g. "wait
+#                             2h then send a message"). Without this,
+#                             any automation with a delay step never
+#                             actually fires past that step.
+#
+# Both endpoints require the same X-Cron-Secret header (by design, see
+# their route.ts comments) — set as the CRON_SECRET repo secret below,
+# matching AUTOMATION_CRON_SECRET on the actual deployment.
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping-cron-endpoints:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sweep stale flow runs
+        run: |
+          curl -sf -o /dev/null -w "flows/cron -> %{http_code}\n" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.WACRM_BASE_URL }}/api/flows/cron"
+
+      - name: Drain due automation steps
+        run: |
+          curl -sf -o /dev/null -w "automations/cron -> %{http_code}\n" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.WACRM_BASE_URL }}/api/automations/cron"
