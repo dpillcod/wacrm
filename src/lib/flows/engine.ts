@@ -922,11 +922,32 @@ async function captureTextIntoVar(
       ? `${existing}\n${captured}`
       : captured;
   const newVars = { ...run.vars, [args.var_key]: newValue };
-  const { error: capErr } = await db
-    .from("flow_runs")
-    .update({ vars: newVars, reprompt_count: 0 })
-    .eq("id", run.id);
-  if (capErr) return null;
+  let capErr = (
+    await db
+      .from("flow_runs")
+      .update({ vars: newVars, reprompt_count: 0 })
+      .eq("id", run.id)
+  ).error;
+  if (capErr) {
+    // One immediate retry — a transient write failure here must not
+    // silently drop whatever the customer just said. If it fails
+    // twice, surface the real reason instead of a bare null so this
+    // is diagnosable from logs rather than another mystery drop.
+    capErr = (
+      await db
+        .from("flow_runs")
+        .update({ vars: newVars, reprompt_count: 0 })
+        .eq("id", run.id)
+    ).error;
+  }
+  if (capErr) {
+    console.error("[flows] captureTextIntoVar update failed twice:", {
+      run_id: run.id,
+      var_key: args.var_key,
+      error: capErr,
+    });
+    return null;
+  }
 
   // Mirror the UPDATE in-memory so downstream interpolation in the
   // advance loop sees the captured var without re-SELECTing the row.
@@ -1066,7 +1087,33 @@ async function handleReplyForActiveRun(
   }
   if (action.type === "reprompt") {
     // Re-send the same prompt. Same node, no current_node_key change.
-    if (currentNode.node_type === "send_buttons") {
+    const textFallbackCfg =
+      currentNode.node_type === "send_buttons"
+        ? (currentNode.config as unknown as SendButtonsNodeConfig).text_fallback
+        : undefined;
+    if (message.kind === "text" && textFallbackCfg) {
+      // A text_fallback node accepts ANY non-empty text, so landing
+      // here means the capture write itself failed (see
+      // captureTextIntoVar) — not that the customer said something
+      // unparseable. Re-sending the node's own prompt would look
+      // identical to the "got it" message on a successful loop and
+      // falsely tell the customer their item was recorded. Say so
+      // honestly instead and ask them to repeat it.
+      try {
+        await engineSendText({
+          accountId: run.account_id,
+          userId: run.user_id,
+          conversationId: run.conversation_id!,
+          contactId: run.contact_id!,
+          text: "Perdón, no logré registrar eso último 🙁 ¿Puedes escribirlo de nuevo?",
+        });
+      } catch (err) {
+        await logEvent(db, run.id, "error", currentNode.node_key, {
+          reason: "reprompt_send_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+      }
+    } else if (currentNode.node_type === "send_buttons") {
       await sendButtonsAndSuspend(db, run, currentNode);
     } else if (currentNode.node_type === "send_list") {
       await sendListAndSuspend(db, run, currentNode);
