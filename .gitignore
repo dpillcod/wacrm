@@ -42,3 +42,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local working folders (product photos, banner images, QR/payment
+# images, config snapshots) — never meant for the repo; some contain
+# real credentials (see fotos-productos/procesar-fotos.js)
+/fotos-productos/
+/banners/
+/checkpoints/
+/qr-pago/
