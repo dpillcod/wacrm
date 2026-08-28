@@ -69,17 +69,39 @@ export function ContactForm({
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [loadingTags, setLoadingTags] = useState(false);
 
+  // Reset the form fields whenever the dialog opens for a (possibly new)
+  // contact, tracked by identity rather than in an effect — see
+  // https://react.dev/learn/you-might-not-need-an-effect#resetting-all-state-when-a-prop-changes.
+  const openKey = open ? (contact?.id ?? 'new') : null;
+  const [resetKey, setResetKey] = useState<string | null>(null);
+  if (openKey !== null && openKey !== resetKey) {
+    setResetKey(openKey);
+    setName(contact?.name ?? '');
+    setPhone(contact?.phone ?? '');
+    setEmail(contact?.email ?? '');
+    setCompany(contact?.company ?? '');
+    setSelectedTagIds(contactTags.map((ct) => ct.tag_id));
+    setDupMatch(null);
+  }
+
+  async function fetchTags() {
+    setLoadingTags(true);
+    const { data } = await supabase
+      .from('tags')
+      .select('*')
+      .order('name');
+    if (data) setTags(data);
+    setLoadingTags(false);
+  }
+
   useEffect(() => {
-    if (open) {
-      setName(contact?.name ?? '');
-      setPhone(contact?.phone ?? '');
-      setEmail(contact?.email ?? '');
-      setCompany(contact?.company ?? '');
-      setSelectedTagIds(contactTags.map((ct) => ct.tag_id));
-      setDupMatch(null);
-      fetchTags();
+    if (openKey !== null) {
+      void (async () => {
+        await fetchTags();
+      })();
     }
-  }, [open, contact]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchTags is stable enough here; only re-fetch when the form re-opens for a (possibly different) contact.
+  }, [openKey]);
 
   // Look up an existing contact with this number (new contacts only).
   // Runs on blur so we don't query on every keystroke.
@@ -101,16 +123,6 @@ export function ContactForm({
     } finally {
       setCheckingDup(false);
     }
-  }
-
-  async function fetchTags() {
-    setLoadingTags(true);
-    const { data } = await supabase
-      .from('tags')
-      .select('*')
-      .order('name');
-    if (data) setTags(data);
-    setLoadingTags(false);
   }
 
   function toggleTag(tagId: string) {

@@ -312,7 +312,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshProfile = useCallback(async () => {
     if (!user?.id) return;
     await fetchProfile(user.id);
-  }, [user?.id, fetchProfile]);
+  }, [user, fetchProfile]);
 
   // Derive the role booleans once per profile change rather than on
   // every consumer render. Cheap regardless, but the memo also gives

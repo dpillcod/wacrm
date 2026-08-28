@@ -60,7 +60,9 @@ export function QuickRepliesManager() {
   }, []);
 
   useEffect(() => {
-    void load();
+    void (async () => {
+      await load();
+    })();
   }, [load]);
 
   const openCreate = () => setDraft(emptyDraft());

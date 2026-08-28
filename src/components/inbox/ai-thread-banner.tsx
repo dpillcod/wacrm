@@ -86,7 +86,15 @@ export function AiThreadBanner({
   // instantly on click; re-seeds whenever the thread (or its server
   // state via realtime) changes.
   const [paused, setPaused] = useState(disabled);
-  useEffect(() => setPaused(disabled), [conversationId, disabled]);
+  // Re-seed the optimistic mirror whenever the thread or its server-known
+  // pause state changes, during render rather than in an effect — see
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-state-based-on-a-prop-or-state-change.
+  const pauseSyncKey = `${conversationId}:${disabled}`;
+  const [prevPauseSyncKey, setPrevPauseSyncKey] = useState(pauseSyncKey);
+  if (pauseSyncKey !== prevPauseSyncKey) {
+    setPrevPauseSyncKey(pauseSyncKey);
+    setPaused(disabled);
+  }
 
   useEffect(() => {
     if (!accountId) return;

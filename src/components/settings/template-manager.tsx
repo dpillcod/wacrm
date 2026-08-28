@@ -167,23 +167,28 @@ export function TemplateManager() {
   );
 
   // Resize body_samples so it always has exactly bodyVarCount entries.
-  // (We mutate via setForm in an effect so React owns the state.)
-  useEffect(() => {
+  // Done during render rather than in an effect, see
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-state-based-on-a-prop-or-state-change.
+  const [prevBodyVarCount, setPrevBodyVarCount] = useState(bodyVarCount);
+  if (bodyVarCount !== prevBodyVarCount) {
+    setPrevBodyVarCount(bodyVarCount);
     setForm((prev) => {
       if (prev.body_samples.length === bodyVarCount) return prev;
       const next = prev.body_samples.slice(0, bodyVarCount);
       while (next.length < bodyVarCount) next.push('');
       return { ...prev, body_samples: next };
     });
-  }, [bodyVarCount]);
+  }
 
   useEffect(() => {
     if (authLoading) return;
-    if (!user) {
-      setLoading(false);
-      return;
-    }
-    fetchTemplates(user.id);
+    void (async () => {
+      if (!user) {
+        setLoading(false);
+        return;
+      }
+      await fetchTemplates(user.id);
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, user?.id]);
 

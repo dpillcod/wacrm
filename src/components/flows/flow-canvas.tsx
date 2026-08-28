@@ -354,9 +354,15 @@ function FlowCanvasInner() {
 
   const [rfNodes, setRfNodes] = useState<RfNode<NodeData>[]>(derivedRfNodes);
 
-  useEffect(() => {
+  // Re-sync the editable node copy whenever the derived value changes
+  // (new builderNodes/layout/etc.) without losing in-progress drag state
+  // in between — done during render rather than in an effect, see
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-state-based-on-a-prop-or-state-change.
+  const [prevDerivedRfNodes, setPrevDerivedRfNodes] = useState(derivedRfNodes);
+  if (derivedRfNodes !== prevDerivedRfNodes) {
+    setPrevDerivedRfNodes(derivedRfNodes);
     setRfNodes(derivedRfNodes);
-  }, [derivedRfNodes]);
+  }
 
   const rfEdges = useMemo(() => {
     const canvasEdges = deriveCanvasEdges(builderNodes);

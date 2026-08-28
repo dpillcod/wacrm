@@ -97,7 +97,9 @@ export function ApiKeysSettings() {
   }, []);
 
   useEffect(() => {
-    void load();
+    void (async () => {
+      await load();
+    })();
   }, [load]);
 
   async function handleRevoke(key: ApiKey) {

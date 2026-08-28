@@ -175,14 +175,16 @@ export function WhatsAppConfig() {
     // for the first render window and bail without ever retrying
     // once the profile arrives.
     if (authLoading || profileLoading) return;
-    if (!user || !accountId) {
-      loadedAccountIdRef.current = null;
-      setLoading(false);
-      return;
-    }
-    if (loadedAccountIdRef.current === accountId) return;
-    loadedAccountIdRef.current = accountId;
-    fetchConfig(accountId);
+    void (async () => {
+      if (!user || !accountId) {
+        loadedAccountIdRef.current = null;
+        setLoading(false);
+        return;
+      }
+      if (loadedAccountIdRef.current === accountId) return;
+      loadedAccountIdRef.current = accountId;
+      await fetchConfig(accountId);
+    })();
   }, [authLoading, profileLoading, user?.id, accountId, fetchConfig]);
 
   async function handleSave() {

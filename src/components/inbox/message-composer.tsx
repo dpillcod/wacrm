@@ -522,9 +522,13 @@ export function MessageComposer({
   }, [clearTimer]);
 
   // Auto-stop at the cap so a forgotten recording can't blow the
-  // upload size limit.
+  // upload size limit. Reacts to the timer tick by stopping the
+  // MediaRecorder (an external system) — the setState inside
+  // stopRecording is incidental bookkeeping for that action, not
+  // derivable during render.
   useEffect(() => {
     if (recording && recordSeconds >= MAX_RECORDING_SECONDS) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       stopRecording();
     }
   }, [recording, recordSeconds, stopRecording]);

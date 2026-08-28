@@ -210,7 +210,9 @@ export function Step2SelectAudience({
   ]);
 
   useEffect(() => {
-    fetchEstimatedCount();
+    void (async () => {
+      await fetchEstimatedCount();
+    })();
   }, [fetchEstimatedCount]);
 
   function toggleTag(tagId: string) {

@@ -183,7 +183,11 @@ const ScrollButton = ({ icon, onClick, disabled }: ScrollButtonProps) => {
 
   React.useEffect(() => {
     if (disabled) {
+      // Stop the repeat-click interval (an external timer) — resetting
+      // isPressed alongside it is necessary bookkeeping for that same
+      // external-system action, not state derivable during render.
       clearInterval(intervalRef.current as NodeJS.Timeout)
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsPressed(false)
     }
   }, [disabled])

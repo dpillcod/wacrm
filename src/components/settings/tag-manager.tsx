@@ -58,11 +58,13 @@ export function TagManager() {
 
   useEffect(() => {
     if (authLoading) return;
-    if (!user) {
-      setLoading(false);
-      return;
-    }
-    fetchTags(user.id);
+    void (async () => {
+      if (!user) {
+        setLoading(false);
+        return;
+      }
+      await fetchTags(user.id);
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, user?.id]);
 

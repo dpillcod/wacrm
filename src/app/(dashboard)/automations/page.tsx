@@ -82,7 +82,9 @@ export default function AutomationsPage() {
   }
 
   useEffect(() => {
-    load()
+    void (async () => {
+      await load()
+    })()
   }, [])
 
   async function toggleActive(a: Automation, next: boolean) {

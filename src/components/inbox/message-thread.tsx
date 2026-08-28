@@ -312,14 +312,14 @@ export function MessageThread({
   // refetches the rows without also tearing down and rebuilding the
   // realtime channel.
   useEffect(() => {
-    if (!conversationId) {
-      setReactions([]);
-      return;
-    }
-    const supabase = createClient();
     let cancelled = false;
 
-    (async () => {
+    void (async () => {
+      if (!conversationId) {
+        setReactions([]);
+        return;
+      }
+      const supabase = createClient();
       const { data, error } = await supabase
         .from("message_reactions")
         .select("*")
@@ -412,9 +412,13 @@ export function MessageThread({
 
   // Clear any in-progress reply draft when the active conversation changes —
   // a quote pulled from conversation A shouldn't bleed into conversation B.
-  useEffect(() => {
+  // Done during render rather than in an effect, see
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-state-based-on-a-prop-or-state-change.
+  const [prevReplyConversationId, setPrevReplyConversationId] = useState(conversationId);
+  if (conversationId !== prevReplyConversationId) {
+    setPrevReplyConversationId(conversationId);
     setReplyTo(null);
-  }, [conversationId]);
+  }
 
   // Reset the server-side unread_count to 0 whenever an unread count
   // surfaces on the active conversation — covers both (a) opening a
@@ -814,7 +818,7 @@ export function MessageThread({
         setReactions(snapshot);
       }
     },
-    [conversation, user?.id],
+    [conversation, user],
   );
 
   const handleAssignChange = useCallback(

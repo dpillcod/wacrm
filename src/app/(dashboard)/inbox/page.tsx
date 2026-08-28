@@ -61,6 +61,10 @@ export default function InboxPage() {
   useEffect(() => {
     try {
       const stored = localStorage.getItem(CONTACT_PANEL_STORAGE_KEY);
+      // Reconciling with localStorage (an external system) after mount is
+      // exactly what this effect is for — the SSR-safe default is set
+      // during render above, this only overrides it client-side.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (stored !== null) setContactPanelOpen(stored === "true");
     } catch {
       // localStorage can throw in private-browsing / sandboxed contexts.

@@ -45,12 +45,17 @@ export function ProfileForm() {
   const [saving, setSaving] = useState(false);
   const [emailChangePending, setEmailChangePending] = useState(false);
 
-  // Seed form state once the profile loads.
-  useEffect(() => {
-    if (!profile) return;
-    setFullName(profile.full_name ?? '');
-    setEmail(profile.email ?? '');
-  }, [profile]);
+  // Seed form state once the profile loads. Done during render rather
+  // than in an effect, see
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-state-based-on-a-prop-or-state-change.
+  const [prevProfile, setPrevProfile] = useState(profile);
+  if (profile !== prevProfile) {
+    setPrevProfile(profile);
+    if (profile) {
+      setFullName(profile.full_name ?? '');
+      setEmail(profile.email ?? '');
+    }
+  }
 
   // Cleanup object URLs to avoid leaks.
   useEffect(() => {

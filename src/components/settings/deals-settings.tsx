@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { Coins, Loader2 } from "lucide-react";
 
@@ -43,10 +43,14 @@ export function DealsSettings() {
   const t = useTranslations("Settings.deals");
 
   // Keep the select in sync once the profile (and its account default)
-  // resolves, and after a save round-trips through refreshProfile.
-  useEffect(() => {
+  // resolves, and after a save round-trips through refreshProfile. Done
+  // during render rather than in an effect, see
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-state-based-on-a-prop-or-state-change.
+  const [prevDefaultCurrency, setPrevDefaultCurrency] = useState(defaultCurrency);
+  if (defaultCurrency !== prevDefaultCurrency) {
+    setPrevDefaultCurrency(defaultCurrency);
     setSelected(defaultCurrency);
-  }, [defaultCurrency]);
+  }
 
   const dirty = selected !== defaultCurrency;
 

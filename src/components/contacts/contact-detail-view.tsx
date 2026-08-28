@@ -181,11 +181,9 @@ export function ContactDetailView({
 
   useEffect(() => {
     if (open && contactId) {
-      fetchContact();
-      fetchTags();
-      fetchNotes();
-      fetchCustomFields();
-      fetchDeals();
+      void (async () => {
+        await Promise.all([fetchContact(), fetchTags(), fetchNotes(), fetchCustomFields(), fetchDeals()]);
+      })();
     }
   }, [open, contactId, fetchContact, fetchTags, fetchNotes, fetchCustomFields, fetchDeals]);
 

@@ -87,7 +87,9 @@ export default function BroadcastsPage() {
   }
 
   useEffect(() => {
-    fetchBroadcasts();
+    void (async () => {
+      await fetchBroadcasts();
+    })();
   }, []);
 
   const anySending = useMemo(
