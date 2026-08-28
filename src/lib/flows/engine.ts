@@ -40,6 +40,7 @@ import {
   engineSendText,
 } from "./meta-send";
 import { decideFallback, resolveFallbackPolicy } from "./fallback";
+import { pickCrossSellSuggestion } from "../ai/cross-sell";
 import {
   type CollectInputNodeConfig,
   type ConditionNodeConfig,
@@ -906,6 +907,7 @@ async function captureTextIntoVar(
     var_key: string;
     append: boolean | undefined;
     lowercase: boolean | undefined;
+    cross_sell: boolean | undefined;
     next_node_key: string;
     text: string;
   },
@@ -921,7 +923,29 @@ async function captureTextIntoVar(
     args.append && typeof existing === "string" && existing.length > 0
       ? `${existing}\n${captured}`
       : captured;
-  const newVars = { ...run.vars, [args.var_key]: newValue };
+
+  // At most one cross-sell aside per run, regardless of how many
+  // capturing nodes have it enabled — a customer who mentions pan,
+  // then leche, then queso should get ONE nudge, not three.
+  let crossSellAside = "";
+  if (args.cross_sell && !run.vars.__cross_sell_shown) {
+    const suggestion = pickCrossSellSuggestion(trimmed, []);
+    if (suggestion) crossSellAside = `\n\n${suggestion}`;
+  }
+
+  const newVars = {
+    ...run.vars,
+    [args.var_key]: newValue,
+    // Lets the node's own confirmation text echo back just what was
+    // captured THIS turn (e.g. "Anotado: 1 libra de queso ✅") instead
+    // of a generic ack that gives no way to notice a dropped item.
+    [`${args.var_key}_last`]: captured,
+    // Reset every turn (not just when cross_sell is on) so a stale
+    // aside from an earlier capture on a different var_key can't leak
+    // into this node's confirmation text.
+    [`${args.var_key}_cross_sell`]: crossSellAside,
+    ...(crossSellAside ? { __cross_sell_shown: true } : {}),
+  };
   let capErr = (
     await db
       .from("flow_runs")
@@ -1018,6 +1042,7 @@ async function handleReplyForActiveRun(
       var_key: cfg.var_key,
       append: cfg.append,
       lowercase: cfg.lowercase,
+      cross_sell: cfg.cross_sell,
       next_node_key: cfg.next_node_key,
       text: message.text,
     });
@@ -1038,6 +1063,7 @@ async function handleReplyForActiveRun(
       var_key: fallbackCfg.var_key,
       append: fallbackCfg.append,
       lowercase: fallbackCfg.lowercase,
+      cross_sell: fallbackCfg.cross_sell,
       next_node_key: fallbackCfg.next_node_key,
       text: message.text,
     });

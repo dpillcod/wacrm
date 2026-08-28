@@ -60,6 +60,8 @@ export interface SendButtonsNodeConfig {
    */
   text_fallback?: {
     var_key: string;
+    /** See CollectInputNodeConfig.cross_sell — same rationale. */
+    cross_sell?: boolean;
     append?: boolean;
     /** See CollectInputNodeConfig.lowercase — same rationale. */
     lowercase?: boolean;
@@ -170,6 +172,16 @@ export interface CollectInputNodeConfig {
    * is lowercased consistently rather than only on later turns.
    */
   lowercase?: boolean;
+  /**
+   * When true, the captured text is checked against the curated
+   * cross-sell rules (see `lib/ai/cross-sell.ts`) and, on a match, the
+   * business-authored aside is stashed into
+   * `vars.<var_key>_cross_sell` (empty string when nothing matched or
+   * one was already shown this run) for the node's own confirmation
+   * text to interpolate. Checked against the ORIGINAL captured text
+   * (before `lowercase`), fires at most once per run.
+   */
+  cross_sell?: boolean;
   /** Node to advance to after capture. */
   next_node_key: string;
 }
