@@ -1088,7 +1088,8 @@ async function handleReplyForActiveRun(
     matched = matchReplyId(currentNode, message.reply_id);
   } else if (
     message.kind === "text" &&
-    currentNode.node_type === "collect_input"
+    currentNode.node_type === "collect_input" &&
+    (currentNode.config as unknown as CollectInputNodeConfig).accept !== "image"
   ) {
     const cfg = currentNode.config as unknown as CollectInputNodeConfig;
     matched = await captureTextIntoVar(db, run, currentNode.node_key, {
@@ -1098,6 +1099,24 @@ async function handleReplyForActiveRun(
       cross_sell: cfg.cross_sell,
       next_node_key: cfg.next_node_key,
       text: message.text,
+    });
+  } else if (
+    message.kind === "image" &&
+    currentNode.node_type === "collect_input" &&
+    (currentNode.config as unknown as CollectInputNodeConfig).accept === "image"
+  ) {
+    // A plain text reply here does NOT satisfy the node (falls through
+    // to the fallback policy's reprompt) — e.g. a transfer receipt
+    // step should keep asking for the photo rather than silently
+    // accepting "ya transferí" as if it were the receipt itself.
+    const cfg = currentNode.config as unknown as CollectInputNodeConfig;
+    matched = await captureTextIntoVar(db, run, currentNode.node_key, {
+      var_key: cfg.var_key,
+      append: cfg.append,
+      lowercase: false,
+      cross_sell: false,
+      next_node_key: cfg.next_node_key,
+      text: message.media_url,
     });
   } else if (
     message.kind === "text" &&

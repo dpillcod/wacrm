@@ -739,11 +739,27 @@ async function processMessage(
             reply_title: contentText ?? '',
             meta_message_id: message.id,
           }
-        : {
-            kind: 'text',
-            text: contentText ?? message.text?.body ?? '',
-            meta_message_id: message.id,
-          },
+        : message.type === 'image' && mediaUrl
+          ? {
+              kind: 'image',
+              // mediaUrl is a same-origin relative path (the inbox's
+              // own <img> proxy) — fine there, but flow vars built from
+              // it can end up interpolated into a raw WhatsApp text
+              // (e.g. the staff handoff note), where a bare relative
+              // path isn't a usable link. Absolutize when we know our
+              // own base URL; otherwise fall back to the relative path
+              // rather than block on it.
+              media_url: process.env.NEXT_PUBLIC_SITE_URL
+                ? `${process.env.NEXT_PUBLIC_SITE_URL.replace(/\/+$/, '')}${mediaUrl}`
+                : mediaUrl,
+              caption: contentText,
+              meta_message_id: message.id,
+            }
+          : {
+              kind: 'text',
+              text: contentText ?? message.text?.body ?? '',
+              meta_message_id: message.id,
+            },
     isFirstInboundMessage,
   })
   const flowConsumed = flowResult.consumed

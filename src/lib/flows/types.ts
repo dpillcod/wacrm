@@ -147,6 +147,14 @@ export interface CollectInputNodeConfig {
    */
   var_key: string;
   /**
+   * What kind of reply this node captures. Defaults to `"text"`.
+   * `"image"` is for cases like a bank-transfer receipt — a plain
+   * text reply at that point does NOT satisfy the node (falls to the
+   * fallback policy's reprompt instead), and `var_key` receives the
+   * image's `media_url` rather than typed text.
+   */
+  accept?: "text" | "image";
+  /**
    * Reserved for v2. Accepted on the config but ignored by the v1.5
    * runner — captures any non-empty text.
    */
@@ -388,6 +396,14 @@ export type ParsedInbound =
       reply_id: string;
       /** The visible title of the tapped option (for logging). */
       reply_title: string;
+      meta_message_id: string;
+    }
+  | {
+      kind: "image";
+      /** Public URL of the already-downloaded/re-hosted image. */
+      media_url: string;
+      /** Optional caption the customer sent alongside the photo. */
+      caption: string | null;
       meta_message_id: string;
     };
 
