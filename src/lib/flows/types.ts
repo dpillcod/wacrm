@@ -65,6 +65,8 @@ export interface SendButtonsNodeConfig {
     append?: boolean;
     /** See CollectInputNodeConfig.lowercase — same rationale. */
     lowercase?: boolean;
+    /** See CollectInputNodeConfig.price_question_reply — same rationale. */
+    price_question_reply?: string;
     next_node_key: string;
   };
 }
@@ -182,6 +184,16 @@ export interface CollectInputNodeConfig {
    * (before `lowercase`), fires at most once per run.
    */
   cross_sell?: boolean;
+  /**
+   * When set, an incoming reply that looks like a price/total question
+   * (see `lib/flows/price-question.ts` — "cuánto es", "cuánto le
+   * debo", etc.) is answered with this text INSTEAD of being captured
+   * into `var_key` — checked before capture, so the question never
+   * lands in the running order as if it were another item. The
+   * customer stays on the same node afterward (no advance), free to
+   * keep adding items or answer normally.
+   */
+  price_question_reply?: string;
   /** Node to advance to after capture. */
   next_node_key: string;
 }

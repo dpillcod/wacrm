@@ -41,6 +41,8 @@ import {
 } from "./meta-send";
 import { decideFallback, resolveFallbackPolicy } from "./fallback";
 import { pickCrossSellSuggestion } from "../ai/cross-sell";
+import { notifyStaffOfHandoff } from "../whatsapp/staff-notify";
+import { isPriceQuestion } from "./price-question";
 import {
   type CollectInputNodeConfig,
   type ConditionNodeConfig,
@@ -454,14 +456,29 @@ async function executeHandoff(
       .update(convUpdate)
       .eq("id", run.conversation_id);
   }
+  const resolvedNote = cfg.note ? interpolateVars(cfg.note, run.vars) : null;
   await logEvent(db, run.id, "handoff", node.node_key, {
     // Same gap as send_buttons/send_list (see comments there) — a note
     // like "Pedido: {{vars.order_text}}" needs the captured var resolved
     // here, or the agent sees the literal template instead of the order.
-    note: cfg.note ? interpolateVars(cfg.note, run.vars) : null,
+    note: resolvedNote,
     assigned_to: cfg.assign_to ?? null,
   });
   await endRun(db, run.id, "handed_off", "handoff_node");
+
+  // Best-effort — nobody watching the inbox otherwise finds out a
+  // conversation needs a human until they happen to open WACRM.
+  // Never let a notification failure affect the handoff itself.
+  try {
+    const contactNameVar = run.vars.contact_name;
+    await notifyStaffOfHandoff(db, {
+      accountId: run.account_id,
+      contactName: typeof contactNameVar === "string" ? contactNameVar.trim() : "",
+      summary: resolvedNote ?? "Un cliente necesita atención.",
+    });
+  } catch (err) {
+    console.error("[flows] staff notification failed:", err);
+  }
 }
 
 /**
@@ -1019,6 +1036,42 @@ async function handleReplyForActiveRun(
   if (!currentNode) {
     await endRun(db, run.id, "failed", "current_node_not_found");
     return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+  }
+
+  // A price/total question ("cuánto es", "cuánto le debo"...) is
+  // handled before anything else can claim the message — otherwise it
+  // either lands in the running order as if it were another item
+  // (collect_input/ask_more) or, worse, "¿cuánto es para transferir?"
+  // gets misread as choosing Transferencia at the payment step, since
+  // it contains "transf". Answer it and stay put; don't advance.
+  if (message.kind === "text") {
+    const priceReply =
+      currentNode.node_type === "collect_input"
+        ? (currentNode.config as unknown as CollectInputNodeConfig).price_question_reply
+        : currentNode.node_type === "send_buttons"
+          ? (currentNode.config as unknown as SendButtonsNodeConfig).text_fallback
+              ?.price_question_reply
+          : undefined;
+    if (priceReply && isPriceQuestion(message.text)) {
+      try {
+        await engineSendText({
+          accountId: run.account_id,
+          userId: run.user_id,
+          conversationId: run.conversation_id!,
+          contactId: run.contact_id!,
+          text: interpolateVars(priceReply, run.vars),
+        });
+        await logEvent(db, run.id, "message_sent", currentNode.node_key, {
+          reason: "price_question_reply",
+        });
+      } catch (err) {
+        await logEvent(db, run.id, "error", currentNode.node_key, {
+          reason: "price_question_reply_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+      }
+      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
   }
 
   // Two ways a reply can advance:
