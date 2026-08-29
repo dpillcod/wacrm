@@ -67,6 +67,8 @@ export interface SendButtonsNodeConfig {
     lowercase?: boolean;
     /** See CollectInputNodeConfig.price_question_reply — same rationale. */
     price_question_reply?: string;
+    /** See CollectInputNodeConfig.debounce_ms — same rationale. */
+    debounce_ms?: number;
     next_node_key: string;
   };
 }
@@ -212,6 +214,16 @@ export interface CollectInputNodeConfig {
    * keep adding items or answer normally.
    */
   price_question_reply?: string;
+  /**
+   * Delay (ms) before the node's confirmation/next message actually
+   * sends — resets on every new capture, so a customer typing several
+   * items back-to-back only gets ONE reply once they pause, instead of
+   * a stacked "Anotado ✅ ¿algo más?" bubble after each item. The
+   * capture itself is immediate and never lost; only the outbound
+   * message + advance to `next_node_key` is deferred. Unset/0 keeps
+   * the old immediate-reply behavior.
+   */
+  debounce_ms?: number;
   /** Node to advance to after capture. */
   next_node_key: string;
 }
@@ -446,7 +458,8 @@ export interface DispatchInboundResult {
     | "handed_off"
     | "fallback_fired"
     | "duplicate_inbound_ignored"
-    | "no_match";
+    | "no_match"
+    | "debounced";
 }
 
 // ============================================================

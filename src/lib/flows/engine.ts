@@ -939,6 +939,79 @@ export async function dispatchInboundToFlows(
   }
 }
 
+// ============================================================
+// Reply debouncing — see CollectInputNodeConfig.debounce_ms. A
+// customer listing several items back-to-back ("1 leche", "1 queso",
+// "10 panes" as separate messages) would otherwise get a stacked
+// "Anotado ✅ ¿algo más?" bubble after each one; this coalesces them
+// into a single reply once they pause.
+//
+// In-memory only — correct for this single-persistent-container
+// deployment (EasyPanel, not serverless: a setTimeout scheduled during
+// one request keeps running after the response is sent, for as long
+// as the process itself stays up), but NOT durable across a restart.
+// Worst case on a restart mid-debounce: the customer's already-
+// captured item sits un-acknowledged until their next message
+// re-triggers a reply — never lost, just delayed. Keyed by run.id, so
+// unrelated conversations never contend.
+// ============================================================
+const pendingDebounces = new Map<string, ReturnType<typeof setTimeout>>();
+
+function clearPendingDebounce(runId: string): void {
+  const existing = pendingDebounces.get(runId);
+  if (existing) {
+    clearTimeout(existing);
+    pendingDebounces.delete(runId);
+  }
+}
+
+async function flushDebouncedAdvance(
+  db: AdminClient,
+  runId: string,
+  expectedNodeKey: string,
+  nextNodeKey: string,
+  nodes: Map<string, FlowNodeRow>,
+): Promise<void> {
+  pendingDebounces.delete(runId);
+  const { data, error } = await db
+    .from("flow_runs")
+    .select("*")
+    .eq("id", runId)
+    .maybeSingle();
+  if (error || !data) return;
+  const freshRun = data as FlowRunRow;
+  // Something else already moved this run on while we were waiting —
+  // a button tap raced ahead of the debounce window, the cron swept
+  // it, etc. The delayed advance is stale; skip it rather than
+  // re-entering a node the run has already left (or reviving an ended
+  // run).
+  if (freshRun.status !== "active" || freshRun.current_node_key !== expectedNodeKey) {
+    return;
+  }
+  if (freshRun.reprompt_count !== 0) {
+    await db.from("flow_runs").update({ reprompt_count: 0 }).eq("id", runId);
+    freshRun.reprompt_count = 0;
+  }
+  await advanceFromNodeKey(db, freshRun, nextNodeKey, nodes);
+}
+
+function scheduleDebouncedAdvance(
+  db: AdminClient,
+  runId: string,
+  expectedNodeKey: string,
+  nextNodeKey: string,
+  nodes: Map<string, FlowNodeRow>,
+  delayMs: number,
+): void {
+  clearPendingDebounce(runId);
+  const timer = setTimeout(() => {
+    flushDebouncedAdvance(db, runId, expectedNodeKey, nextNodeKey, nodes).catch((err) => {
+      console.error("[flows] debounced advance failed:", err);
+    });
+  }, delayMs);
+  pendingDebounces.set(runId, timer);
+}
+
 /**
  * Shared by collect_input's own capture and send_buttons' text_fallback
  * (see SendButtonsNodeConfig.text_fallback) — both need the identical
@@ -1038,6 +1111,13 @@ async function handleReplyForActiveRun(
   message: ParsedInbound,
   nodes: Map<string, FlowNodeRow>,
 ): Promise<DispatchInboundResult> {
+  // Any new inbound message supersedes whatever an earlier debounced
+  // capture was waiting on — if this message itself schedules a fresh
+  // debounce below, that's exactly the "extend the wait" behavior we
+  // want; if it's a button tap instead, this prevents the stale timer
+  // from re-entering a node the tap has already moved the run past.
+  clearPendingDebounce(run.id);
+
   // Note: we intentionally do NOT persist the raw customer text. A
   // `collect_input` prompt that asks "what's your card number?" would
   // otherwise leave the PAN sitting in flow_run_events.payload forever,
@@ -1111,6 +1191,7 @@ async function handleReplyForActiveRun(
   //
   // Everything else falls through to the fallback policy below.
   let matched: string | null = null;
+  let debounceMs: number | undefined;
   if (
     message.kind === "interactive_reply" &&
     (currentNode.node_type === "send_buttons" ||
@@ -1138,6 +1219,7 @@ async function handleReplyForActiveRun(
       next_node_key: cfg.next_node_key,
       text: message.text,
     });
+    debounceMs = cfg.debounce_ms;
   } else if (
     message.kind === "image" &&
     currentNode.node_type === "collect_input" &&
@@ -1173,6 +1255,7 @@ async function handleReplyForActiveRun(
       next_node_key: fallbackCfg.next_node_key,
       text: message.text,
     });
+    debounceMs = fallbackCfg.debounce_ms;
   }
 
   if (matched) {
@@ -1190,6 +1273,15 @@ async function handleReplyForActiveRun(
         .eq("id", run.id);
       if (!error) run.reprompt_count = 0;
     }
+
+    if (debounceMs && debounceMs > 0) {
+      // Capture already landed above — only the reply + advance is
+      // deferred, so nothing the customer said is at risk of being
+      // lost even if the process restarts before the timer fires.
+      scheduleDebouncedAdvance(db, run.id, currentNode.node_key, matched, nodes, debounceMs);
+      return { consumed: true, flow_run_id: run.id, outcome: "debounced" };
+    }
+
     const outcome = await advanceFromNodeKey(db, run, matched, nodes);
     return {
       consumed: true,
