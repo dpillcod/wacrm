@@ -881,6 +881,24 @@ export async function dispatchInboundToFlows(
           outcome: "duplicate_inbound_ignored",
         };
       }
+
+      // A customer stuck on an abandoned or confusing step can restart
+      // on demand by sending a fresh trigger word ("hola", "menu"...)
+      // instead of waiting on the 24h cron sweep to free them up —
+      // checked BEFORE handing the message to the stuck run, so it
+      // takes priority over whatever that run's current node expects.
+      const restartFlow = await findEntryFlow(
+        db,
+        input.accountId,
+        input.message,
+        input.isFirstInboundMessage,
+      );
+      if (restartFlow?.entry_node_id) {
+        await endRun(db, activeRun.id, "timed_out", "restarted_by_keyword");
+        const restartNodes = await loadAllNodes(db, restartFlow.id);
+        return startNewRun(db, restartFlow, input, restartNodes);
+      }
+
       // One SELECT for the whole flow's nodes — advance loop is now
       // in-memory. See loadAllNodes.
       const nodes = await loadAllNodes(db, activeRun.flow_id);
@@ -1089,8 +1107,15 @@ async function handleReplyForActiveRun(
   } else if (
     message.kind === "text" &&
     currentNode.node_type === "collect_input" &&
-    (currentNode.config as unknown as CollectInputNodeConfig).accept !== "image"
+    ((currentNode.config as unknown as CollectInputNodeConfig).accept !== "image" ||
+      (currentNode.config as unknown as CollectInputNodeConfig).optional)
   ) {
+    // `accept: "image", optional: true` also lands here for a text
+    // reply — live-testing showed a hard block on the transfer receipt
+    // stalls the conversation (the customer often hasn't gone and made
+    // the bank transfer yet). Whatever they typed is captured as-is
+    // instead of silently discarded, and the run advances rather than
+    // reprompting for the photo.
     const cfg = currentNode.config as unknown as CollectInputNodeConfig;
     matched = await captureTextIntoVar(db, run, currentNode.node_key, {
       var_key: cfg.var_key,
@@ -1105,10 +1130,6 @@ async function handleReplyForActiveRun(
     currentNode.node_type === "collect_input" &&
     (currentNode.config as unknown as CollectInputNodeConfig).accept === "image"
   ) {
-    // A plain text reply here does NOT satisfy the node (falls through
-    // to the fallback policy's reprompt) — e.g. a transfer receipt
-    // step should keep asking for the photo rather than silently
-    // accepting "ya transferí" as if it were the receipt itself.
     const cfg = currentNode.config as unknown as CollectInputNodeConfig;
     matched = await captureTextIntoVar(db, run, currentNode.node_key, {
       var_key: cfg.var_key,

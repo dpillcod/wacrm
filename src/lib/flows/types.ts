@@ -155,6 +155,16 @@ export interface CollectInputNodeConfig {
    */
   accept?: "text" | "image";
   /**
+   * Only meaningful when `accept: "image"`. Live-testing showed a
+   * blocking wait for a transfer receipt stalls the conversation —
+   * the customer often hasn't gone and made the actual bank transfer
+   * yet, so they have nothing to send. When true, a text reply is
+   * accepted too (captured as-is into `var_key`, e.g. "ya transferí,
+   * la foto te la mando en un momento") and the run advances instead
+   * of reprompting for the photo.
+   */
+  optional?: boolean;
+  /**
    * Reserved for v2. Accepted on the config but ignored by the v1.5
    * runner — captures any non-empty text.
    */
