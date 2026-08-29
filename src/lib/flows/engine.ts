@@ -575,6 +575,12 @@ async function endRun(
       end_reason: reason,
     })
     .eq("id", runId);
+  // The staleness guards on both timers' flush functions would catch
+  // this anyway (status is no longer 'active'), but clearing here too
+  // stops the Map from holding onto entries for runs that are already
+  // done.
+  clearPendingDebounce(runId);
+  clearPendingIdleNudge(runId);
 }
 
 // ============================================================
@@ -590,6 +596,13 @@ async function advanceFromNodeKey(
   startNodeKey: string,
   nodes: Map<string, FlowNodeRow>,
 ): Promise<{ outcome: "advanced" | "completed" | "handed_off" }> {
+  // Loaded once per advance call (not per node — the loop below can
+  // pass through several auto-advance nodes before actually
+  // suspending) so every suspend point below can schedule its idle
+  // nudge without a redundant extra fetch each.
+  const idleNudgeMinutes = resolveFallbackPolicy(
+    (await loadFlow(db, run.flow_id))?.fallback_policy,
+  ).idle_nudge_minutes;
   let currentKey: string | null = startNodeKey;
   // Defensive cap — if a flow has a cycle (which the validator
   // SHOULD catch but doesn't yet in v1), we bail rather than loop.
@@ -719,6 +732,7 @@ async function advanceFromNodeKey(
           reason: "lost_race_during_advance",
         });
       }
+      scheduleIdleNudge(db, run.id, node.node_key, idleNudgeMinutes);
       return { outcome: "advanced" };
     }
     if (node.node_type === "condition") {
@@ -786,6 +800,7 @@ async function advanceFromNodeKey(
           reason: "lost_race_during_advance",
         });
       }
+      scheduleIdleNudge(db, run.id, node.node_key, idleNudgeMinutes);
       return { outcome: "advanced" };
     }
     if (node.node_type === "send_list") {
@@ -801,6 +816,7 @@ async function advanceFromNodeKey(
           reason: "lost_race_during_advance",
         });
       }
+      scheduleIdleNudge(db, run.id, node.node_key, idleNudgeMinutes);
       return { outcome: "advanced" };
     }
     if (node.node_type === "handoff") {
@@ -1012,6 +1028,77 @@ function scheduleDebouncedAdvance(
   pendingDebounces.set(runId, timer);
 }
 
+// ============================================================
+// Idle nudge — see FlowFallbackPolicy.idle_nudge_minutes. A customer
+// who goes quiet mid-order otherwise hears nothing again until the
+// on_timeout_hours sweep, hours later. Same in-memory-timer model and
+// caveats as the debounce above (correct for this single-persistent-
+// container deployment; a restart mid-wait just means the nudge
+// doesn't fire that once, nothing is lost).
+// ============================================================
+const pendingIdleNudges = new Map<string, ReturnType<typeof setTimeout>>();
+
+function clearPendingIdleNudge(runId: string): void {
+  const existing = pendingIdleNudges.get(runId);
+  if (existing) {
+    clearTimeout(existing);
+    pendingIdleNudges.delete(runId);
+  }
+}
+
+async function sendIdleNudge(
+  db: AdminClient,
+  runId: string,
+  expectedNodeKey: string,
+): Promise<void> {
+  pendingIdleNudges.delete(runId);
+  const { data, error } = await db
+    .from("flow_runs")
+    .select("*")
+    .eq("id", runId)
+    .maybeSingle();
+  if (error || !data) return;
+  const freshRun = data as FlowRunRow;
+  // They already replied (or the run moved/ended some other way) —
+  // stale, skip. Mirrors the same staleness guard the debounce flush
+  // uses, and for the same reason: this timer was scheduled minutes
+  // ago against whatever node was current back then.
+  if (freshRun.status !== "active" || freshRun.current_node_key !== expectedNodeKey) {
+    return;
+  }
+  try {
+    const { whatsapp_message_id } = await engineSendText({
+      accountId: freshRun.account_id,
+      userId: freshRun.user_id,
+      conversationId: freshRun.conversation_id!,
+      contactId: freshRun.contact_id!,
+      text: "¿Sigues ahí? Si tienes alguna duda, dime y seguimos con tu pedido 🙂",
+    });
+    await logEvent(db, runId, "message_sent", expectedNodeKey, {
+      reason: "idle_nudge",
+      whatsapp_message_id,
+    });
+  } catch (err) {
+    console.error("[flows] idle nudge send failed:", err);
+  }
+}
+
+function scheduleIdleNudge(
+  db: AdminClient,
+  runId: string,
+  nodeKey: string,
+  minutes: number,
+): void {
+  clearPendingIdleNudge(runId);
+  if (!minutes || minutes <= 0) return;
+  const timer = setTimeout(() => {
+    sendIdleNudge(db, runId, nodeKey).catch((err) => {
+      console.error("[flows] idle nudge failed:", err);
+    });
+  }, minutes * 60_000);
+  pendingIdleNudges.set(runId, timer);
+}
+
 /**
  * Shared by collect_input's own capture and send_buttons' text_fallback
  * (see SendButtonsNodeConfig.text_fallback) — both need the identical
@@ -1117,6 +1204,8 @@ async function handleReplyForActiveRun(
   // want; if it's a button tap instead, this prevents the stale timer
   // from re-entering a node the tap has already moved the run past.
   clearPendingDebounce(run.id);
+  // They clearly ARE still there — cancel any pending "¿sigues ahí?".
+  clearPendingIdleNudge(run.id);
 
   // Note: we intentionally do NOT persist the raw customer text. A
   // `collect_input` prompt that asks "what's your card number?" would

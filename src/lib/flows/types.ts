@@ -386,6 +386,15 @@ export interface FlowFallbackPolicy {
   on_timeout_hours: number;
   /** What to do once max_reprompts has been hit. */
   on_exhaust: "handoff" | "end";
+  /**
+   * Minutes of silence after a prompt before a one-time "¿sigues
+   * ahí?" nudge — a customer who goes quiet mid-order otherwise hears
+   * nothing again until the `on_timeout_hours` sweep, hours later.
+   * Fires at most once per suspended node (cancelled the moment they
+   * reply, whether that's before or after it fires) — never repeats
+   * while they keep ignoring it, to avoid nagging. 0/unset disables it.
+   */
+  idle_nudge_minutes: number;
 }
 
 export const DEFAULT_FALLBACK_POLICY: FlowFallbackPolicy = {
@@ -393,6 +402,7 @@ export const DEFAULT_FALLBACK_POLICY: FlowFallbackPolicy = {
   max_reprompts: 2,
   on_timeout_hours: 24,
   on_exhaust: "handoff",
+  idle_nudge_minutes: 0,
 };
 
 // ============================================================

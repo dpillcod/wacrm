@@ -63,6 +63,7 @@ const POLICY_REPROMPT_2_HANDOFF: FlowFallbackPolicy = {
   max_reprompts: 2,
   on_timeout_hours: 24,
   on_exhaust: "handoff",
+  idle_nudge_minutes: 0,
 };
 
 describe("decideFallback", () => {

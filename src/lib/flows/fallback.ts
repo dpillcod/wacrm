@@ -56,6 +56,10 @@ export function resolveFallbackPolicy(
       r.on_exhaust === "handoff" || r.on_exhaust === "end"
         ? r.on_exhaust
         : DEFAULT_FALLBACK_POLICY.on_exhaust,
+    idle_nudge_minutes:
+      typeof r.idle_nudge_minutes === "number" && r.idle_nudge_minutes >= 0
+        ? r.idle_nudge_minutes
+        : DEFAULT_FALLBACK_POLICY.idle_nudge_minutes,
   };
 }
 
