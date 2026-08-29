@@ -468,16 +468,29 @@ async function executeHandoff(
 
   // Best-effort — nobody watching the inbox otherwise finds out a
   // conversation needs a human until they happen to open WACRM.
-  // Never let a notification failure affect the handoff itself.
+  // Never let a notification failure affect the handoff itself. The
+  // result is logged to flow_run_events (not just console.error) —
+  // a newline-in-parameter bug here once silently failed every real
+  // handoff across several live tests before anyone noticed.
   try {
     const contactNameVar = run.vars.contact_name;
-    await notifyStaffOfHandoff(db, {
+    const result = await notifyStaffOfHandoff(db, {
       accountId: run.account_id,
       contactName: typeof contactNameVar === "string" ? contactNameVar.trim() : "",
       summary: resolvedNote ?? "Un cliente necesita atención.",
     });
+    if (result.failed.length > 0) {
+      await logEvent(db, run.id, "error", node.node_key, {
+        reason: "staff_notify_failed",
+        failed: result.failed,
+        sent: result.sent,
+      });
+    }
   } catch (err) {
-    console.error("[flows] staff notification failed:", err);
+    await logEvent(db, run.id, "error", node.node_key, {
+      reason: "staff_notify_threw",
+      detail: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 

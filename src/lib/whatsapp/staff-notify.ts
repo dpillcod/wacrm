@@ -18,8 +18,18 @@ import { sanitizePhoneForMeta } from './phone-utils'
  * template name is configured), never a free-form text.
  *
  * Best-effort by design: a failed staff notification must never break
- * the handoff itself. Callers should fire this and swallow errors.
+ * the handoff itself. Callers should fire this and swallow/log errors
+ * — the return value exists so a caller CAN record per-phone failures
+ * somewhere inspectable (e.g. flow_run_events) instead of only a
+ * server console log nobody's watching; a newline-in-parameter bug
+ * here once went unnoticed across several live tests for exactly that
+ * reason.
  */
+export interface NotifyStaffResult {
+  sent: string[]
+  failed: { phone: string; error: string }[]
+}
+
 export async function notifyStaffOfHandoff(
   db: SupabaseClient,
   args: {
@@ -29,12 +39,12 @@ export async function notifyStaffOfHandoff(
      *  customer asked for — shown as the template's second variable. */
     summary: string
   },
-): Promise<void> {
+): Promise<NotifyStaffResult> {
   const phones = (process.env.ORDER_NOTIFICATION_PHONES ?? '')
     .split(',')
     .map((p) => sanitizePhoneForMeta(p.trim()))
     .filter(Boolean)
-  if (phones.length === 0) return
+  if (phones.length === 0) return { sent: [], failed: [] }
 
   const templateName = process.env.ORDER_NOTIFICATION_TEMPLATE ?? 'aviso_pedido_nuevo'
   const templateLanguage = process.env.ORDER_NOTIFICATION_TEMPLATE_LANG ?? 'es'
@@ -46,14 +56,27 @@ export async function notifyStaffOfHandoff(
     .single()
   if (configError || !config) {
     console.error('[staff-notify] no whatsapp_config for account, skipping', args.accountId)
-    return
+    return { sent: [], failed: phones.map((phone) => ({ phone, error: 'no whatsapp_config for account' })) }
   }
 
   const accessToken = decrypt(config.access_token)
-  // Meta caps a template body variable's length; a very long running
-  // order shouldn't blow past that and fail every send.
-  const summary = args.summary.slice(0, 900) || '(sin detalle)'
+  // Meta rejects a template parameter outright (error 132018) if it
+  // contains a newline/tab or 4+ consecutive spaces — found live: every
+  // real handoff note is multi-line (order items, one per line, plus
+  // billing/location), so every notification was silently failing
+  // until this was caught. " · " keeps the structure legible on one
+  // line instead of just collapsing to spaces.
+  const sanitizeForTemplateParam = (text: string): string =>
+    text
+      .replace(/[\n\t]+/g, ' · ')
+      .replace(/ {4,}/g, '   ')
+      .trim()
+  // Meta also caps a template body variable's length; a very long
+  // running order shouldn't blow past that and fail every send.
+  const summary = sanitizeForTemplateParam(args.summary).slice(0, 900) || '(sin detalle)'
 
+  const sent: string[] = []
+  const failed: { phone: string; error: string }[] = []
   await Promise.all(
     phones.map(async (phone) => {
       try {
@@ -63,11 +86,15 @@ export async function notifyStaffOfHandoff(
           to: phone,
           templateName,
           language: templateLanguage,
-          params: [args.contactName || 'Cliente', summary],
+          params: [sanitizeForTemplateParam(args.contactName) || 'Cliente', summary],
         })
+        sent.push(phone)
       } catch (err) {
-        console.error(`[staff-notify] failed to notify ${phone}:`, err)
+        const message = err instanceof Error ? err.message : String(err)
+        console.error(`[staff-notify] failed to notify ${phone}:`, message)
+        failed.push({ phone, error: message })
       }
     }),
   )
+  return { sent, failed }
 }
