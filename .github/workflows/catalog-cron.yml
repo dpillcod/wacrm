@@ -1,0 +1,24 @@
+name: Daily WhatsApp catalog sync
+
+# Refreshes every connected account's catalog_products from Meta
+# Commerce Manager once a day. Kept on its own schedule (not the
+# 15-minute cron.yml) since product names/prices/availability don't
+# churn fast enough to justify that cadence, and each run can be a
+# non-trivial number of Meta API calls for a large catalog.
+#
+# Reuses the same CRON_SECRET / WACRM_BASE_URL repo secrets as
+# cron.yml — no new secrets to provision.
+on:
+  schedule:
+    - cron: "0 9 * * *" # 09:00 UTC daily (04:00 Ecuador time)
+  workflow_dispatch: {}
+
+jobs:
+  sync-catalog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync WhatsApp catalogs
+        run: |
+          curl -sf -o /dev/null -w "catalog/cron-sync -> %{http_code}\n" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.WACRM_BASE_URL }}/api/whatsapp/catalog/cron-sync"
