@@ -48,5 +48,6 @@ next-env.d.ts
 # real credentials (see fotos-productos/procesar-fotos.js)
 /fotos-productos/
 /banners/
+/contenido-web/
 /checkpoints/
 /qr-pago/

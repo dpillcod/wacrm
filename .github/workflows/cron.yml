@@ -20,12 +20,23 @@ name: Scheduled maintenance cron
 #                             any automation with a delay step never
 #                             actually fires past that step.
 #
-# Both endpoints require the same X-Cron-Secret header (by design, see
-# their route.ts comments) — set as the CRON_SECRET repo secret below,
-# matching AUTOMATION_CRON_SECRET on the actual deployment.
+#   /api/whatsapp/catalog/cron-sync - refreshes every account's Meta
+#                             product catalog (name/price/availability/
+#                             image). Runs on the separate daily
+#                             schedule below, not the 15-minute one —
+#                             product data doesn't churn fast enough to
+#                             justify that cadence, and each leg can be
+#                             a non-trivial number of Meta API calls for
+#                             a large catalog (see the route's own
+#                             comment).
+#
+# All three endpoints require the same X-Cron-Secret header (by design,
+# see their route.ts comments) — set as the CRON_SECRET repo secret
+# below, matching AUTOMATION_CRON_SECRET on the actual deployment.
 on:
   schedule:
     - cron: "*/15 * * * *"
+    - cron: "0 8 * * *"
   workflow_dispatch: {}
 
 jobs:
@@ -43,3 +54,10 @@ jobs:
           curl -sf -o /dev/null -w "automations/cron -> %{http_code}\n" \
             -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
             "${{ secrets.WACRM_BASE_URL }}/api/automations/cron"
+
+      - name: Sync WhatsApp product catalogs (daily only)
+        if: github.event.schedule == '0 8 * * *' || github.event_name == 'workflow_dispatch'
+        run: |
+          curl -sf -o /dev/null -w "catalog/cron-sync -> %{http_code}\n" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.WACRM_BASE_URL }}/api/whatsapp/catalog/cron-sync"

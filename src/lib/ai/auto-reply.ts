@@ -165,16 +165,18 @@ export async function dispatchInboundToAiReply(
       return
     }
 
-    // Ground the reply in the account's knowledge base (best-effort).
+    // Ground the reply in the account's knowledge base (best-effort), and
+    // fetch catalog candidates (opt-in — same "don't pay for work nobody
+    // asked for" gate as the knowledge-base head-count check) in
+    // parallel: neither depends on the other's result, and both are on
+    // the hot path the customer is waiting on.
     const question = latestUserMessage(messages)
-    const knowledge = await retrieveKnowledge(db, accountId, config, question)
-
-    // Catalog candidates are opt-in and only worth fetching when the
-    // account might actually recommend a product — same "don't pay for
-    // work nobody asked for" gate as the knowledge-base head-count check.
-    const catalogCandidates = config.productSuggestionsEnabled
-      ? await retrieveCatalogProducts(db, accountId, question)
-      : []
+    const [knowledge, catalogCandidates] = await Promise.all([
+      retrieveKnowledge(db, accountId, config, question),
+      config.productSuggestionsEnabled
+        ? retrieveCatalogProducts(db, accountId, question)
+        : Promise.resolve([]),
+    ])
 
     const systemPrompt = buildSystemPrompt({
       userPrompt: config.systemPrompt,
