@@ -170,6 +170,42 @@ export function NodeConfigForm({
             onChange={(v) => onUpdateConfig({ next_node_key: v })}
             label={t("advanceAfterCapture")}
           />
+          {showAdvanced && (
+            <>
+              <div>
+                <TextRow
+                  label={t("priceQuestionReplyLabel")}
+                  value={
+                    (cfg as { price_question_reply?: string })
+                      .price_question_reply ?? ""
+                  }
+                  onChange={(v) =>
+                    onUpdateConfig({ price_question_reply: v || null })
+                  }
+                  rows={2}
+                />
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  {t("priceQuestionReplyHelp")}
+                </p>
+              </div>
+              <div>
+                <TextRow
+                  label={t("generalInfoReplyLabel")}
+                  value={
+                    (cfg as { general_info_reply?: string })
+                      .general_info_reply ?? ""
+                  }
+                  onChange={(v) =>
+                    onUpdateConfig({ general_info_reply: v || null })
+                  }
+                  rows={2}
+                />
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  {t("generalInfoReplyHelp")}
+                </p>
+              </div>
+            </>
+          )}
         </>
       );
 
