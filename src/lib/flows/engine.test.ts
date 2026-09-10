@@ -6,6 +6,7 @@ import {
   isSuspending,
   isTerminal,
   evaluateConditionPredicate,
+  parseLeadingQuantity,
 } from "./engine";
 
 describe("matchReplyId", () => {
@@ -94,6 +95,39 @@ describe("matchReplyId", () => {
         "x",
       ),
     ).toBeNull();
+  });
+});
+
+describe("parseLeadingQuantity", () => {
+  it("splits a leading number off the rest of the text", () => {
+    expect(parseLeadingQuantity("2 cocas")).toEqual({
+      quantity: "2",
+      rest: "cocas",
+    });
+    expect(parseLeadingQuantity("10 panes blancos")).toEqual({
+      quantity: "10",
+      rest: "panes blancos",
+    });
+  });
+
+  it("returns a null quantity when there's no leading number", () => {
+    expect(parseLeadingQuantity("coca cola")).toEqual({
+      quantity: null,
+      rest: "coca cola",
+    });
+  });
+
+  it("treats a bare number with nothing after it as having no rest to search", () => {
+    // No product text follows the number — falls back to searching the
+    // whole trimmed string rather than an empty query.
+    expect(parseLeadingQuantity("2")).toEqual({ quantity: null, rest: "2" });
+  });
+
+  it("trims surrounding whitespace", () => {
+    expect(parseLeadingQuantity("  3   leches  ")).toEqual({
+      quantity: "3",
+      rest: "leches",
+    });
   });
 });
 

@@ -67,6 +67,8 @@ export interface SendButtonsNodeConfig {
     lowercase?: boolean;
     /** See CollectInputNodeConfig.price_question_reply — same rationale. */
     price_question_reply?: string;
+    /** See CollectInputNodeConfig.general_info_reply — same rationale. */
+    general_info_reply?: string;
     /** See CollectInputNodeConfig.debounce_ms — same rationale. */
     debounce_ms?: number;
     next_node_key: string;
@@ -215,6 +217,15 @@ export interface CollectInputNodeConfig {
    */
   price_question_reply?: string;
   /**
+   * When set, an incoming reply that looks like a general "about the
+   * business" question (see `lib/flows/general-question.ts` —
+   * schedule, location, general range of products) is answered with
+   * this text INSTEAD of being captured into `var_key` — checked
+   * before capture, same rationale as `price_question_reply`. The
+   * customer stays on the same node afterward (no advance).
+   */
+  general_info_reply?: string;
+  /**
    * Delay (ms) before the node's confirmation/next message actually
    * sends — resets on every new capture, so a customer typing several
    * items back-to-back only gets ONE reply once they pause, instead of
@@ -224,6 +235,19 @@ export interface CollectInputNodeConfig {
    * the old immediate-reply behavior.
    */
   debounce_ms?: number;
+  /**
+   * When true, the captured text is checked against the account's
+   * product catalog (`lib/ai/catalog.ts`) before storing. 2+ matches
+   * (e.g. "coca cola" matching several sizes) pause the run on this
+   * same node and send an interactive list of the candidates (name +
+   * price per row, `lib/flows/meta-send.ts`'s `engineSendInteractiveList`)
+   * instead of capturing the ambiguous text — the customer's tap
+   * becomes the captured value (see `vars.__pending_disambiguation`
+   * in the engine). 0 or 1 matches, or no catalog configured for the
+   * account, fall through to today's plain-text capture. Defaults to
+   * false — existing flows are unaffected unless authored to opt in.
+   */
+  disambiguate_products?: boolean;
   /** Node to advance to after capture. */
   next_node_key: string;
 }
@@ -469,7 +493,8 @@ export interface DispatchInboundResult {
     | "fallback_fired"
     | "duplicate_inbound_ignored"
     | "no_match"
-    | "debounced";
+    | "debounced"
+    | "awaiting_disambiguation";
 }
 
 // ============================================================

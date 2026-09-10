@@ -41,8 +41,14 @@ import {
 } from "./meta-send";
 import { decideFallback, resolveFallbackPolicy } from "./fallback";
 import { pickCrossSellSuggestion } from "../ai/cross-sell";
+import {
+  retrieveCatalogProducts,
+  type CatalogProductCandidate,
+} from "../ai/catalog";
 import { notifyStaffOfHandoff } from "../whatsapp/staff-notify";
+import { INTERACTIVE_LIMITS } from "../whatsapp/meta-api";
 import { isPriceQuestion } from "./price-question";
+import { isGeneralQuestion } from "./general-question";
 import {
   type CollectInputNodeConfig,
   type ConditionNodeConfig,
@@ -1100,6 +1106,127 @@ function scheduleIdleNudge(
 }
 
 /**
+ * Stashed in `flow_runs.vars.__pending_disambiguation` while a
+ * `collect_input` node with `disambiguate_products: true` is waiting
+ * on the customer to pick one of several catalog matches from an
+ * interactive list. `candidates` maps each row's `reply_id`
+ * (the product's `retailerId`) back to its display name so the tap
+ * can be turned into the text that would otherwise have been typed.
+ */
+interface PendingDisambiguation {
+  var_key: string;
+  next_node_key: string;
+  append: boolean | undefined;
+  lowercase: boolean | undefined;
+  cross_sell: boolean | undefined;
+  quantity: string | null;
+  candidates: Record<string, string>;
+}
+
+/**
+ * Splits a leading item count off free text ("2 cocas" -> "2" +
+ * "cocas"), so a resolved catalog pick can be re-combined as
+ * "2 Coca-Cola 2L" instead of losing the quantity the customer typed.
+ * No leading number -> quantity is null and the whole trimmed text is
+ * searched as-is.
+ */
+export function parseLeadingQuantity(text: string): {
+  quantity: string | null;
+  rest: string;
+} {
+  const trimmed = text.trim();
+  const match = trimmed.match(/^(\d+)\s+(.+)$/);
+  if (match) return { quantity: match[1], rest: match[2].trim() };
+  return { quantity: null, rest: trimmed };
+}
+
+function formatCandidatePrice(candidate: CatalogProductCandidate): string {
+  if (candidate.price == null) return "";
+  return `${candidate.currency ?? ""} ${candidate.price}`.trim();
+}
+
+/**
+ * Checked before a `collect_input` node (with `disambiguate_products:
+ * true`) captures a text reply. Returns null when there's nothing to
+ * disambiguate (no catalog configured, or the text matches 0-1
+ * products) — the caller falls through to the normal capture. When
+ * 2+ products match, sends an interactive list of the candidates and
+ * suspends the run on the SAME node (no capture, no advance) — the
+ * customer's tap is resolved back into a capture by the
+ * `__pending_disambiguation` branch in `handleReplyForActiveRun`.
+ */
+async function tryStartProductDisambiguation(
+  db: AdminClient,
+  run: FlowRunRow,
+  node: FlowNodeRow,
+  cfg: CollectInputNodeConfig,
+  text: string,
+): Promise<DispatchInboundResult | null> {
+  if (!cfg.disambiguate_products) return null;
+
+  const { data: waConfig } = await db
+    .from("whatsapp_config")
+    .select("catalog_id")
+    .eq("account_id", run.account_id)
+    .maybeSingle();
+  const catalogId = (waConfig as { catalog_id: string | null } | null)
+    ?.catalog_id;
+  if (!catalogId) return null;
+
+  const { quantity, rest } = parseLeadingQuantity(text);
+  const candidates = await retrieveCatalogProducts(db, run.account_id, rest, 8);
+  if (candidates.length < 2) return null;
+
+  const { whatsapp_message_id } = await engineSendInteractiveList({
+    accountId: run.account_id,
+    userId: run.user_id,
+    conversationId: run.conversation_id!,
+    contactId: run.contact_id!,
+    bodyText: "¿Cuál de estas opciones es la que buscas?",
+    buttonLabel: "Ver opciones",
+    sections: [
+      {
+        rows: candidates.map((c) => ({
+          id: c.retailerId,
+          title: c.name.slice(0, INTERACTIVE_LIMITS.listRowTitleMaxLength),
+          description: formatCandidatePrice(c).slice(
+            0,
+            INTERACTIVE_LIMITS.listRowDescriptionMaxLength,
+          ),
+        })),
+      },
+    ],
+  });
+
+  const candidateMap: Record<string, string> = {};
+  for (const c of candidates) candidateMap[c.retailerId] = c.name;
+  const pending: PendingDisambiguation = {
+    var_key: cfg.var_key,
+    next_node_key: cfg.next_node_key,
+    append: cfg.append,
+    lowercase: cfg.lowercase,
+    cross_sell: cfg.cross_sell,
+    quantity,
+    candidates: candidateMap,
+  };
+  const newVars = { ...run.vars, __pending_disambiguation: pending };
+  await db.from("flow_runs").update({ vars: newVars }).eq("id", run.id);
+  run.vars = newVars;
+
+  await logEvent(db, run.id, "message_sent", node.node_key, {
+    node_type: "collect_input_disambiguation",
+    whatsapp_message_id,
+    candidate_count: candidates.length,
+  });
+
+  return {
+    consumed: true,
+    flow_run_id: run.id,
+    outcome: "awaiting_disambiguation",
+  };
+}
+
+/**
  * Shared by collect_input's own capture and send_buttons' text_fallback
  * (see SendButtonsNodeConfig.text_fallback) — both need the identical
  * "trim, append-or-overwrite, persist, mirror in-memory, log" sequence,
@@ -1274,6 +1401,42 @@ async function handleReplyForActiveRun(
     }
   }
 
+  // A general "about the business" question (schedule, location,
+  // general range of products — "cual son sus horarios de atencion")
+  // gets the same treatment as a price question above: answer it and
+  // stay put, instead of it landing in the running order as if it
+  // were another item. Checked after the price-question intercept so
+  // a price question phrased ambiguously still hits that one first.
+  if (message.kind === "text") {
+    const generalReply =
+      currentNode.node_type === "collect_input"
+        ? (currentNode.config as unknown as CollectInputNodeConfig).general_info_reply
+        : currentNode.node_type === "send_buttons"
+          ? (currentNode.config as unknown as SendButtonsNodeConfig).text_fallback
+              ?.general_info_reply
+          : undefined;
+    if (generalReply && isGeneralQuestion(message.text)) {
+      try {
+        await engineSendText({
+          accountId: run.account_id,
+          userId: run.user_id,
+          conversationId: run.conversation_id!,
+          contactId: run.contact_id!,
+          text: interpolateVars(generalReply, run.vars),
+        });
+        await logEvent(db, run.id, "message_sent", currentNode.node_key, {
+          reason: "general_info_reply",
+        });
+      } catch (err) {
+        await logEvent(db, run.id, "error", currentNode.node_key, {
+          reason: "general_info_reply_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+      }
+      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
+  }
+
   // Two ways a reply can advance:
   //   1. Interactive button/list tap on a send_buttons/send_list node.
   //   2. Text reply on a collect_input node — capture into vars.
@@ -1281,7 +1444,45 @@ async function handleReplyForActiveRun(
   // Everything else falls through to the fallback policy below.
   let matched: string | null = null;
   let debounceMs: number | undefined;
-  if (
+
+  // A collect_input node with disambiguate_products may have paused
+  // this exact node waiting on a product pick (see
+  // tryStartProductDisambiguation). Whatever comes in next resolves
+  // or discards that pending pick, so it's cleared up front — a tap
+  // resolves it into the capture that would otherwise have happened;
+  // anything else (a stale tap, or the customer typing instead of
+  // tapping) just drops it and falls through to the branches below,
+  // where a text reply re-enters the disambiguation check fresh.
+  const pendingDisambiguation = run.vars.__pending_disambiguation as
+    | PendingDisambiguation
+    | undefined;
+  if (pendingDisambiguation) {
+    const restVars: Record<string, unknown> = { ...run.vars };
+    delete restVars.__pending_disambiguation;
+    run.vars = restVars;
+    const pickedName =
+      message.kind === "interactive_reply"
+        ? pendingDisambiguation.candidates[message.reply_id]
+        : undefined;
+    if (pickedName) {
+      matched = await captureTextIntoVar(db, run, currentNode.node_key, {
+        var_key: pendingDisambiguation.var_key,
+        append: pendingDisambiguation.append,
+        lowercase: pendingDisambiguation.lowercase,
+        cross_sell: pendingDisambiguation.cross_sell,
+        next_node_key: pendingDisambiguation.next_node_key,
+        text: pendingDisambiguation.quantity
+          ? `${pendingDisambiguation.quantity} ${pickedName}`
+          : pickedName,
+      });
+      // Resolving an ambiguity IS the "reply now" signal — no debounce.
+    }
+  }
+
+  if (matched !== null) {
+    // Resolved via a disambiguation pick above — skip the rest of the
+    // matching chain entirely.
+  } else if (
     message.kind === "interactive_reply" &&
     (currentNode.node_type === "send_buttons" ||
       currentNode.node_type === "send_list")
@@ -1300,6 +1501,14 @@ async function handleReplyForActiveRun(
     // instead of silently discarded, and the run advances rather than
     // reprompting for the photo.
     const cfg = currentNode.config as unknown as CollectInputNodeConfig;
+    const disambiguation = await tryStartProductDisambiguation(
+      db,
+      run,
+      currentNode,
+      cfg,
+      message.text,
+    );
+    if (disambiguation) return disambiguation;
     matched = await captureTextIntoVar(db, run, currentNode.node_key, {
       var_key: cfg.var_key,
       append: cfg.append,
