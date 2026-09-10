@@ -57,7 +57,7 @@ import {
   type OnNodeDrag,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Plus, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react';
 
 import { useTranslations } from 'next-intl';
 
@@ -582,6 +582,7 @@ function FlowCanvasInner() {
       </div>
 
       <NodeEditSheet
+        key={selectedNode?.node_key ?? 'none'}
         node={selectedNode}
         isEntry={selectedNode?.node_key === entryNodeId}
         allNodes={builderNodes}
@@ -623,6 +624,7 @@ function NodeEditSheet({
   // Sheet is controlled — opens when a node is selected, closes via
   // Esc / overlay / close button (all delegated to onClose).
   const open = node !== null;
+  const [showAdvanced, setShowAdvanced] = useState(false);
   if (!node) {
     return (
       <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
@@ -662,9 +664,23 @@ function NodeEditSheet({
           <NodeConfigForm
             node={node}
             allNodes={allNodes}
-            showAdvanced={false}
+            showAdvanced={showAdvanced}
             onUpdateConfig={onUpdateConfig}
           />
+          <div className="border-border border-t pt-3">
+            <button
+              type="button"
+              onClick={() => setShowAdvanced((v) => !v)}
+              className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs"
+            >
+              {showAdvanced ? (
+                <ChevronUp className="h-3 w-3" />
+              ) : (
+                <ChevronDown className="h-3 w-3" />
+              )}
+              {showAdvanced ? t('hideAdvanced') : t('showAdvanced')}
+            </button>
+          </div>
         </div>
 
         <SheetFooter className="border-border border-t px-5 py-3 sm:flex-row sm:justify-between">
