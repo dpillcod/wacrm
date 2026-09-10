@@ -14,6 +14,17 @@ import { engineSendText, engineSendProduct, engineSendProductList } from '@/lib/
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 
 /**
+ * Sent to the customer right before a handoff takes over. Without
+ * this, the customer sees the bot go silent mid-conversation with no
+ * acknowledgment at all — `text` is discarded on every handoff path
+ * below, so whatever the model wrote (or was told to write via the
+ * business-context prompt) never reaches them. Fixed Spanish copy:
+ * this fork's canned strings are for one specific Spanish-speaking
+ * account (see cross-sell.ts's suggestions), not a generic default.
+ */
+const HANDOFF_ACK_MESSAGE = 'Un momento por favor, en breve un encargado le va a ayudar 🙂'
+
+/**
  * Hand a conversation off to a human: pause the bot (sticky until
  * re-enabled), route to the configured handoff agent (null leaves it
  * in the shared queue), and leave a short internal note. Assigning
@@ -24,11 +35,29 @@ import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
  */
 async function handOffToHuman(
   db: ReturnType<typeof supabaseAdmin>,
+  accountId: string,
   conversationId: string,
+  contactId: string,
+  userId: string,
   handoffAgentId: string | null,
   currentAssignedAgentId: string | null,
   summary: string,
 ): Promise<void> {
+  try {
+    await engineSendText({
+      accountId,
+      userId,
+      conversationId,
+      contactId,
+      text: HANDOFF_ACK_MESSAGE,
+      aiGenerated: true,
+    })
+  } catch (err) {
+    // A send failure must never block the actual handoff below — the
+    // conversation still needs to reach a human either way.
+    console.error('[ai auto-reply] handoff ack send failed:', err)
+  }
+
   const update: Record<string, unknown> = {
     ai_autoreply_disabled: true,
     ai_handoff_summary: summary,
@@ -132,7 +161,10 @@ export async function dispatchInboundToAiReply(
       const capMessages = await buildConversationContext(db, conversationId)
       await handOffToHuman(
         db,
+        accountId,
         conversationId,
+        contactId,
+        configOwnerUserId,
         config.handoffAgentId,
         conv.assigned_agent_id,
         buildHandoffSummary({
@@ -218,7 +250,10 @@ export async function dispatchInboundToAiReply(
       // this thread and hand it to a human.
       await handOffToHuman(
         db,
+        accountId,
         conversationId,
+        contactId,
+        configOwnerUserId,
         config.handoffAgentId,
         conv.assigned_agent_id,
         buildHandoffSummary({ messages, replyCount: conv.ai_reply_count ?? 0 }),
