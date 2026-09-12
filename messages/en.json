@@ -1089,6 +1089,8 @@
         "generalInfoReplyLabel": "Reply to a general business question (optional)",
         "generalInfoReplyHelp": "If the customer asks about hours, location, or what you sell in general instead of naming an item, send this text instead of capturing it as part of the order. Leave blank to disable.",
         "internalNote": "Internal note (for the agent picking up)",
+        "assignToLabel": "Assign to (optional)",
+        "assignToHelp": "Assigns the conversation to this teammate, which triggers wacrm's own in-app notification (the bell icon) — free, no WhatsApp template needed. Leave as \"None\" to only flip the conversation to pending, with no notification.",
         "endNodeHelp": "Terminal node. When the runner reaches this node the run is marked complete. No config needed.",
         "bodyText": "Body text",
         "footerText": "Footer (optional, 60 chars)",

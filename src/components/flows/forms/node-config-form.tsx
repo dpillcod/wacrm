@@ -49,6 +49,7 @@ import { cn } from "@/lib/utils";
 import { uploadAccountMedia, MEDIA_MAX_BYTES } from "@/lib/storage/upload-media";
 import { slugify, type BuilderNode } from "../shared";
 import { NextNodeRow, NodeKeySelect, TextRow } from "./fields";
+import type { AccountMember } from "@/types";
 
 interface NodeConfigFormProps {
   node: BuilderNode;
@@ -233,11 +234,10 @@ export function NodeConfigForm({
 
     case "handoff":
       return (
-        <TextRow
-          label={t("internalNote")}
-          value={(cfg as { note?: string }).note ?? ""}
-          onChange={(v) => onUpdateConfig({ note: v })}
-          rows={2}
+        <HandoffForm
+          cfg={cfg as { note?: string; assign_to?: string }}
+          onUpdateConfig={onUpdateConfig}
+          t={t}
         />
       );
 
@@ -248,6 +248,82 @@ export function NodeConfigForm({
         </p>
       );
   }
+}
+
+// ============================================================
+// handoff
+// ============================================================
+
+/**
+ * `assign_to` was config-only (no UI) — a handoff node with it unset
+ * flips the conversation to pending WITHOUT assigning anyone, which
+ * means the free in-app "conversation_assigned" notification never
+ * fires (see notifications/page.tsx) and nobody finds out a run
+ * handed off unless they happen to check the inbox. Lets a flow
+ * author pick a real teammate instead of leaving this silent.
+ */
+function HandoffForm({
+  cfg,
+  onUpdateConfig,
+  t,
+}: {
+  cfg: { note?: string; assign_to?: string };
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const [members, setMembers] = useState<AccountMember[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/account/members")
+      .then((res) => res.json())
+      .then((data: { members?: AccountMember[] }) => {
+        if (!cancelled) setMembers(data.members ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setMembers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <>
+      <TextRow
+        label={t("internalNote")}
+        value={cfg.note ?? ""}
+        onChange={(v) => onUpdateConfig({ note: v })}
+        rows={2}
+      />
+      <div>
+        <label className="text-muted-foreground mb-1 block text-xs">
+          {t("assignToLabel")}
+        </label>
+        <Select
+          value={cfg.assign_to ?? "__none__"}
+          onValueChange={(v) =>
+            onUpdateConfig({ assign_to: v === "__none__" ? null : v })
+          }
+        >
+          <SelectTrigger className="bg-muted">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">{t("none")}</SelectItem>
+            {(members ?? []).map((m) => (
+              <SelectItem key={m.user_id} value={m.user_id}>
+                {m.full_name || m.email || m.user_id}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="mt-1 text-[10px] text-muted-foreground">
+          {t("assignToHelp")}
+        </p>
+      </div>
+    </>
+  );
 }
 
 // ============================================================
