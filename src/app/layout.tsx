@@ -32,6 +32,12 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [{ url: "/icon" }],
+    apple: [{ url: "/pwa-icon-192" }],
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "wacrm",
   },
   formatDetection: {
     email: false,
