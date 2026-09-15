@@ -3,6 +3,7 @@ import {
   sendInteractiveList,
   sendInteractiveProduct,
   sendInteractiveProductList,
+  sendInteractiveCtaUrl,
   sendMediaMessage,
   sendTextMessage,
   type InteractiveButton,
@@ -384,6 +385,128 @@ export async function engineSendProductList(
     message_id: waMessageId,
     status: 'sent',
     ai_generated: args.aiGenerated ?? false,
+  })
+  if (msgErr) {
+    throw new Error(`sent to Meta but DB insert failed: ${msgErr.message}`)
+  }
+
+  await db
+    .from('conversations')
+    .update({
+      last_message_text: args.bodyText,
+      last_message_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', args.conversationId)
+
+  return { whatsapp_message_id: waMessageId }
+}
+
+interface SendCtaUrlEngineArgs {
+  accountId: string
+  userId: string
+  conversationId: string
+  contactId: string
+  bodyText: string
+  headerText?: string
+  footerText?: string
+  buttonText: string
+  url: string
+}
+
+/**
+ * Send Meta's single-button "Call-To-Action URL" message from the
+ * Flows engine — used by the runner's `send_cta_url` node. Always
+ * auto-advances right after the send lands, same as `engineSendText`:
+ * tapping the button opens the URL in the customer's browser and
+ * never reports back to us, so there's nothing to suspend and wait
+ * for (contrast `engineSendInteractiveButtons`/List, which persist
+ * `last_prompt_message_id` because a reply IS expected).
+ */
+export async function engineSendCtaUrl(
+  args: SendCtaUrlEngineArgs,
+): Promise<{ whatsapp_message_id: string }> {
+  const db = supabaseAdmin()
+
+  const { data: contact, error: contactErr } = await db
+    .from('contacts')
+    .select('id, phone')
+    .eq('id', args.contactId)
+    .eq('account_id', args.accountId)
+    .maybeSingle()
+  if (contactErr || !contact?.phone) {
+    throw new Error('contact not found for this account')
+  }
+
+  const sanitized = sanitizePhoneForMeta(contact.phone)
+  if (!isValidE164(sanitized)) {
+    throw new Error(`contact phone invalid: ${contact.phone}`)
+  }
+
+  const { data: config, error: configErr } = await db
+    .from('whatsapp_config')
+    .select('*')
+    .eq('account_id', args.accountId)
+    .single()
+  if (configErr || !config) {
+    throw new Error('WhatsApp not configured for this account')
+  }
+
+  const accessToken = decrypt(config.access_token)
+
+  const attempt = async (phone: string): Promise<string> => {
+    const r = await sendInteractiveCtaUrl({
+      phoneNumberId: config.phone_number_id,
+      accessToken,
+      to: phone,
+      bodyText: args.bodyText,
+      headerText: args.headerText,
+      footerText: args.footerText,
+      buttonText: args.buttonText,
+      url: args.url,
+    })
+    return r.messageId
+  }
+
+  const variants = phoneVariants(sanitized)
+  let workingPhone = sanitized
+  let waMessageId = ''
+  let lastError: unknown = null
+  for (const v of variants) {
+    try {
+      waMessageId = await attempt(v)
+      workingPhone = v
+      lastError = null
+      break
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (!isRecipientNotAllowedError(msg)) throw err
+      lastError = err
+    }
+  }
+  if (lastError) throw lastError
+
+  if (workingPhone !== sanitized) {
+    await db.from('contacts').update({ phone: workingPhone }).eq('id', contact.id)
+  }
+
+  const interactivePayload: InteractiveMessagePayload = {
+    kind: 'cta_url',
+    body: args.bodyText,
+    header: args.headerText,
+    footer: args.footerText,
+    button_text: args.buttonText,
+    url: args.url,
+  }
+
+  const { error: msgErr } = await db.from('messages').insert({
+    conversation_id: args.conversationId,
+    sender_type: 'bot',
+    content_type: 'interactive',
+    content_text: args.bodyText,
+    interactive_payload: interactivePayload,
+    message_id: waMessageId,
+    status: 'sent',
   })
   if (msgErr) {
     throw new Error(`sent to Meta but DB insert failed: ${msgErr.message}`)

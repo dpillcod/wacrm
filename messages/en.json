@@ -1139,7 +1139,10 @@
         "filenamePlaceholder": "invoice.pdf",
         "advanceAfterSending": "After sending, advance to",
         "pickNextNode": "Pick a next node…",
-        "none": "— None —"
+        "none": "— None —",
+        "ctaButtonLabel": "Button label (≤20 chars)",
+        "ctaUrlLabel": "Button destination URL",
+        "ctaUrlHelp": "Must start with http:// or https:// — opens directly in the customer's browser in one tap, with no reply back to the bot (so there's nothing to branch on)."
       },
       "categories": {
         "messaging": "Messaging",
@@ -1166,6 +1169,10 @@
         "send_media": {
           "label": "Send media",
           "blurb": "Sends an image, video, or document"
+        },
+        "send_cta_url": {
+          "label": "Link button",
+          "blurb": "Opens a link in one tap"
         },
         "collect_input": {
           "label": "Collect input",

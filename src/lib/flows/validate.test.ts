@@ -516,6 +516,97 @@ describe("validateFlowForActivation — send_media", () => {
   });
 });
 
+describe("validateFlowForActivation — send_cta_url", () => {
+  const baseFlow = { ...validFlow, entry_node_id: "s" };
+  const nodesWith = (ctaConfig: Record<string, unknown>) => [
+    { node_key: "s", node_type: "start", config: { next_node_key: "cta" } },
+    { node_key: "cta", node_type: "send_cta_url", config: ctaConfig },
+    { node_key: "e", node_type: "end", config: {} },
+  ];
+
+  const validCta = {
+    text: "Ver catálogo completo",
+    button_text: "Ver catálogo",
+    url: "https://ferrotiendaec.com/shop/",
+    next_node_key: "e",
+  };
+
+  it("passes on a fully-populated send_cta_url node", () => {
+    const issues = validateFlowForActivation(baseFlow, nodesWith(validCta));
+    expect(issues).toEqual([]);
+  });
+
+  it("flags missing text", () => {
+    const issues = validateFlowForActivation(
+      baseFlow,
+      nodesWith({ ...validCta, text: "" }),
+    );
+    expect(
+      issues.some((i) => i.node_key === "cta" && i.field === "text"),
+    ).toBe(true);
+  });
+
+  it("flags missing button_text", () => {
+    const issues = validateFlowForActivation(
+      baseFlow,
+      nodesWith({ ...validCta, button_text: "" }),
+    );
+    expect(
+      issues.some((i) => i.node_key === "cta" && i.field === "button_text"),
+    ).toBe(true);
+  });
+
+  it("flags a button_text over 20 chars", () => {
+    const issues = validateFlowForActivation(
+      baseFlow,
+      nodesWith({ ...validCta, button_text: "x".repeat(21) }),
+    );
+    expect(
+      issues.some((i) => i.node_key === "cta" && i.field === "button_text"),
+    ).toBe(true);
+  });
+
+  it("flags a missing url", () => {
+    const issues = validateFlowForActivation(
+      baseFlow,
+      nodesWith({ ...validCta, url: "" }),
+    );
+    expect(
+      issues.some((i) => i.node_key === "cta" && i.field === "url"),
+    ).toBe(true);
+  });
+
+  it("flags a url without http(s):// — e.g. tel:", () => {
+    const issues = validateFlowForActivation(
+      baseFlow,
+      nodesWith({ ...validCta, url: "tel:+593981499637" }),
+    );
+    expect(
+      issues.some((i) => i.node_key === "cta" && i.field === "url"),
+    ).toBe(true);
+  });
+
+  it("flags next_node_key pointing at a non-existent node", () => {
+    const issues = validateFlowForActivation(
+      baseFlow,
+      nodesWith({ ...validCta, next_node_key: "ghost" }),
+    );
+    expect(
+      issues.some(
+        (i) =>
+          i.node_key === "cta" &&
+          i.field === "next_node_key" &&
+          i.message.includes("ghost"),
+      ),
+    ).toBe(true);
+  });
+
+  it("contributes its next_node_key to reachability", () => {
+    const set = reachableFromEntry("s", nodesWith(validCta));
+    expect(set).toEqual(new Set(["s", "cta", "e"]));
+  });
+});
+
 describe("reachableFromEntry", () => {
   it("walks the graph from the entry", () => {
     const set = reachableFromEntry("start", validNodes);

@@ -1,6 +1,6 @@
 "use client";
 
-import { List, Reply, ShoppingBag } from "lucide-react";
+import { ExternalLink, List, Reply, ShoppingBag } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { InteractiveMessagePayload } from "@/lib/whatsapp/interactive";
 
@@ -91,6 +91,15 @@ export function InteractivePreview({
             Product · {payload.product_retailer_id}
           </span>
         </div>
+      ) : payload.kind === "cta_url" ? (
+        <button
+          type="button"
+          disabled
+          className="flex w-full items-center justify-center gap-1.5 border-t border-border py-2 text-sm font-medium text-primary"
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+          <span className="truncate">{payload.button_text || "Open link"}</span>
+        </button>
       ) : (
         <div className="flex flex-col gap-1 border-t border-border px-3 py-2">
           {payload.sections.map((s, i) => (

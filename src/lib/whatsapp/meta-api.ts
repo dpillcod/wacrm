@@ -833,6 +833,88 @@ export async function sendInteractiveButtons(
   return { messageId: data.messages[0].id }
 }
 
+export interface SendInteractiveCtaUrlArgs {
+  phoneNumberId: string
+  accessToken: string
+  to: string
+  /** The body text — what the customer reads above the button. */
+  bodyText: string
+  /** Optional plain-text header (≤ 60 chars). */
+  headerText?: string
+  /** Optional grey footer line under the button (≤ 60 chars). */
+  footerText?: string
+  /** Visible button label (≤ 20 chars per Meta). */
+  buttonText: string
+  /** Must start with http:// or https:// — Meta rejects anything else. */
+  url: string
+  /** Meta's message_id of the message being replied to (quote preview). */
+  contextMessageId?: string
+}
+
+/**
+ * Send Meta's single-button "Call-To-Action URL" interactive message —
+ * the customer opens `url` directly in their browser in one tap.
+ * Unlike `sendInteractiveButtons`, tapping never produces a webhook
+ * event (Meta treats it as leaving the chat, not replying), and only
+ * one button is allowed per message — a menu of several direct links
+ * is several of these sent back to back, not one call with more
+ * buttons.
+ */
+export async function sendInteractiveCtaUrl(
+  args: SendInteractiveCtaUrlArgs
+): Promise<MetaSendResult> {
+  const {
+    phoneNumberId, accessToken, to,
+    bodyText, headerText, footerText, buttonText, url, contextMessageId,
+  } = args
+  validateInteractiveBody(bodyText)
+  validateInteractiveHeaderFooter(headerText, footerText)
+  if (!buttonText) throw new Error('CTA URL button missing label.')
+  if (buttonText.length > INTERACTIVE_LIMITS.buttonTitleMaxLength) {
+    throw new Error(
+      `CTA URL button label "${buttonText}" exceeds ${INTERACTIVE_LIMITS.buttonTitleMaxLength} chars.`
+    )
+  }
+  if (!/^https?:\/\//i.test(url)) {
+    throw new Error('CTA URL button requires a url starting with http:// or https://.')
+  }
+
+  const interactive: Record<string, unknown> = {
+    type: 'cta_url',
+    body: { text: bodyText },
+    action: {
+      name: 'cta_url',
+      parameters: { display_text: buttonText, url },
+    },
+  }
+  if (headerText) interactive.header = { type: 'text', text: headerText }
+  if (footerText) interactive.footer = { text: footerText }
+
+  const body: Record<string, unknown> = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to,
+    type: 'interactive',
+    interactive,
+  }
+  if (contextMessageId) body.context = { message_id: contextMessageId }
+
+  const endpoint = `${META_API_BASE}/${phoneNumberId}/messages`
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  const data = await response.json()
+  return { messageId: data.messages[0].id }
+}
+
 export interface InteractiveListRow {
   /** Stable id sent back in the webhook when tapped (≤ 200 chars). */
   id: string

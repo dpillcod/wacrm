@@ -96,11 +96,26 @@ export interface InteractiveProductListPayload {
   sections: InteractiveProductListSection[]
 }
 
+export interface InteractiveCtaUrlPayload {
+  kind: 'cta_url'
+  /** Body text shown above the button (≤ 1024 chars). */
+  body: string
+  /** Optional plain-text header (≤ 60 chars). */
+  header?: string
+  /** Optional grey footer line (≤ 60 chars). */
+  footer?: string
+  /** Visible button label (≤ 20 chars per Meta). */
+  button_text: string
+  /** Must start with http:// or https:// — Meta's own requirement. */
+  url: string
+}
+
 export type InteractiveMessagePayload =
   | InteractiveButtonsPayload
   | InteractiveListPayload
   | InteractiveProductPayload
   | InteractiveProductListPayload
+  | InteractiveCtaUrlPayload
 
 export type InteractiveValidation =
   | { ok: true }
@@ -173,7 +188,7 @@ export function validateInteractivePayload(
     )
   }
 
-  if (p.kind === 'buttons' || p.kind === 'list') {
+  if (p.kind === 'buttons' || p.kind === 'list' || p.kind === 'cta_url') {
     const withHeader = p as { header?: string; footer?: string }
     const hf = validateHeaderFooter(withHeader.header, withHeader.footer)
     if (!hf.ok) return hf
@@ -351,8 +366,24 @@ export function validateInteractivePayload(
     return ok()
   }
 
+  if (p.kind === 'cta_url') {
+    const cta = p as InteractiveCtaUrlPayload
+    if (typeof cta.button_text !== 'string' || cta.button_text.trim() === '') {
+      return fail('A call-to-action button needs a label.')
+    }
+    if (cta.button_text.length > INTERACTIVE_LIMITS.buttonTitleMaxLength) {
+      return fail(
+        `Button label exceeds the ${INTERACTIVE_LIMITS.buttonTitleMaxLength}-character limit.`,
+      )
+    }
+    if (typeof cta.url !== 'string' || !/^https?:\/\//i.test(cta.url)) {
+      return fail('The button URL must start with http:// or https://.')
+    }
+    return ok()
+  }
+
   return fail(
-    'Interactive message must be reply buttons, a list, a product, or a product list.',
+    'Interactive message must be reply buttons, a list, a product, a product list, or a call-to-action URL.',
   )
 }
 
@@ -372,6 +403,8 @@ export function interactivePayloadPreviewText(
       return '[product]'
     case 'product_list':
       return '[product list]'
+    case 'cta_url':
+      return '[link button]'
     default:
       return '[list]'
   }

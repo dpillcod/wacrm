@@ -301,6 +301,86 @@ function validateNode(
       break;
     }
 
+    case "send_cta_url": {
+      const cfg = node.config as {
+        text?: string;
+        button_text?: string;
+        url?: string;
+        footer_text?: string;
+        next_node_key?: string;
+      };
+      if (!cfg.text?.trim()) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "text",
+          message: "Call-to-action node needs a text body.",
+        });
+      }
+      if (!cfg.button_text?.trim()) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "button_text",
+          message: "Call-to-action node needs a button label.",
+        });
+      } else if (cfg.button_text.length > INTERACTIVE_LIMITS.buttonTitleMaxLength) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "button_text",
+          message: `Button label exceeds ${INTERACTIVE_LIMITS.buttonTitleMaxLength} chars (WhatsApp limit).`,
+        });
+      }
+      if (!cfg.url?.trim()) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "url",
+          message: "Call-to-action node needs a URL.",
+        });
+      } else if (!/^https?:\/\//i.test(cfg.url)) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "url",
+          message: "URL must start with http:// or https:// (WhatsApp rejects anything else, tel: included).",
+        });
+      }
+      if (cfg.footer_text && cfg.footer_text.length > INTERACTIVE_LIMITS.footerMaxLength) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "footer_text",
+          message: `Footer exceeds ${INTERACTIVE_LIMITS.footerMaxLength} chars (WhatsApp limit).`,
+        });
+      }
+      if (!cfg.next_node_key) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "next_node_key",
+          message: "Call-to-action node must point to a next node.",
+        });
+      } else if (!knownKeys.has(cfg.next_node_key)) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "next_node_key",
+          message: `Call-to-action points to non-existent node "${cfg.next_node_key}".`,
+        });
+      }
+      break;
+    }
+
     case "send_buttons": {
       const cfg = node.config as {
         text?: string;
@@ -780,6 +860,7 @@ function outgoingEdges(node: NodeInput): string[] {
     case "start":
     case "send_message":
     case "send_media":
+    case "send_cta_url":
     case "collect_input":
     case "set_tag": {
       const cfg = node.config as { next_node_key?: string };

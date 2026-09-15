@@ -36,6 +36,7 @@ import { supabaseAdmin } from "./admin-client";
 import {
   engineSendInteractiveButtons,
   engineSendInteractiveList,
+  engineSendCtaUrl,
   engineSendMedia,
   engineSendText,
 } from "./meta-send";
@@ -61,6 +62,7 @@ import {
   type SendButtonsNodeConfig,
   type SendListNodeConfig,
   type SendMediaNodeConfig,
+  type SendCtaUrlNodeConfig,
   type SendMessageNodeConfig,
   type SetTagNodeConfig,
   type StartNodeConfig,
@@ -124,6 +126,7 @@ export function isAutoAdvancing(node_type: string): boolean {
     node_type === "start" ||
     node_type === "send_message" ||
     node_type === "send_media" ||
+    node_type === "send_cta_url" ||
     node_type === "condition" ||
     node_type === "set_tag"
   );
@@ -687,6 +690,39 @@ async function advanceFromNodeKey(
           detail: err instanceof Error ? err.message : String(err),
         });
         await endRun(db, run.id, "failed", "send_media_failed");
+        return { outcome: "completed" };
+      }
+      currentKey = cfg.next_node_key;
+      continue;
+    }
+    if (node.node_type === "send_cta_url") {
+      const cfg = node.config as unknown as SendCtaUrlNodeConfig;
+      try {
+        const { whatsapp_message_id } = await engineSendCtaUrl({
+          accountId: run.account_id,
+    userId: run.user_id,
+          conversationId: run.conversation_id!,
+          contactId: run.contact_id!,
+          bodyText: interpolateVars(cfg.text, run.vars),
+          headerText: cfg.header_text
+            ? interpolateVars(cfg.header_text, run.vars)
+            : cfg.header_text,
+          footerText: cfg.footer_text
+            ? interpolateVars(cfg.footer_text, run.vars)
+            : cfg.footer_text,
+          buttonText: cfg.button_text,
+          url: cfg.url,
+        });
+        await logEvent(db, run.id, "message_sent", node.node_key, {
+          node_type: "send_cta_url",
+          whatsapp_message_id,
+        });
+      } catch (err) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "send_cta_url_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+        await endRun(db, run.id, "failed", "send_cta_url_failed");
         return { outcome: "completed" };
       }
       currentKey = cfg.next_node_key;

@@ -3,6 +3,7 @@ import {
   INTERACTIVE_LIMITS,
   sendInteractiveButtons,
   sendInteractiveList,
+  sendInteractiveCtaUrl,
 } from "./meta-api";
 
 // All assertions in this file run BEFORE the network call. We stub fetch
@@ -135,6 +136,93 @@ describe("sendInteractiveButtons — validation", () => {
             { type: "reply", reply: { id: "yes", title: "Yes" } },
             { type: "reply", reply: { id: "no", title: "No" } },
           ],
+        },
+      },
+    });
+  });
+});
+
+describe("sendInteractiveCtaUrl — validation", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn(neverFetch));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("rejects a missing button label", async () => {
+    await expect(
+      sendInteractiveCtaUrl({
+        ...BASE_ARGS,
+        buttonText: "",
+        url: "https://ferrotiendaec.com/shop/",
+      }),
+    ).rejects.toThrow(/missing label/);
+  });
+
+  it("rejects a button label longer than 20 chars (Meta cap)", async () => {
+    await expect(
+      sendInteractiveCtaUrl({
+        ...BASE_ARGS,
+        buttonText: "x".repeat(INTERACTIVE_LIMITS.buttonTitleMaxLength + 1),
+        url: "https://ferrotiendaec.com/shop/",
+      }),
+    ).rejects.toThrow(/exceeds 20 chars/);
+  });
+
+  it("rejects a url without http(s):// — e.g. tel:", async () => {
+    await expect(
+      sendInteractiveCtaUrl({
+        ...BASE_ARGS,
+        buttonText: "Llamar",
+        url: "tel:+593981499637",
+      }),
+    ).rejects.toThrow(/http:\/\/ or https:\/\//);
+  });
+
+  it("sends the right payload shape when all inputs are valid", async () => {
+    let captured: { url: string; body: unknown; method: string } | null = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        captured = {
+          url,
+          method: init.method ?? "GET",
+          body: JSON.parse(String(init.body)),
+        };
+        return new Response(
+          JSON.stringify({ messages: [{ id: "wamid.PASS" }] }),
+          { status: 200 },
+        );
+      }),
+    );
+
+    const result = await sendInteractiveCtaUrl({
+      ...BASE_ARGS,
+      footerText: "Horario: L-S 7am-10pm",
+      buttonText: "Ver catálogo",
+      url: "https://ferrotiendaec.com/shop/",
+    });
+
+    expect(result).toEqual({ messageId: "wamid.PASS" });
+    expect(captured).not.toBeNull();
+    expect(captured!.method).toBe("POST");
+    expect(captured!.url).toContain("test-phone/messages");
+    expect(captured!.body).toMatchObject({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: "1234567890",
+      type: "interactive",
+      interactive: {
+        type: "cta_url",
+        body: { text: "Body text" },
+        footer: { text: "Horario: L-S 7am-10pm" },
+        action: {
+          name: "cta_url",
+          parameters: {
+            display_text: "Ver catálogo",
+            url: "https://ferrotiendaec.com/shop/",
+          },
         },
       },
     });

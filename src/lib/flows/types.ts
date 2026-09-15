@@ -122,6 +122,35 @@ export interface SendMediaNodeConfig {
   next_node_key: string;
 }
 
+/**
+ * Sends Meta's single-button "Call-To-Action URL" interactive message
+ * — the button opens `url` directly in the customer's browser in one
+ * tap, unlike `send_buttons` (which only ever returns a reply_id to
+ * us). Meta caps this message type at exactly one button, so a menu
+ * of several direct links is modeled as several send_cta_url nodes in
+ * a row, not one node with multiple buttons.
+ *
+ * Tapping the button never produces a webhook event — WhatsApp treats
+ * it as the customer leaving the chat to view a URL, not as a reply —
+ * so there's no branching here (contrast send_buttons/send_list):
+ * always auto-advance to `next_node_key` right after the send lands.
+ */
+export interface SendCtaUrlNodeConfig {
+  /** Body text shown above the button (≤ 1024 chars). */
+  text: string;
+  /** Optional plain-text header (≤ 60 chars). */
+  header_text?: string;
+  /** Optional grey footer line (≤ 60 chars). */
+  footer_text?: string;
+  /** Visible button label (≤ 20 chars per Meta). */
+  button_text: string;
+  /** Must start with http:// or https:// — Meta rejects anything else
+   *  (no tel:, no wa.me is fine since that's https). */
+  url: string;
+  /** Auto-advance target after the send lands at Meta. */
+  next_node_key: string;
+}
+
 export interface HandoffNodeConfig {
   /** Optional internal note written to flow_run_events.payload.note. */
   note?: string;
@@ -306,6 +335,7 @@ export type FlowNodeConfig =
   | { node_type: "send_buttons"; config: SendButtonsNodeConfig }
   | { node_type: "send_list"; config: SendListNodeConfig }
   | { node_type: "send_media"; config: SendMediaNodeConfig }
+  | { node_type: "send_cta_url"; config: SendCtaUrlNodeConfig }
   | { node_type: "collect_input"; config: CollectInputNodeConfig }
   | { node_type: "condition"; config: ConditionNodeConfig }
   | { node_type: "set_tag"; config: SetTagNodeConfig }

@@ -96,6 +96,56 @@ export function NodeConfigForm({
         </>
       );
 
+    case "send_cta_url":
+      return (
+        <>
+          <TextRow
+            label={t("bodyText")}
+            value={(cfg as { text?: string }).text ?? ""}
+            onChange={(v) => onUpdateConfig({ text: v })}
+            rows={3}
+          />
+          <TextRow
+            label={t("footerText")}
+            value={(cfg as { footer_text?: string }).footer_text ?? ""}
+            onChange={(v) => onUpdateConfig({ footer_text: v })}
+          />
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">
+              {t("ctaButtonLabel")}
+            </label>
+            <Input
+              value={(cfg as { button_text?: string }).button_text ?? ""}
+              onChange={(e) => onUpdateConfig({ button_text: e.target.value })}
+              placeholder={t("optionTitlePlaceholder")}
+              className="bg-muted"
+              maxLength={20}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">
+              {t("ctaUrlLabel")}
+            </label>
+            <Input
+              value={(cfg as { url?: string }).url ?? ""}
+              onChange={(e) => onUpdateConfig({ url: e.target.value })}
+              placeholder="https://…"
+              className="bg-muted"
+            />
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              {t("ctaUrlHelp")}
+            </p>
+          </div>
+          <NextNodeRow
+            value={(cfg as { next_node_key?: string }).next_node_key ?? ""}
+            allNodes={allNodes}
+            currentKey={node.node_key}
+            onChange={(v) => onUpdateConfig({ next_node_key: v })}
+            label={t("advanceAfterSending")}
+          />
+        </>
+      );
+
     case "send_buttons":
       return (
         <SendButtonsForm

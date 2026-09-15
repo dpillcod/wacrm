@@ -5,6 +5,7 @@ import {
   interactivePayloadPreviewText,
   type InteractiveButtonsPayload,
   type InteractiveListPayload,
+  type InteractiveCtaUrlPayload,
 } from './interactive'
 
 const validButtons: InteractiveButtonsPayload = {
@@ -138,5 +139,47 @@ describe('interactivePayloadPreviewText', () => {
   it('falls back when body is blank', () => {
     expect(interactivePayloadPreviewText({ ...validButtons, body: '   ' })).toBe('[buttons]')
     expect(interactivePayloadPreviewText({ ...validList, body: '' })).toBe('[list]')
+  })
+})
+
+const validCtaUrl: InteractiveCtaUrlPayload = {
+  kind: 'cta_url',
+  body: 'Ver catálogo completo',
+  button_text: 'Ver catálogo',
+  url: 'https://ferrotiendaec.com/shop/',
+}
+
+describe('validateInteractivePayload — cta_url', () => {
+  it('accepts a well-formed cta_url payload', () => {
+    expect(validateInteractivePayload(validCtaUrl)).toEqual({ ok: true })
+  })
+
+  it('requires a non-empty button label', () => {
+    expect(validateInteractivePayload({ ...validCtaUrl, button_text: '' }).ok).toBe(false)
+  })
+
+  it('caps the button label at 20 chars', () => {
+    expect(
+      validateInteractivePayload({ ...validCtaUrl, button_text: 'x'.repeat(21) }).ok,
+    ).toBe(false)
+  })
+
+  it('rejects a url without http(s)://', () => {
+    expect(validateInteractivePayload({ ...validCtaUrl, url: 'tel:+593981499637' }).ok).toBe(
+      false,
+    )
+    expect(validateInteractivePayload({ ...validCtaUrl, url: 'ferrotiendaec.com' }).ok).toBe(
+      false,
+    )
+  })
+
+  it('accepts http:// as well as https://', () => {
+    expect(validateInteractivePayload({ ...validCtaUrl, url: 'http://example.com' }).ok).toBe(
+      true,
+    )
+  })
+
+  it('falls back to [link button] when body is blank', () => {
+    expect(interactivePayloadPreviewText({ ...validCtaUrl, body: '' })).toBe('[link button]')
   })
 })

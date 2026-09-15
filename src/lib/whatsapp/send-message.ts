@@ -29,6 +29,7 @@ import {
   sendInteractiveList,
   sendInteractiveProduct,
   sendInteractiveProductList,
+  sendInteractiveCtaUrl,
   type MediaKind,
 } from '@/lib/whatsapp/meta-api';
 import {
@@ -414,6 +415,20 @@ export async function sendMessageToConversation(
             title: s.title,
             productRetailerIds: s.product_retailer_ids,
           })),
+          contextMessageId,
+        });
+        return result.messageId;
+      }
+      if (p.kind === 'cta_url') {
+        const result = await sendInteractiveCtaUrl({
+          phoneNumberId: config.phone_number_id,
+          accessToken,
+          to: phone,
+          bodyText: p.body,
+          headerText: p.header || undefined,
+          footerText: p.footer || undefined,
+          buttonText: p.button_text,
+          url: p.url,
           contextMessageId,
         });
         return result.messageId;
