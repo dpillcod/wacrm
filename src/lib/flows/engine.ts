@@ -1794,3 +1794,103 @@ async function startNewRun(
     outcome: outcome.outcome === "advanced" ? "started" : outcome.outcome,
   };
 }
+
+/**
+ * Starts a flow run triggered by something other than an inbound
+ * WhatsApp message — today, a WooCommerce "order created" webhook
+ * (see src/app/api/webhooks/woocommerce/[accountId]/route.ts). Mirrors
+ * startNewRun's core (insert flow_runs, log, bump the execution
+ * counter, advance from the entry node) but drops everything tied to
+ * a real inbound message: there's no meta_message_id to log, and no
+ * keyword-trigger handoff-clearing to do (this was never a customer
+ * typing "menu" to reclaim the bot from a human).
+ *
+ * `args.vars` seeds the run alongside the usual `contact_name` lookup
+ * — e.g. `{ order_id, order_total, payment_method, order_items_summary }`
+ * for a WooCommerce order, so the flow's own nodes can reference
+ * `{{vars.order_total}}` etc. immediately, with no collect_input
+ * needed for data the webhook already has.
+ *
+ * Caller is responsible for resolving/creating the contact and
+ * conversation first (account-scoped — this function trusts
+ * `args.contactId`/`args.conversationId` are already correct for
+ * `flowId`'s account) and for treating a `no_match` outcome as
+ * "nothing sent, log and move on" rather than retrying — same
+ * best-effort spirit as the rest of the flow engine.
+ */
+export async function startFlowRunForExternalEvent(
+  db: AdminClient,
+  flowId: string,
+  args: {
+    contactId: string;
+    conversationId: string;
+    vars: Record<string, unknown>;
+  },
+): Promise<DispatchInboundResult> {
+  const flow = await loadFlow(db, flowId);
+  if (!flow || flow.status !== "active" || !flow.entry_node_id) {
+    return { consumed: false, outcome: "no_match" };
+  }
+  const nodes = await loadAllNodes(db, flow.id);
+
+  let contactName = "";
+  try {
+    const { data: contactRow } = await db
+      .from("contacts")
+      .select("name")
+      .eq("id", args.contactId)
+      .maybeSingle();
+    const rawName = (contactRow as { name?: string | null } | null)?.name;
+    if (typeof rawName === "string" && rawName.trim().length > 0) {
+      contactName = ` ${rawName.trim().split(/\s+/)[0]}`;
+    }
+  } catch (err) {
+    console.error("[flows] contact name lookup failed:", err);
+  }
+
+  const { data: inserted, error: insErr } = await db
+    .from("flow_runs")
+    .insert({
+      flow_id: flow.id,
+      account_id: flow.account_id,
+      user_id: flow.user_id,
+      contact_id: args.contactId,
+      conversation_id: args.conversationId,
+      status: "active",
+      current_node_key: flow.entry_node_id,
+      vars: { contact_name: contactName, ...args.vars },
+    })
+    .select("*")
+    .maybeSingle();
+  if (insErr) {
+    // 23505 = unique_violation → this contact already has an active
+    // run (idx_one_active_run_per_contact) — most likely they're mid
+    // WhatsApp conversation with the bot already. Don't fight it.
+    const msg = insErr.message ?? "";
+    if (msg.includes("23505") || msg.includes("duplicate key")) {
+      return { consumed: true, outcome: "duplicate_inbound_ignored" };
+    }
+    console.error("[flows] startFlowRunForExternalEvent insert error:", insErr.message);
+    return { consumed: false, outcome: "no_match" };
+  }
+  const run = inserted as FlowRunRow;
+  await logEvent(db, run.id, "started", flow.entry_node_id, {
+    flow_id: flow.id,
+    trigger_type: flow.trigger_type,
+    source: "external_event",
+  });
+
+  const { error: incErr } = await db.rpc("increment_flow_execution_count", {
+    p_flow_id: flow.id,
+  });
+  if (incErr) {
+    console.error("[flows] execution_count rpc error:", incErr.message);
+  }
+
+  const outcome = await advanceFromNodeKey(db, run, flow.entry_node_id!, nodes);
+  return {
+    consumed: true,
+    flow_run_id: run.id,
+    outcome: outcome.outcome === "advanced" ? "started" : outcome.outcome,
+  };
+}
