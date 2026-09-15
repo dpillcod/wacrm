@@ -17,7 +17,8 @@
  * concept). User can switch to List to address them.
  */
 
-import { CircleAlert, CircleCheck } from "lucide-react";
+import { useState } from "react";
+import { ChevronDown, ChevronUp, CircleAlert, CircleCheck } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 import type { ValidationIssue } from "@/lib/flows/validate";
@@ -26,6 +27,11 @@ import { useFlowEditor } from "./flow-editor-state";
 export function ValidationPanel() {
   const { issues, requestFlash } = useFlowEditor();
   const t = useTranslations("Flows.validation");
+  // Collapsed by default — a flow mid-construction routinely has a
+  // couple dozen "unreachable" warnings (everything downstream of a
+  // branch you haven't wired yet), and showing all of them by default
+  // ate real editing space. One line unless the author asks for more.
+  const [expanded, setExpanded] = useState(false);
 
   if (issues.length === 0) {
     // Slate-950 base + emerald accents so the panel stays readable when
@@ -47,19 +53,36 @@ export function ValidationPanel() {
         errors.length > 0 ? "border-red-500/40" : "border-amber-500/40",
       )}
     >
-      <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-        {errors.length > 0 ? (
-          <CircleAlert className="h-4 w-4 text-red-400" />
-        ) : (
-          <CircleAlert className="h-4 w-4 text-amber-400" />
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className={cn(
+          "flex w-full items-center gap-2 text-xs text-muted-foreground",
+          expanded && "mb-2",
         )}
-        {t("summary", { errorCount: errors.length, warningCount: warnings.length })}
-      </div>
-      <div className="flex max-h-24 flex-col gap-1 overflow-y-auto">
-        {issues.map((i, ix) => (
-          <IssueLine key={ix} issue={i} onJump={requestFlash} t={t} />
-        ))}
-      </div>
+        aria-expanded={expanded}
+      >
+        {errors.length > 0 ? (
+          <CircleAlert className="h-4 w-4 shrink-0 text-red-400" />
+        ) : (
+          <CircleAlert className="h-4 w-4 shrink-0 text-amber-400" />
+        )}
+        <span className="flex-1 text-left">
+          {t("summary", { errorCount: errors.length, warningCount: warnings.length })}
+        </span>
+        {expanded ? (
+          <ChevronUp className="h-3.5 w-3.5 shrink-0" />
+        ) : (
+          <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+        )}
+      </button>
+      {expanded && (
+        <div className="flex max-h-40 flex-col gap-1 overflow-y-auto">
+          {issues.map((i, ix) => (
+            <IssueLine key={ix} issue={i} onJump={requestFlash} t={t} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
