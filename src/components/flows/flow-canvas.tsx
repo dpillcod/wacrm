@@ -63,6 +63,7 @@ import { useTranslations } from 'next-intl';
 
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Sheet,
   SheetContent,
@@ -82,6 +83,7 @@ import {
   NodeIconChip,
   groupNodeTypesByCategory,
   nodeColors,
+  slugify,
   summarizeNode,
   type BuilderNode,
   type NodeType,
@@ -278,6 +280,7 @@ function FlowCanvasInner() {
   const {
     state,
     setState,
+    updateNode,
     updateNodeConfig,
     updateNodePosition,
     updateNodePositions,
@@ -505,6 +508,13 @@ function FlowCanvasInner() {
     [selectedNodeKey, updateNodeConfig]
   );
 
+  const onSelectedUpdate = useCallback(
+    (patch: Partial<BuilderNode>) => {
+      if (selectedNodeKey) updateNode(selectedNodeKey, patch);
+    },
+    [selectedNodeKey, updateNode]
+  );
+
   const handleDeleteSelected = useCallback(() => {
     if (!selectedNodeKey) return;
     removeNode(selectedNodeKey);
@@ -587,6 +597,7 @@ function FlowCanvasInner() {
         isEntry={selectedNode?.node_key === entryNodeId}
         allNodes={builderNodes}
         onClose={() => setSelectedNodeKey(null)}
+        onUpdate={onSelectedUpdate}
         onUpdateConfig={onSelectedUpdateConfig}
         onDelete={handleDeleteSelected}
         onSetEntry={handleSetEntry}
@@ -607,6 +618,7 @@ function NodeEditSheet({
   isEntry,
   allNodes,
   onClose,
+  onUpdate,
   onUpdateConfig,
   onDelete,
   onSetEntry,
@@ -616,6 +628,7 @@ function NodeEditSheet({
   isEntry: boolean;
   allNodes: BuilderNode[];
   onClose: () => void;
+  onUpdate: (patch: Partial<BuilderNode>) => void;
   onUpdateConfig: (patch: Record<string, unknown>) => void;
   onDelete: () => void;
   onSetEntry: () => void;
@@ -680,6 +693,20 @@ function NodeEditSheet({
               )}
               {showAdvanced ? t('hideAdvanced') : t('showAdvanced')}
             </button>
+            {showAdvanced && (
+              <div className="mt-3">
+                <label className="text-muted-foreground mb-1 block text-xs">
+                  {t('nodeKeyLabel')}
+                </label>
+                <Input
+                  value={node.node_key}
+                  onChange={(e) =>
+                    onUpdate({ node_key: slugify(e.target.value, node.node_key) })
+                  }
+                  className="bg-muted font-mono text-xs"
+                />
+              </div>
+            )}
           </div>
         </div>
 
