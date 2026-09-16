@@ -37,6 +37,7 @@ import { toast } from "sonner";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -213,6 +214,37 @@ export function NodeConfigForm({
               </code>
               .
             </p>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">
+              {t("acceptLabel")}
+            </label>
+            <Select
+              value={(cfg as { accept?: string }).accept === "image" ? "image" : "text"}
+              onValueChange={(v) =>
+                onUpdateConfig({ accept: v === "image" ? "image" : undefined })
+              }
+            >
+              <SelectTrigger className="bg-muted">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="text">{t("acceptText")}</SelectItem>
+                <SelectItem value="image">{t("acceptImage")}</SelectItem>
+              </SelectContent>
+            </Select>
+            {(cfg as { accept?: string }).accept === "image" && (
+              <label className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
+                <Checkbox
+                  checked={(cfg as { optional?: boolean }).optional ?? false}
+                  onCheckedChange={(checked) =>
+                    onUpdateConfig({ optional: checked === true })
+                  }
+                  className="mt-0.5"
+                />
+                <span>{t("acceptImageOptionalHelp")}</span>
+              </label>
+            )}
           </div>
           <NextNodeRow
             value={(cfg as { next_node_key?: string }).next_node_key ?? ""}
