@@ -259,6 +259,44 @@ export async function sendTextMessage(
   return { messageId: data.messages[0].id }
 }
 
+export interface SendTypingIndicatorArgs {
+  phoneNumberId: string
+  accessToken: string
+  /** The inbound message's own wamid — marks it (and everything
+   *  earlier in the thread) read, and anchors the typing bubble. */
+  messageId: string
+}
+
+/**
+ * Mark an inbound message read (blue double-check) and show the
+ * "escribiendo…" bubble while we work out a reply. Meta auto-dismisses
+ * it after we actually send something, or after 25s, whichever is
+ * first — so callers fire this once per inbound message and forget it,
+ * no matching "stop typing" call needed.
+ */
+export async function sendTypingIndicator(
+  args: SendTypingIndicatorArgs,
+): Promise<void> {
+  const { phoneNumberId, accessToken, messageId } = args
+  const url = `${META_API_BASE}/${phoneNumberId}/messages`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      status: 'read',
+      message_id: messageId,
+      typing_indicator: { type: 'text' },
+    }),
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+}
+
 export type MediaKind = 'image' | 'video' | 'document' | 'audio'
 
 export interface SendMediaMessageArgs {

@@ -1,7 +1,7 @@
 import { NextResponse, after } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
-import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
+import { getMediaUrl, downloadMedia, sendTypingIndicator } from '@/lib/whatsapp/meta-api'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
@@ -300,7 +300,8 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
           // inserts that need it for NOT NULL FK compliance. Always
           // the admin who saved the WhatsApp config.
           config.user_id,
-          decryptedAccessToken
+          decryptedAccessToken,
+          phoneNumberId
         )
       }
     }
@@ -568,8 +569,23 @@ async function processMessage(
   // (contacts, conversations). Always the admin who saved the
   // WhatsApp config; the choice is arbitrary post-017 but stable.
   configOwnerUserId: string,
-  accessToken: string
+  accessToken: string,
+  phoneNumberId: string
 ) {
+  // Best-effort, fired without awaiting: shows "escribiendo…" + the
+  // blue double-check on the customer's side while everything below
+  // (contact/conversation lookups, flow/AI processing) actually runs —
+  // Meta auto-dismisses it once we reply or after 25s. Never let a
+  // failure here (rate limit, transient network) block or slow down
+  // the real processing path.
+  sendTypingIndicator({
+    phoneNumberId,
+    accessToken,
+    messageId: message.id,
+  }).catch((err) => {
+    console.error('[webhook] sendTypingIndicator failed:', err)
+  })
+
   const senderPhone = normalizePhone(message.from)
   const contactName = contact.profile.name
 

@@ -4,6 +4,7 @@ import {
   sendInteractiveButtons,
   sendInteractiveList,
   sendInteractiveCtaUrl,
+  sendTypingIndicator,
 } from "./meta-api";
 
 // All assertions in this file run BEFORE the network call. We stub fetch
@@ -226,6 +227,62 @@ describe("sendInteractiveCtaUrl — validation", () => {
         },
       },
     });
+  });
+});
+
+describe("sendTypingIndicator", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("sends the mark-as-read + typing_indicator payload", async () => {
+    let captured: { url: string; body: unknown; method: string } | null = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        captured = {
+          url,
+          method: init.method ?? "GET",
+          body: JSON.parse(String(init.body)),
+        };
+        return new Response(JSON.stringify({ success: true }), { status: 200 });
+      }),
+    );
+
+    await sendTypingIndicator({
+      phoneNumberId: "test-phone",
+      accessToken: "test-token",
+      messageId: "wamid.INBOUND123",
+    });
+
+    expect(captured).not.toBeNull();
+    expect(captured!.method).toBe("POST");
+    expect(captured!.url).toContain("test-phone/messages");
+    expect(captured!.body).toEqual({
+      messaging_product: "whatsapp",
+      status: "read",
+      message_id: "wamid.INBOUND123",
+      typing_indicator: { type: "text" },
+    });
+  });
+
+  it("throws on a non-2xx response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ error: { message: "bad token" } }), {
+          status: 401,
+        }),
+      ),
+    );
+
+    await expect(
+      sendTypingIndicator({
+        phoneNumberId: "test-phone",
+        accessToken: "bad-token",
+        messageId: "wamid.INBOUND123",
+      }),
+    ).rejects.toThrow();
   });
 });
 
