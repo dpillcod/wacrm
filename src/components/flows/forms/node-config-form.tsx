@@ -317,7 +317,7 @@ export function NodeConfigForm({
     case "handoff":
       return (
         <HandoffForm
-          cfg={cfg as { note?: string; assign_to?: string }}
+          cfg={cfg as { note?: string; assign_to?: string; notify_user_ids?: string[] }}
           onUpdateConfig={onUpdateConfig}
           t={t}
         />
@@ -349,7 +349,7 @@ function HandoffForm({
   onUpdateConfig,
   t,
 }: {
-  cfg: { note?: string; assign_to?: string };
+  cfg: { note?: string; assign_to?: string; notify_user_ids?: string[] };
   onUpdateConfig: (patch: Record<string, unknown>) => void;
   t: ReturnType<typeof useTranslations>;
 }) {
@@ -402,6 +402,44 @@ function HandoffForm({
         </Select>
         <p className="mt-1 text-[10px] text-muted-foreground">
           {t("assignToHelp")}
+        </p>
+      </div>
+      <div>
+        <label className="text-muted-foreground mb-1 block text-xs">
+          {t("notifyAlsoLabel")}
+        </label>
+        <div className="flex flex-col gap-1.5 rounded-md border border-border bg-muted/40 p-2">
+          {(members ?? []).length === 0 ? (
+            <p className="text-[10px] text-muted-foreground">{t("none")}</p>
+          ) : (
+            (members ?? []).map((m) => {
+              const checked = (cfg.notify_user_ids ?? []).includes(m.user_id);
+              return (
+                <label
+                  key={m.user_id}
+                  className="flex items-center gap-2 text-xs"
+                >
+                  <Checkbox
+                    checked={checked}
+                    onCheckedChange={(next) => {
+                      const current = cfg.notify_user_ids ?? [];
+                      const updated =
+                        next === true
+                          ? [...current, m.user_id]
+                          : current.filter((id) => id !== m.user_id);
+                      onUpdateConfig({
+                        notify_user_ids: updated.length > 0 ? updated : undefined,
+                      });
+                    }}
+                  />
+                  {m.full_name || m.email || m.user_id}
+                </label>
+              );
+            })
+          )}
+        </div>
+        <p className="mt-1 text-[10px] text-muted-foreground">
+          {t("notifyAlsoHelp")}
         </p>
       </div>
     </>

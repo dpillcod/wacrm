@@ -1095,6 +1095,8 @@
         "internalNote": "Internal note (for the agent picking up)",
         "assignToLabel": "Assign to (optional)",
         "assignToHelp": "Assigns the conversation to this teammate, which triggers wacrm's own in-app notification (the bell icon) — free, no WhatsApp template needed. Leave as \"None\" to only flip the conversation to pending, with no notification.",
+        "notifyAlsoLabel": "Also notify (optional)",
+        "notifyAlsoHelp": "These teammates get the same in-app notification as the assignee, without becoming the conversation's owner — so a sale doesn't hinge on just one person seeing it.",
         "endNodeHelp": "Terminal node. When the runner reaches this node the run is marked complete. No config needed.",
         "bodyText": "Body text",
         "footerText": "Footer (optional, 60 chars)",

@@ -159,6 +159,15 @@ export interface HandoffNodeConfig {
    * node fires. Leave unset to flip the status without assignment.
    */
   assign_to?: string;
+  /**
+   * Optional extra teammates to alert alongside `assign_to` — the
+   * conversation still has exactly one owner (`assign_to`, mirrored
+   * onto `conversations.assigned_agent_id`), but a sale shouldn't hinge
+   * on one person seeing one notification. Each id here gets its own
+   * in-app "conversation_assigned" notification row, same as the
+   * owner's (deduplicated against `assign_to` by the runner).
+   */
+  notify_user_ids?: string[];
 }
 
 /**

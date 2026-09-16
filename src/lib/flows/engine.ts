@@ -58,6 +58,7 @@ import {
   type FlowNodeRow,
   type FlowRow,
   type FlowRunRow,
+  type HandoffNodeConfig,
   type ParsedInbound,
   type SendButtonsNodeConfig,
   type SendListNodeConfig,
@@ -453,7 +454,7 @@ async function executeHandoff(
   run: FlowRunRow,
   node: FlowNodeRow,
 ): Promise<void> {
-  const cfg = node.config as { assign_to?: string; note?: string };
+  const cfg = node.config as unknown as HandoffNodeConfig;
   const convUpdate: Record<string, unknown> = {
     status: "pending",
     updated_at: new Date().toISOString(),
@@ -500,6 +501,46 @@ async function executeHandoff(
       reason: "staff_notify_threw",
       detail: err instanceof Error ? err.message : String(err),
     });
+  }
+
+  // Extra in-app recipients beyond the single conversation owner — a
+  // real sale shouldn't hinge on exactly one person seeing exactly one
+  // notification. `assign_to` already gets its own row for free via
+  // the `on_conversation_assigned` DB trigger (migration 027), so it's
+  // excluded here to avoid double-notifying that same person.
+  const extraRecipients = (cfg.notify_user_ids ?? []).filter(
+    (id) => id && id !== cfg.assign_to,
+  );
+  if (extraRecipients.length > 0) {
+    try {
+      const contactNameVar = run.vars.contact_name;
+      const contactName =
+        typeof contactNameVar === "string" && contactNameVar.trim()
+          ? contactNameVar.trim()
+          : "un contacto";
+      const { error: notifyErr } = await db.from("notifications").insert(
+        extraRecipients.map((userId) => ({
+          account_id: run.account_id,
+          user_id: userId,
+          type: "conversation_assigned",
+          conversation_id: run.conversation_id,
+          contact_id: run.contact_id,
+          title: "New conversation assigned",
+          body: `Ferrobot te asignó una conversación con ${contactName}`,
+        })),
+      );
+      if (notifyErr) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "extra_notify_failed",
+          detail: notifyErr.message,
+        });
+      }
+    } catch (err) {
+      await logEvent(db, run.id, "error", node.node_key, {
+        reason: "extra_notify_threw",
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 }
 
