@@ -1148,6 +1148,11 @@
         "none": "— None —",
         "ctaButtonLabel": "Button label (≤20 chars)",
         "ctaUrlLabel": "Button destination URL",
+        "templateNameLabel": "Approved template name",
+        "templateNameHelp": "Must exactly match an APPROVED row in your WhatsApp templates (approved in Meta's WhatsApp Manager) — this is the only send type that works with no open 24h session, e.g. a customer's very first message after buying on the website.",
+        "templateLanguageLabel": "Template language code",
+        "templateParamsHelp": "Body variables, in order — each can use {{vars.x}} like any other message.",
+        "addTemplateParam": "Add variable",
         "ctaUrlHelp": "Must start with http:// or https:// — opens directly in the customer's browser in one tap, with no reply back to the bot (so there's nothing to branch on)."
       },
       "categories": {
@@ -1179,6 +1184,10 @@
         "send_cta_url": {
           "label": "Link button",
           "blurb": "Opens a link in one tap"
+        },
+        "send_template": {
+          "label": "Send template",
+          "blurb": "Sends an approved template — works with no open session"
         },
         "collect_input": {
           "label": "Collect input",

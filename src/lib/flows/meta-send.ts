@@ -6,6 +6,7 @@ import {
   sendInteractiveCtaUrl,
   sendMediaMessage,
   sendTextMessage,
+  sendTemplateMessage,
   type InteractiveButton,
   type InteractiveListSection,
   type InteractiveProductListSection,
@@ -146,6 +147,117 @@ export async function engineSendText(
     .from('conversations')
     .update({
       last_message_text: args.text,
+      last_message_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', args.conversationId)
+
+  return { whatsapp_message_id: waMessageId }
+}
+
+interface SendTemplateEngineArgs {
+  accountId: string
+  userId: string
+  conversationId: string
+  contactId: string
+  templateName: string
+  language: string
+  params?: string[]
+}
+
+/**
+ * Send an approved WhatsApp message TEMPLATE from the Flows engine —
+ * used by the runner's `send_template` node. Unlike `engineSendText`,
+ * this works with no open 24h session (Meta's own rule for templates),
+ * which is exactly why it exists: a first-time web buyer who has never
+ * messaged the WhatsApp number still needs their order confirmation.
+ * Same phone-variant retry + DB persistence pattern as the other
+ * senders in this file; mirrors `engineSendTemplate` in
+ * src/lib/automations/meta-send.ts (the two engines keep separate
+ * copies on purpose — see that file's header comment).
+ */
+export async function engineSendTemplate(
+  args: SendTemplateEngineArgs,
+): Promise<{ whatsapp_message_id: string }> {
+  const db = supabaseAdmin()
+
+  const { data: contact, error: contactErr } = await db
+    .from('contacts')
+    .select('id, phone')
+    .eq('id', args.contactId)
+    .eq('account_id', args.accountId)
+    .maybeSingle()
+  if (contactErr || !contact?.phone) {
+    throw new Error('contact not found for this account')
+  }
+
+  const sanitized = sanitizePhoneForMeta(contact.phone)
+  if (!isValidE164(sanitized)) {
+    throw new Error(`contact phone invalid: ${contact.phone}`)
+  }
+
+  const { data: config, error: configErr } = await db
+    .from('whatsapp_config')
+    .select('*')
+    .eq('account_id', args.accountId)
+    .single()
+  if (configErr || !config) {
+    throw new Error('WhatsApp not configured for this account')
+  }
+
+  const accessToken = decrypt(config.access_token)
+
+  const attempt = async (phone: string): Promise<string> => {
+    const r = await sendTemplateMessage({
+      phoneNumberId: config.phone_number_id,
+      accessToken,
+      to: phone,
+      templateName: args.templateName,
+      language: args.language,
+      params: args.params,
+    })
+    return r.messageId
+  }
+
+  const variants = phoneVariants(sanitized)
+  let workingPhone = sanitized
+  let waMessageId = ''
+  let lastError: unknown = null
+  for (const v of variants) {
+    try {
+      waMessageId = await attempt(v)
+      workingPhone = v
+      lastError = null
+      break
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (!isRecipientNotAllowedError(msg)) throw err
+      lastError = err
+    }
+  }
+  if (lastError) throw lastError
+
+  if (workingPhone !== sanitized) {
+    await db.from('contacts').update({ phone: workingPhone }).eq('id', contact.id)
+  }
+
+  const { error: msgErr } = await db.from('messages').insert({
+    conversation_id: args.conversationId,
+    sender_type: 'bot',
+    content_type: 'template',
+    content_text: null,
+    template_name: args.templateName,
+    message_id: waMessageId,
+    status: 'sent',
+  })
+  if (msgErr) {
+    throw new Error(`sent to Meta but DB insert failed: ${msgErr.message}`)
+  }
+
+  await db
+    .from('conversations')
+    .update({
+      last_message_text: `[template:${args.templateName}]`,
       last_message_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })

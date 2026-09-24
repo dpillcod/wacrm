@@ -37,6 +37,7 @@ import {
   engineSendInteractiveButtons,
   engineSendInteractiveList,
   engineSendCtaUrl,
+  engineSendTemplate,
   engineSendMedia,
   engineSendText,
 } from "./meta-send";
@@ -64,6 +65,7 @@ import {
   type SendListNodeConfig,
   type SendMediaNodeConfig,
   type SendCtaUrlNodeConfig,
+  type SendTemplateNodeConfig,
   type SendMessageNodeConfig,
   type SetTagNodeConfig,
   type StartNodeConfig,
@@ -128,6 +130,7 @@ export function isAutoAdvancing(node_type: string): boolean {
     node_type === "send_message" ||
     node_type === "send_media" ||
     node_type === "send_cta_url" ||
+    node_type === "send_template" ||
     node_type === "condition" ||
     node_type === "set_tag"
   );
@@ -764,6 +767,33 @@ async function advanceFromNodeKey(
           detail: err instanceof Error ? err.message : String(err),
         });
         await endRun(db, run.id, "failed", "send_cta_url_failed");
+        return { outcome: "completed" };
+      }
+      currentKey = cfg.next_node_key;
+      continue;
+    }
+    if (node.node_type === "send_template") {
+      const cfg = node.config as unknown as SendTemplateNodeConfig;
+      try {
+        const { whatsapp_message_id } = await engineSendTemplate({
+          accountId: run.account_id,
+    userId: run.user_id,
+          conversationId: run.conversation_id!,
+          contactId: run.contact_id!,
+          templateName: cfg.template_name,
+          language: cfg.template_language,
+          params: cfg.params?.map((p) => interpolateVars(p, run.vars)),
+        });
+        await logEvent(db, run.id, "message_sent", node.node_key, {
+          node_type: "send_template",
+          whatsapp_message_id,
+        });
+      } catch (err) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "send_template_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+        await endRun(db, run.id, "failed", "send_template_failed");
         return { outcome: "completed" };
       }
       currentKey = cfg.next_node_key;

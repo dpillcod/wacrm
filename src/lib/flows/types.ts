@@ -123,6 +123,33 @@ export interface SendMediaNodeConfig {
 }
 
 /**
+ * Sends an approved WhatsApp message TEMPLATE, then auto-advances.
+ *
+ * Unlike `send_message` (a free-form session message, which Meta only
+ * delivers within 24h of the customer's last message to this number),
+ * a template send works regardless of session state — required for
+ * the FIRST message to a contact who bought on the website but has
+ * never messaged the WhatsApp number (no open session yet), and for
+ * any other business-initiated nudge (abandoned cart, review request,
+ * birthday) sent hours or days after the customer last wrote in.
+ *
+ * `template_name`/`template_language` must match an APPROVED row in
+ * `message_templates` (approval happens in Meta's WhatsApp Manager,
+ * outside this app). `params` are positional body variables — Meta
+ * substitutes them into the template's {{1}}, {{2}}, … in order; each
+ * entry supports the same `{{vars.x}}` interpolation as send_message.
+ */
+export interface SendTemplateNodeConfig {
+  template_name: string;
+  /** Meta locale code the template was approved under, e.g. "es". */
+  template_language: string;
+  /** Positional body variables, in {{1}}, {{2}}, … order. */
+  params?: string[];
+  /** Auto-advance target after the send lands at Meta. */
+  next_node_key: string;
+}
+
+/**
  * Sends Meta's single-button "Call-To-Action URL" interactive message
  * — the button opens `url` directly in the customer's browser in one
  * tap, unlike `send_buttons` (which only ever returns a reply_id to
@@ -345,6 +372,7 @@ export type FlowNodeConfig =
   | { node_type: "send_list"; config: SendListNodeConfig }
   | { node_type: "send_media"; config: SendMediaNodeConfig }
   | { node_type: "send_cta_url"; config: SendCtaUrlNodeConfig }
+  | { node_type: "send_template"; config: SendTemplateNodeConfig }
   | { node_type: "collect_input"; config: CollectInputNodeConfig }
   | { node_type: "condition"; config: ConditionNodeConfig }
   | { node_type: "set_tag"; config: SetTagNodeConfig }

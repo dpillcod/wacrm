@@ -147,6 +147,17 @@ export function NodeConfigForm({
         </>
       );
 
+    case "send_template":
+      return (
+        <SendTemplateForm
+          cfg={cfg as SendTemplateCfg}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+          t={t}
+        />
+      );
+
     case "send_buttons":
       return (
         <SendButtonsForm
@@ -442,6 +453,117 @@ function HandoffForm({
           {t("notifyAlsoHelp")}
         </p>
       </div>
+    </>
+  );
+}
+
+// ============================================================
+// send_template
+// ============================================================
+
+interface SendTemplateCfg {
+  template_name?: string;
+  template_language?: string;
+  params?: string[];
+  next_node_key?: string;
+}
+
+/**
+ * A send_template node's `params` are positional — Meta substitutes
+ * them into the approved template's {{1}}, {{2}}, … in array order, so
+ * this is a plain reorderable list, not id-keyed like send_buttons'
+ * buttons. No reply_id/next_node_key per entry either: unlike a
+ * button tap, a template send never branches — there's exactly one
+ * next_node_key for the whole node (see NextNodeRow below).
+ */
+function SendTemplateForm({
+  cfg,
+  allNodes,
+  currentKey,
+  onUpdateConfig,
+  t,
+}: {
+  cfg: SendTemplateCfg;
+  allNodes: BuilderNode[];
+  currentKey: string;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const params = cfg.params ?? [];
+  const updateParam = (idx: number, value: string) =>
+    onUpdateConfig({ params: params.map((p, i) => (i === idx ? value : p)) });
+  const addParam = () => onUpdateConfig({ params: [...params, ""] });
+  const removeParam = (idx: number) =>
+    onUpdateConfig({ params: params.filter((_, i) => i !== idx) });
+
+  return (
+    <>
+      <div>
+        <label className="mb-1 block text-xs text-muted-foreground">
+          {t("templateNameLabel")}
+        </label>
+        <Input
+          value={cfg.template_name ?? ""}
+          onChange={(e) => onUpdateConfig({ template_name: e.target.value })}
+          placeholder="confirmacion_pedido_web"
+          className="bg-muted font-mono text-xs"
+        />
+        <p className="mt-1 text-[10px] text-muted-foreground">
+          {t("templateNameHelp")}
+        </p>
+      </div>
+      <div>
+        <label className="mb-1 block text-xs text-muted-foreground">
+          {t("templateLanguageLabel")}
+        </label>
+        <Input
+          value={cfg.template_language ?? ""}
+          onChange={(e) => onUpdateConfig({ template_language: e.target.value })}
+          placeholder="es"
+          className="bg-muted font-mono text-xs"
+        />
+      </div>
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <label className="text-xs text-muted-foreground">
+            {t("templateParamsHelp")}
+          </label>
+        </div>
+        <div className="flex flex-col gap-2">
+          {params.map((p, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <span className="w-8 shrink-0 text-center text-[10px] text-muted-foreground">
+                {`{{${i + 1}}}`}
+              </span>
+              <Input
+                value={p}
+                onChange={(e) => updateParam(i, e.target.value)}
+                placeholder="{{vars.order_id}}"
+                className="bg-muted font-mono text-xs"
+              />
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => removeParam(i)}
+                className="shrink-0 text-muted-foreground hover:text-red-400"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ))}
+        </div>
+        <Button variant="outline" size="sm" onClick={addParam} className="mt-2">
+          <Plus className="h-3.5 w-3.5" />
+          {t("addTemplateParam")}
+        </Button>
+      </div>
+      <NextNodeRow
+        value={cfg.next_node_key ?? ""}
+        allNodes={allNodes}
+        currentKey={currentKey}
+        onChange={(v) => onUpdateConfig({ next_node_key: v })}
+        label={t("advanceAfterSending")}
+      />
     </>
   );
 }

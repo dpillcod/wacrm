@@ -607,6 +607,69 @@ describe("validateFlowForActivation — send_cta_url", () => {
   });
 });
 
+describe("validateFlowForActivation — send_template", () => {
+  const baseFlow = { ...validFlow, entry_node_id: "s" };
+  const nodesWith = (tplConfig: Record<string, unknown>) => [
+    { node_key: "s", node_type: "start", config: { next_node_key: "tpl" } },
+    { node_key: "tpl", node_type: "send_template", config: tplConfig },
+    { node_key: "e", node_type: "end", config: {} },
+  ];
+
+  const validTpl = {
+    template_name: "confirmacion_pedido_web",
+    template_language: "es",
+    params: ["{{vars.order_id}}"],
+    next_node_key: "e",
+  };
+
+  it("passes on a fully-populated send_template node", () => {
+    const issues = validateFlowForActivation(baseFlow, nodesWith(validTpl));
+    expect(issues).toEqual([]);
+  });
+
+  it("flags missing template_name", () => {
+    const issues = validateFlowForActivation(
+      baseFlow,
+      nodesWith({ ...validTpl, template_name: "" }),
+    );
+    expect(
+      issues.some((i) => i.node_key === "tpl" && i.field === "template_name"),
+    ).toBe(true);
+  });
+
+  it("flags missing template_language", () => {
+    const issues = validateFlowForActivation(
+      baseFlow,
+      nodesWith({ ...validTpl, template_language: "" }),
+    );
+    expect(
+      issues.some(
+        (i) => i.node_key === "tpl" && i.field === "template_language",
+      ),
+    ).toBe(true);
+  });
+
+  it("flags next_node_key pointing at a non-existent node", () => {
+    const issues = validateFlowForActivation(
+      baseFlow,
+      nodesWith({ ...validTpl, next_node_key: "ghost" }),
+    );
+    expect(
+      issues.some(
+        (i) =>
+          i.node_key === "tpl" &&
+          i.field === "next_node_key" &&
+          i.message.includes("ghost"),
+      ),
+    ).toBe(true);
+  });
+
+  it("contributes its next_node_key to reachability", () => {
+    const set = reachableFromEntry("s", nodesWith(validTpl));
+    expect(set).toEqual(new Set(["s", "tpl", "e"]));
+  });
+});
+
 describe("reachableFromEntry", () => {
   it("walks the graph from the entry", () => {
     const set = reachableFromEntry("start", validNodes);

@@ -31,7 +31,7 @@ describe("deriveCanvasEdges — single-outgoing node types", () => {
     });
   });
 
-  it("derives a `next` edge from send_media, send_cta_url, set_tag, collect_input, start", () => {
+  it("derives a `next` edge from send_media, send_cta_url, send_template, set_tag, collect_input, start", () => {
     const edges = deriveCanvasEdges(
       nodes(
         { node_key: "s", node_type: "start", config: { next_node_key: "m" } },
@@ -51,6 +51,15 @@ describe("deriveCanvasEdges — single-outgoing node types", () => {
             text: "Ver catálogo",
             button_text: "Ver catálogo",
             url: "https://ferrotiendaec.com/shop/",
+            next_node_key: "tpl",
+          },
+        },
+        {
+          node_key: "tpl",
+          node_type: "send_template",
+          config: {
+            template_name: "confirmacion_pedido_web",
+            template_language: "es",
             next_node_key: "t",
           },
         },
@@ -71,11 +80,12 @@ describe("deriveCanvasEdges — single-outgoing node types", () => {
         { node_key: "e", node_type: "end", config: {} },
       ),
     );
-    expect(edges).toHaveLength(5);
+    expect(edges).toHaveLength(6);
     expect(edges.map((e) => `${e.source}->${e.target}`)).toEqual([
       "s->m",
       "m->cta",
-      "cta->t",
+      "cta->tpl",
+      "tpl->t",
       "t->ci",
       "ci->e",
     ]);
@@ -317,6 +327,9 @@ describe("outgoingSlots", () => {
     ).toEqual(["next"]);
     expect(
       each({ node_key: "x", node_type: "send_cta_url", config: {} }),
+    ).toEqual(["next"]);
+    expect(
+      each({ node_key: "x", node_type: "send_template", config: {} }),
     ).toEqual(["next"]);
     expect(
       each({ node_key: "x", node_type: "collect_input", config: {} }),

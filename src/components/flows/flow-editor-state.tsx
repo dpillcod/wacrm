@@ -173,6 +173,13 @@ export function defaultConfigFor(type: NodeType): Record<string, unknown> {
         url: "",
         next_node_key: "",
       };
+    case "send_template":
+      return {
+        template_name: "",
+        template_language: "es",
+        params: [],
+        next_node_key: "",
+      };
     case "collect_input":
       return {
         prompt_text: "",

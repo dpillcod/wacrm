@@ -18,6 +18,7 @@
 
 import {
   ExternalLink,
+  FileBadge,
   Flag,
   GitFork,
   Inbox,
@@ -48,6 +49,7 @@ export type NodeType =
   | 'send_list'
   | 'send_media'
   | 'send_cta_url'
+  | 'send_template'
   | 'collect_input'
   | 'condition'
   | 'set_tag'
@@ -140,6 +142,13 @@ export const NODE_META: Record<
     blurb: 'Opens a link in one tap',
     category: 'messaging',
   },
+  send_template: {
+    label: 'Send template',
+    icon: FileBadge,
+    color: 'text-orange-300',
+    blurb: 'Sends an approved template — works with no open session',
+    category: 'messaging',
+  },
   collect_input: {
     label: 'Collect input',
     icon: Inbox,
@@ -212,6 +221,7 @@ const NODE_HUE: Record<NodeType, { l: number; c: number; h: number }> = {
   send_list: { l: 0.62, c: 0.15, h: 277 }, // indigo
   send_media: { l: 0.65, c: 0.12, h: 210 }, // sky
   send_cta_url: { l: 0.68, c: 0.16, h: 128 }, // lime — an outbound link
+  send_template: { l: 0.75, c: 0.13, h: 40 }, // orange/gold — an approved badge
   collect_input: { l: 0.65, c: 0.1, h: 185 }, // teal — capture
   condition: { l: 0.72, c: 0.15, h: 65 }, // amber — a fork in the road
   set_tag: { l: 0.65, c: 0.15, h: 350 }, // pink
@@ -387,6 +397,12 @@ export function summarizeNode(
       return buttonText
         ? `${truncate(buttonText, 20)} → ${truncate(url, 50)}`
         : truncate(url, 60);
+    }
+    case 'send_template': {
+      const name = typeof cfg.template_name === 'string' ? cfg.template_name : '';
+      const lang = typeof cfg.template_language === 'string' ? cfg.template_language : '';
+      if (!name) return null;
+      return lang ? `${name} (${lang})` : name;
     }
     case 'collect_input': {
       const prompt = typeof cfg.prompt_text === 'string' ? cfg.prompt_text : '';
