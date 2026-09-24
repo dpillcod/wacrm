@@ -30,6 +30,13 @@ name: Scheduled maintenance cron
 #                             a large catalog (see the route's own
 #                             comment).
 #
+#   /api/flows/birthday-cron - starts an account's configured birthday
+#                             flow for any contact whose "Fecha de
+#                             nacimiento" custom field matches today.
+#                             Daily-only, same reasoning as the catalog
+#                             sync: a birthday only needs checking once
+#                             a day, not every 15 minutes.
+#
 # All three endpoints require the same X-Cron-Secret header (by design,
 # see their route.ts comments) — set as the CRON_SECRET repo secret
 # below, matching AUTOMATION_CRON_SECRET on the actual deployment.
@@ -61,3 +68,10 @@ jobs:
           curl -sf -o /dev/null -w "catalog/cron-sync -> %{http_code}\n" \
             -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
             "${{ secrets.WACRM_BASE_URL }}/api/whatsapp/catalog/cron-sync"
+
+      - name: Send birthday messages (daily only)
+        if: github.event.schedule == '0 8 * * *' || github.event_name == 'workflow_dispatch'
+        run: |
+          curl -sf -o /dev/null -w "flows/birthday-cron -> %{http_code}\n" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.WACRM_BASE_URL }}/api/flows/birthday-cron"
