@@ -10,6 +10,13 @@ import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import {
+  formatOrderLines,
+  formatOrderSummary,
+  resolveOrderItems,
+  type MetaOrderPayload,
+} from '@/lib/whatsapp/catalog-order'
+import type { OrderItem, ParsedInbound } from '@/lib/flows/types'
+import {
   handleTemplateWebhookChange,
   isTemplateWebhookField,
 } from '@/lib/whatsapp/template-webhook'
@@ -46,6 +53,8 @@ interface WhatsAppMessage {
   sticker?: { id: string; mime_type: string }
   location?: { latitude: number; longitude: number; name?: string; address?: string }
   reaction?: { message_id: string; emoji: string }
+  /** A cart sent from the in-chat catalog (see lib/whatsapp/catalog-order). */
+  order?: MetaOrderPayload
   /**
    * Set when the customer taps a button or list row on an interactive
    * message we sent. `button_reply.id` / `list_reply.id` is whatever id
@@ -628,8 +637,17 @@ async function processMessage(
   }
 
   // Parse message content based on type
-  const { contentText, mediaUrl, mediaType, interactiveReplyId } =
-    await parseMessageContent(message, accessToken)
+  const parsed = await parseMessageContent(message, accessToken)
+  const { mediaUrl, mediaType, interactiveReplyId } = parsed
+  let { contentText } = parsed
+
+  // A catalog cart carries retailer ids but no names — resolve them
+  // against the synced catalog so the inbox bubble is readable.
+  let orderItems: OrderItem[] | null = null
+  if (message.type === 'order' && message.order) {
+    orderItems = await resolveOrderItems(supabaseAdmin(), accountId, message.order)
+    contentText = formatOrderSummary(orderItems, message.order.text)
+  }
 
   // Resolve swipe-reply context if present. A missing parent is fine —
   // we just store NULL and the UI renders the message without a quote.
@@ -747,35 +765,7 @@ async function processMessage(
     userId: configOwnerUserId,
     contactId: contactRecord.id,
     conversationId: conversation.id,
-    message:
-      interactiveReplyId
-        ? {
-            kind: 'interactive_reply',
-            reply_id: interactiveReplyId,
-            reply_title: contentText ?? '',
-            meta_message_id: message.id,
-          }
-        : message.type === 'image' && mediaUrl
-          ? {
-              kind: 'image',
-              // mediaUrl is a same-origin relative path (the inbox's
-              // own <img> proxy) — fine there, but flow vars built from
-              // it can end up interpolated into a raw WhatsApp text
-              // (e.g. the staff handoff note), where a bare relative
-              // path isn't a usable link. Absolutize when we know our
-              // own base URL; otherwise fall back to the relative path
-              // rather than block on it.
-              media_url: process.env.NEXT_PUBLIC_SITE_URL
-                ? `${process.env.NEXT_PUBLIC_SITE_URL.replace(/\/+$/, '')}${mediaUrl}`
-                : mediaUrl,
-              caption: contentText,
-              meta_message_id: message.id,
-            }
-          : {
-              kind: 'text',
-              text: contentText ?? message.text?.body ?? '',
-              meta_message_id: message.id,
-            },
+    message: toFlowInbound(message, contentText, mediaUrl, interactiveReplyId, orderItems),
     isFirstInboundMessage,
   })
   const flowConsumed = flowResult.consumed
@@ -861,6 +851,71 @@ async function processMessage(
     content_type: contentType,
     text: contentText,
   })
+}
+
+/**
+ * mediaUrl is a same-origin relative path (the inbox's own <img>
+ * proxy) — fine there, but flow vars built from it can end up
+ * interpolated into a raw WhatsApp text (e.g. the staff handoff note),
+ * where a bare relative path isn't a usable link. Absolutize when we
+ * know our own base URL; otherwise fall back to the relative path
+ * rather than block on it.
+ */
+function absoluteMediaUrl(mediaUrl: string): string {
+  return process.env.NEXT_PUBLIC_SITE_URL
+    ? `${process.env.NEXT_PUBLIC_SITE_URL.replace(/\/+$/, '')}${mediaUrl}`
+    : mediaUrl
+}
+
+const NON_TEXT_FLOW_TYPES = new Set(['audio', 'video', 'sticker', 'document'])
+
+/** Shape an inbound message the way the Flows engine consumes it. */
+function toFlowInbound(
+  message: WhatsAppMessage,
+  contentText: string | null,
+  mediaUrl: string | null,
+  interactiveReplyId: string | null,
+  orderItems: OrderItem[] | null,
+): ParsedInbound {
+  if (interactiveReplyId) {
+    return {
+      kind: 'interactive_reply',
+      reply_id: interactiveReplyId,
+      reply_title: contentText ?? '',
+      meta_message_id: message.id,
+    }
+  }
+  if (message.type === 'image' && mediaUrl) {
+    return {
+      kind: 'image',
+      media_url: absoluteMediaUrl(mediaUrl),
+      caption: contentText,
+      meta_message_id: message.id,
+    }
+  }
+  if (orderItems && orderItems.length > 0) {
+    return {
+      kind: 'order',
+      items: orderItems,
+      text: formatOrderLines(orderItems),
+      meta_message_id: message.id,
+    }
+  }
+  // Previously these reached the engine as an empty (or filename-only)
+  // "text", which failed every capture and silently burned reprompts.
+  if (NON_TEXT_FLOW_TYPES.has(message.type)) {
+    return {
+      kind: 'other',
+      message_type: message.type,
+      media_url: mediaUrl ? absoluteMediaUrl(mediaUrl) : null,
+      meta_message_id: message.id,
+    }
+  }
+  return {
+    kind: 'text',
+    text: contentText ?? message.text?.body ?? '',
+    meta_message_id: message.id,
+  }
 }
 
 async function parseMessageContent(
@@ -971,7 +1026,14 @@ async function parseMessageContent(
     case 'location':
       if (message.location) {
         const loc = message.location
-        const locationText = [loc.name, loc.address, `${loc.latitude},${loc.longitude}`]
+        // A tappable Maps link rather than bare coordinates: staff
+        // forward the delivery location to the (external) courier over
+        // WhatsApp to get a quote, so it has to open as a map.
+        const locationText = [
+          loc.name,
+          loc.address,
+          `https://maps.google.com/?q=${loc.latitude},${loc.longitude}`,
+        ]
           .filter(Boolean)
           .join(' - ')
         return { ...empty, contentText: locationText }

@@ -28,9 +28,8 @@ export interface CrossSellRule {
 /**
  * Curated pairings, grouped as the business owner described them:
  *   - pan / leche / queso / café (desayuno)
- *   - licor / hielo / snacks (reunión)
+ *   - hielo / snacks (reunión)
  *   - carnes / arroz / aceite / hierbas aromáticas (comida)
- *   - cerveza / snacks / colas
  *   - detergente / suavizante / cloro / trapeador (limpieza)
  *
  * Each keyword suggests OTHER items from its own group, never itself —
@@ -41,39 +40,37 @@ export interface CrossSellRule {
  */
 export const CROSS_SELL_RULES: CrossSellRule[] = [
   // --- Pan / lácteos / café ---
-  { keyword: 'pan', suggestion: 'Por cierto, si quieres te agrego queso fresco o café, recién nos llegó 🙂' },
-  { keyword: 'panes', suggestion: 'Por cierto, si quieres te agrego queso fresco o café, recién nos llegó 🙂' },
-  { keyword: 'leche', suggestion: 'Por cierto, ¿te provoca pan fresco o café para acompañar? 🙂' },
-  { keyword: 'queso', suggestion: 'Por cierto, tenemos pan recién horneado que combina bien, ¿te agrego? 🙂' },
-  { keyword: 'quesos', suggestion: 'Por cierto, tenemos pan recién horneado que combina bien, ¿te agrego? 🙂' },
+  { keyword: 'pan', suggestion: 'Por cierto, si desea le agrego queso fresco o café, recién nos llegó 🙂' },
+  { keyword: 'panes', suggestion: 'Por cierto, si desea le agrego queso fresco o café, recién nos llegó 🙂' },
+  { keyword: 'leche', suggestion: 'Por cierto, ¿le provoca pan fresco o café para acompañar? 🙂' },
+  { keyword: 'queso', suggestion: 'Por cierto, tenemos pan recién horneado que combina bien, ¿le agrego? 🙂' },
+  { keyword: 'quesos', suggestion: 'Por cierto, tenemos pan recién horneado que combina bien, ¿le agrego? 🙂' },
   { keyword: 'café', suggestion: 'Por cierto, tenemos pan recién horneado, ideal para acompañar el café 🙂' },
   { keyword: 'cafe', suggestion: 'Por cierto, tenemos pan recién horneado, ideal para acompañar el café 🙂' },
 
-  // --- Licor / hielo / snacks de reunión ---
-  { keyword: 'licor', suggestion: 'Por cierto, ¿te hace falta hielo o algún snack para acompañar? 🙂' },
+  // --- Hielo / snacks de reunión ---
+  // No licor/cerveza rules: Meta's Commerce Policy forbids selling
+  // alcohol over WhatsApp, so the bot must never upsell around it
+  // (see src/lib/flows/store-policy.ts).
   { keyword: 'hielo', suggestion: 'Por cierto, si es para una reunión, tenemos snacks y salsa de queso que combinan bien 🙂' },
   { keyword: 'hielos', suggestion: 'Por cierto, si es para una reunión, tenemos snacks y salsa de queso que combinan bien 🙂' },
 
   // --- Carnes / arroz / aceite / hierbas aromáticas ---
-  { keyword: 'pollo', suggestion: 'Por cierto, ¿te agrego arroz, aceite o culantro/perejil para la sazón? 🙂' },
-  { keyword: 'res', suggestion: 'Por cierto, ¿te agrego arroz, aceite o culantro/perejil para la sazón? 🙂' },
-  { keyword: 'carne', suggestion: 'Por cierto, ¿te agrego arroz, aceite o culantro/perejil para la sazón? 🙂' },
-  { keyword: 'chancho', suggestion: 'Por cierto, ¿te agrego arroz, aceite o culantro/perejil para la sazón? 🙂' },
-  { keyword: 'cerdo', suggestion: 'Por cierto, ¿te agrego arroz, aceite o culantro/perejil para la sazón? 🙂' },
-  { keyword: 'arroz', suggestion: 'Por cierto, ¿buscas también algo de carne o aceite para acompañar? 🙂' },
-  { keyword: 'aceite', suggestion: 'Por cierto, ¿te hace falta arroz o algo de carne para la comida? 🙂' },
-
-  // --- Cerveza / snacks / colas ---
-  { keyword: 'cerveza', suggestion: 'Por cierto, ¿te agrego unos snacks o colas para acompañar? 🙂' },
-  { keyword: 'cervezas', suggestion: 'Por cierto, ¿te agrego unos snacks o colas para acompañar? 🙂' },
+  { keyword: 'pollo', suggestion: 'Por cierto, ¿le agrego arroz, aceite o culantro/perejil para la sazón? 🙂' },
+  { keyword: 'res', suggestion: 'Por cierto, ¿le agrego arroz, aceite o culantro/perejil para la sazón? 🙂' },
+  { keyword: 'carne', suggestion: 'Por cierto, ¿le agrego arroz, aceite o culantro/perejil para la sazón? 🙂' },
+  { keyword: 'chancho', suggestion: 'Por cierto, ¿le agrego arroz, aceite o culantro/perejil para la sazón? 🙂' },
+  { keyword: 'cerdo', suggestion: 'Por cierto, ¿le agrego arroz, aceite o culantro/perejil para la sazón? 🙂' },
+  { keyword: 'arroz', suggestion: 'Por cierto, ¿busca también algo de carne o aceite para acompañar? 🙂' },
+  { keyword: 'aceite', suggestion: 'Por cierto, ¿le hace falta arroz o algo de carne para la comida? 🙂' },
 
   // --- Limpieza ---
-  { keyword: 'detergente', suggestion: 'Por cierto, ¿te hace falta suavizante o cloro para completar la limpieza? 🙂' },
-  { keyword: 'detergentes', suggestion: 'Por cierto, ¿te hace falta suavizante o cloro para completar la limpieza? 🙂' },
-  { keyword: 'suavizante', suggestion: 'Por cierto, ¿te hace falta detergente para completar la limpieza? 🙂' },
-  { keyword: 'cloro', suggestion: 'Por cierto, ¿te hace falta detergente o suavizante también? 🙂' },
-  { keyword: 'trapeador', suggestion: 'Por cierto, ¿te hace falta detergente para la limpieza general? 🙂' },
-  { keyword: 'trapeadores', suggestion: 'Por cierto, ¿te hace falta detergente para la limpieza general? 🙂' },
+  { keyword: 'detergente', suggestion: 'Por cierto, ¿le hace falta suavizante o cloro para completar la limpieza? 🙂' },
+  { keyword: 'detergentes', suggestion: 'Por cierto, ¿le hace falta suavizante o cloro para completar la limpieza? 🙂' },
+  { keyword: 'suavizante', suggestion: 'Por cierto, ¿le hace falta detergente para completar la limpieza? 🙂' },
+  { keyword: 'cloro', suggestion: 'Por cierto, ¿le hace falta detergente o suavizante también? 🙂' },
+  { keyword: 'trapeador', suggestion: 'Por cierto, ¿le hace falta detergente para la limpieza general? 🙂' },
+  { keyword: 'trapeadores', suggestion: 'Por cierto, ¿le hace falta detergente para la limpieza general? 🙂' },
 ]
 
 function normalize(text: string): string {

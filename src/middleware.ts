@@ -77,9 +77,14 @@ export async function middleware(request: NextRequest) {
     return withRefreshedCookies(NextResponse.redirect(url))
   }
 
-  // API routes that need auth (not webhooks)
+  // API routes that need auth (not webhooks). The catalog cron-sync
+  // route is called by the scheduled GitHub Actions sweep with no user
+  // session — it authenticates itself via X-Cron-Secret, so letting
+  // this guard reject it first meant every scheduled catalog sync
+  // failed with 401 and the catalog silently went stale.
   if (!user && request.nextUrl.pathname.startsWith('/api/whatsapp/') &&
-      !request.nextUrl.pathname.includes('/webhook')) {
+      !request.nextUrl.pathname.includes('/webhook') &&
+      request.nextUrl.pathname !== '/api/whatsapp/catalog/cron-sync') {
     return withRefreshedCookies(
       NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     )

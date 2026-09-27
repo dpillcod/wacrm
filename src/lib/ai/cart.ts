@@ -139,7 +139,7 @@ export function computeCartTotal(items: CartItem[]): {
 /** Plain-text itemized summary, ready to send as a WhatsApp message. */
 export function formatCartSummary(items: CartItem[]): string {
   if (items.length === 0) {
-    return 'Todavía no tienes productos agregados a tu pedido.'
+    return 'Todavía no tiene productos agregados a su pedido.'
   }
   const { total, currency, hasUnpriced } = computeCartTotal(items)
   const lines = items.map((item) => {
@@ -151,7 +151,7 @@ export function formatCartSummary(items: CartItem[]): string {
   })
   const totalLabel = hasUnpriced ? 'Subtotal (productos con precio disponible)' : 'Total'
   return (
-    `🛒 Tu pedido hasta ahora:\n\n${lines.join('\n')}\n\n` +
+    `🛒 Su pedido hasta ahora:\n\n${lines.join('\n')}\n\n` +
     `${totalLabel}: ${total.toFixed(2)} ${currency ?? 'USD'}`
   )
 }

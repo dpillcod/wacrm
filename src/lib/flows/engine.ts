@@ -52,6 +52,13 @@ import { INTERACTIVE_LIMITS } from "../whatsapp/meta-api";
 import { isPriceQuestion } from "./price-question";
 import { isGeneralQuestion } from "./general-question";
 import {
+  ALCOHOL_REPLY,
+  isAlcoholRequest,
+  isWithinBusinessHours,
+  normalizeForMatch,
+  outOfHoursNotice,
+} from "./store-policy";
+import {
   type CollectInputNodeConfig,
   type ConditionNodeConfig,
   type DispatchInboundInput,
@@ -71,6 +78,22 @@ import {
   type StartNodeConfig,
   type KeywordTriggerConfig,
 } from "./types";
+
+// ============================================================
+// Engine-authored customer texts (everything else a customer sees
+// comes from the flow's own node config). The store addresses
+// customers as "usted".
+// ============================================================
+
+const IDLE_NUDGE_TEXT =
+  "¿Sigue ahí? Si tiene alguna duda, dígame y seguimos con su pedido 🙂";
+const DISAMBIGUATION_PROMPT = "¿Cuál de estas opciones es la que busca?";
+const CAPTURE_FAILED_TEXT =
+  "Disculpe, no logré registrar eso último 🙁 ¿Me lo puede escribir de nuevo?";
+const FALLBACK_HANDOFF_TEXT =
+  "Disculpe, no logré entenderle bien 🙏 Le comunico con uno de nuestros asesores para que le ayude.";
+const NON_TEXT_REPLY_TEXT =
+  "Por ahora no puedo escuchar audios ni ver ese tipo de mensajes 🙏 ¿Me lo puede escribir, por favor?";
 
 // ============================================================
 // Pure helpers — extracted so engine.test.ts can exercise them
@@ -105,6 +128,11 @@ export function matchReplyId(
  * Case-insensitive contains/exact match against a list of keywords.
  * Used by the trigger evaluator. Stable enough that the v3 builder
  * UI can preview matches by passing canned strings.
+ *
+ * "contains" matches whole words/phrases only (accent-insensitive
+ * unless case_sensitive): a plain substring test made "2 cholas" match
+ * "hola" and "menudencia" match "menu", which restarted a customer's
+ * flow and wiped their order mid-conversation.
  */
 export function matchesKeywordTrigger(
   text: string,
@@ -112,15 +140,49 @@ export function matchesKeywordTrigger(
 ): boolean {
   if (!text || !cfg.keywords?.length) return false;
   const matchType = cfg.match_type ?? "contains";
-  const haystack = cfg.case_sensitive ? text : text.toLowerCase();
+  if (cfg.case_sensitive) {
+    for (const needle of cfg.keywords) {
+      if (!needle) continue;
+      if (matchType === "exact" ? text === needle : text.includes(needle)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  const haystack = normalizeForMatch(text);
+  const paddedHaystack = ` ${haystack} `;
   for (const raw of cfg.keywords) {
     if (!raw) continue;
-    const needle = cfg.case_sensitive ? raw : raw.toLowerCase();
-    if (matchType === "exact" ? haystack === needle : haystack.includes(needle)) {
+    const needle = normalizeForMatch(raw);
+    if (!needle) continue;
+    if (
+      matchType === "exact"
+        ? haystack === needle
+        : paddedHaystack.includes(` ${needle} `)
+    ) {
       return true;
     }
   }
   return false;
+}
+
+/**
+ * Stricter than `matchesKeywordTrigger`, used only while the contact
+ * already has an ACTIVE run: restarting throws away that run's state
+ * (the order captured so far), so only a short message that is
+ * essentially the command itself ("hola", "menú", "buenas tardes")
+ * counts. "Hola, también quiero 2 panes" mid-order is an order line,
+ * not a request to start over.
+ */
+export const RESTART_MAX_WORDS = 3;
+
+export function isRestartCommand(
+  text: string,
+  cfg: KeywordTriggerConfig,
+): boolean {
+  if (!matchesKeywordTrigger(text, cfg)) return false;
+  const words = normalizeForMatch(text).split(" ").filter(Boolean);
+  return words.length <= RESTART_MAX_WORDS;
 }
 
 /** Nodes that advance to a next_node_key without waiting for input. */
@@ -329,10 +391,14 @@ async function findEntryFlow(
   accountId: string,
   message: ParsedInbound,
   isFirstInbound: boolean,
+  /** True when checking whether to abandon an active run — see
+   *  `isRestartCommand` for why that needs a stricter match. */
+  restartOnly = false,
 ): Promise<FlowRow | null> {
   // Only text messages can match an entry trigger. Interactive replies
   // are responses to existing prompts; they never start a new flow.
   if (message.kind !== "text") return null;
+  const matchKeyword = restartOnly ? isRestartCommand : matchesKeywordTrigger;
 
   // Pull all active flows for this account. Active set is bounded
   // (the builder discourages double-trigger overlap; partial index
@@ -348,7 +414,7 @@ async function findEntryFlow(
   const typed = flows as FlowRow[];
   for (const flow of typed) {
     if (flow.trigger_type === "keyword") {
-      if (matchesKeywordTrigger(
+      if (matchKeyword(
         message.text,
         flow.trigger_config as KeywordTriggerConfig,
       )) {
@@ -360,6 +426,40 @@ async function findEntryFlow(
     // 'manual' triggers do not auto-start from inbound messages.
   }
   return null;
+}
+
+/**
+ * Non-text inbounds worth answering even with no active run: a catalog
+ * cart, or a voice note / video (which otherwise gets no reply at all —
+ * the AI auto-reply only handles text).
+ */
+export function isBotAddressableNonText(message: ParsedInbound): boolean {
+  return (
+    message.kind === "order" ||
+    (message.kind === "other" &&
+      (message.message_type === "audio" || message.message_type === "video"))
+  );
+}
+
+/**
+ * The account's "main menu" flow for inbounds that can't match a
+ * keyword (see isBotAddressableNonText): the oldest active flow with an
+ * inbound-driven trigger, same ordering findEntryFlow uses.
+ */
+async function findDefaultEntryFlow(
+  db: AdminClient,
+  accountId: string,
+): Promise<FlowRow | null> {
+  const { data, error } = await db
+    .from("flows")
+    .select("*")
+    .eq("account_id", accountId)
+    .eq("status", "active")
+    .in("trigger_type", ["keyword", "first_inbound_message"])
+    .order("created_at", { ascending: true })
+    .limit(1);
+  if (error) return null;
+  return ((data as FlowRow[] | null) ?? [])[0] ?? null;
 }
 
 // ============================================================
@@ -478,6 +578,34 @@ async function executeHandoff(
     assigned_to: cfg.assign_to ?? null,
   });
   await endRun(db, run.id, "handed_off", "handoff_node");
+  await notifyHandoff(db, run, node.node_key, {
+    summary: resolvedNote ?? "Un cliente necesita atención.",
+    assignTo: cfg.assign_to,
+    notifyUserIds: cfg.notify_user_ids,
+  });
+}
+
+/**
+ * Everything that should happen around ANY handoff, whether a
+ * `handoff` node reached it or the fallback policy gave up: tell the
+ * customer when nobody can answer until the next opening, alert staff
+ * by WhatsApp template, and add in-app notifications for extra
+ * teammates. All best-effort — a failure here never undoes the
+ * handoff itself.
+ */
+async function notifyHandoff(
+  db: AdminClient,
+  run: FlowRunRow,
+  nodeKey: string | null,
+  args: {
+    summary: string;
+    assignTo?: string | null;
+    notifyUserIds?: string[];
+  },
+): Promise<void> {
+  if (!isWithinBusinessHours()) {
+    await sendEngineText(db, run, nodeKey, outOfHoursNotice(), "out_of_hours_notice");
+  }
 
   // Best-effort — nobody watching the inbox otherwise finds out a
   // conversation needs a human until they happen to open WACRM.
@@ -490,17 +618,17 @@ async function executeHandoff(
     const result = await notifyStaffOfHandoff(db, {
       accountId: run.account_id,
       contactName: typeof contactNameVar === "string" ? contactNameVar.trim() : "",
-      summary: resolvedNote ?? "Un cliente necesita atención.",
+      summary: args.summary,
     });
     if (result.failed.length > 0) {
-      await logEvent(db, run.id, "error", node.node_key, {
+      await logEvent(db, run.id, "error", nodeKey, {
         reason: "staff_notify_failed",
         failed: result.failed,
         sent: result.sent,
       });
     }
   } catch (err) {
-    await logEvent(db, run.id, "error", node.node_key, {
+    await logEvent(db, run.id, "error", nodeKey, {
       reason: "staff_notify_threw",
       detail: err instanceof Error ? err.message : String(err),
     });
@@ -511,8 +639,8 @@ async function executeHandoff(
   // notification. `assign_to` already gets its own row for free via
   // the `on_conversation_assigned` DB trigger (migration 027), so it's
   // excluded here to avoid double-notifying that same person.
-  const extraRecipients = (cfg.notify_user_ids ?? []).filter(
-    (id) => id && id !== cfg.assign_to,
+  const extraRecipients = (args.notifyUserIds ?? []).filter(
+    (id) => id && id !== args.assignTo,
   );
   if (extraRecipients.length > 0) {
     try {
@@ -528,18 +656,18 @@ async function executeHandoff(
           type: "conversation_assigned",
           conversation_id: run.conversation_id,
           contact_id: run.contact_id,
-          title: "New conversation assigned",
-          body: `Ferrobot te asignó una conversación con ${contactName}`,
+          title: "Nueva conversación asignada",
+          body: `Ferrobot le asignó una conversación con ${contactName}`,
         })),
       );
       if (notifyErr) {
-        await logEvent(db, run.id, "error", node.node_key, {
+        await logEvent(db, run.id, "error", nodeKey, {
           reason: "extra_notify_failed",
           detail: notifyErr.message,
         });
       }
     } catch (err) {
-      await logEvent(db, run.id, "error", node.node_key, {
+      await logEvent(db, run.id, "error", nodeKey, {
         reason: "extra_notify_threw",
         detail: err instanceof Error ? err.message : String(err),
       });
@@ -614,6 +742,35 @@ function interpolateVars(template: string, vars: Record<string, unknown>): strin
   });
 }
 
+/** Send an engine-authored text (not a node's own) and log it; a send
+ *  failure is logged, never thrown — these are courtesy replies. */
+async function sendEngineText(
+  db: AdminClient,
+  run: FlowRunRow,
+  nodeKey: string | null,
+  text: string,
+  reason: string,
+): Promise<void> {
+  try {
+    const { whatsapp_message_id } = await engineSendText({
+      accountId: run.account_id,
+      userId: run.user_id,
+      conversationId: run.conversation_id!,
+      contactId: run.contact_id!,
+      text,
+    });
+    await logEvent(db, run.id, "message_sent", nodeKey, {
+      reason,
+      whatsapp_message_id,
+    });
+  } catch (err) {
+    await logEvent(db, run.id, "error", nodeKey, {
+      reason: `${reason}_failed`,
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 async function endRun(
   db: AdminClient,
   runId: string,
@@ -656,6 +813,19 @@ async function advanceFromNodeKey(
   const idleNudgeMinutes = resolveFallbackPolicy(
     (await loadFlow(db, run.flow_id))?.fallback_policy,
   ).idle_nudge_minutes;
+  // This advance is the reply that closes any open capture batch (see
+  // captureTextIntoVar). Clear the marker up front — the `_last` value
+  // it accumulated stays in vars for this advance's interpolation —
+  // so the customer's next message starts a fresh batch.
+  if (run.vars.__capture_batch_var !== undefined) {
+    const closedVars: Record<string, unknown> = { ...run.vars };
+    delete closedVars.__capture_batch_var;
+    const { error } = await db
+      .from("flow_runs")
+      .update({ vars: closedVars })
+      .eq("id", run.id);
+    if (!error) run.vars = closedVars;
+  }
   let currentKey: string | null = startNodeKey;
   // Defensive cap — if a flow has a cycle (which the validator
   // SHOULD catch but doesn't yet in v1), we bail rather than loop.
@@ -1034,6 +1204,7 @@ export async function dispatchInboundToFlows(
         input.accountId,
         input.message,
         input.isFirstInboundMessage,
+        true,
       );
       if (restartFlow?.entry_node_id) {
         await endRun(db, activeRun.id, "timed_out", "restarted_by_keyword");
@@ -1045,6 +1216,45 @@ export async function dispatchInboundToFlows(
       // in-memory. See loadAllNodes.
       const nodes = await loadAllNodes(db, activeRun.flow_id);
       return handleReplyForActiveRun(db, activeRun, input.message, nodes);
+    }
+
+    // No active run. Non-text messages never match a keyword trigger,
+    // but two of them still deserve the bot's attention — only while
+    // the bot owns the conversation (open and unassigned): once a human
+    // has it, they can listen to the audio / read the cart themselves.
+    if (isBotAddressableNonText(input.message)) {
+      const { data: conv } = await db
+        .from("conversations")
+        .select("status, assigned_agent_id")
+        .eq("id", input.conversationId)
+        .maybeSingle();
+      const c = conv as { status: string; assigned_agent_id: string | null } | null;
+      const botOwnsConversation = !!c && c.status === "open" && !c.assigned_agent_id;
+      if (botOwnsConversation) {
+        const defaultFlow = await findDefaultEntryFlow(db, input.accountId);
+        if (defaultFlow?.entry_node_id) {
+          if (input.message.kind === "order") {
+            // A cart sent straight from the catalog: start the bot as
+            // if the customer had typed their order at the greeting.
+            const nodes = await loadAllNodes(db, defaultFlow.id);
+            return startNewRun(db, defaultFlow, input, nodes);
+          }
+          // A voice note / video as the first message: ask for text.
+          try {
+            await engineSendText({
+              accountId: input.accountId,
+              userId: input.userId,
+              conversationId: input.conversationId,
+              contactId: input.contactId,
+              text: NON_TEXT_REPLY_TEXT,
+            });
+            return { consumed: true, outcome: "no_match" };
+          } catch (err) {
+            console.error("[flows] non-text reply failed:", err);
+          }
+        }
+      }
+      return { consumed: false, outcome: "no_match" };
     }
 
     // No active run → look for a flow whose entry trigger matches.
@@ -1185,7 +1395,7 @@ async function sendIdleNudge(
       userId: freshRun.user_id,
       conversationId: freshRun.conversation_id!,
       contactId: freshRun.contact_id!,
-      text: "¿Sigues ahí? Si tienes alguna duda, dime y seguimos con tu pedido 🙂",
+      text: IDLE_NUDGE_TEXT,
     });
     await logEvent(db, runId, "message_sent", expectedNodeKey, {
       reason: "idle_nudge",
@@ -1289,7 +1499,7 @@ async function tryStartProductDisambiguation(
     userId: run.user_id,
     conversationId: run.conversation_id!,
     contactId: run.contact_id!,
-    bodyText: "¿Cuál de estas opciones es la que buscas?",
+    bodyText: DISAMBIGUATION_PROMPT,
     buttonLabel: "Ver opciones",
     sections: [
       {
@@ -1369,23 +1579,41 @@ async function captureTextIntoVar(
   // At most one cross-sell aside per run, regardless of how many
   // capturing nodes have it enabled — a customer who mentions pan,
   // then leche, then queso should get ONE nudge, not three.
+  // A debounced batch ("1 leche", "1 queso", "10 panes" sent back to
+  // back) gets ONE confirmation, so `_last` must cover every capture
+  // since the previous reply — not just the final one, which made the
+  // first items look dropped. `__capture_batch_var` stays set until
+  // the advance loop sends that reply (see advanceFromNodeKey).
+  const batchOpen = run.vars.__capture_batch_var === args.var_key;
+  const prevLast = run.vars[`${args.var_key}_last`];
+  const prevAside = run.vars[`${args.var_key}_cross_sell`];
+  const lastValue =
+    batchOpen && typeof prevLast === "string" && prevLast.length > 0
+      ? `${prevLast}, ${captured}`
+      : captured;
+
   let crossSellAside = "";
   if (args.cross_sell && !run.vars.__cross_sell_shown) {
     const suggestion = pickCrossSellSuggestion(trimmed, []);
     if (suggestion) crossSellAside = `\n\n${suggestion}`;
+  }
+  if (!crossSellAside && batchOpen && typeof prevAside === "string") {
+    // Keep an aside an earlier item in this same batch earned.
+    crossSellAside = prevAside;
   }
 
   const newVars = {
     ...run.vars,
     [args.var_key]: newValue,
     // Lets the node's own confirmation text echo back just what was
-    // captured THIS turn (e.g. "Anotado: 1 libra de queso ✅") instead
-    // of a generic ack that gives no way to notice a dropped item.
-    [`${args.var_key}_last`]: captured,
+    // captured since the last reply (e.g. "Anotado: 1 libra de queso ✅")
+    // instead of a generic ack that gives no way to notice a dropped item.
+    [`${args.var_key}_last`]: lastValue,
     // Reset every turn (not just when cross_sell is on) so a stale
     // aside from an earlier capture on a different var_key can't leak
     // into this node's confirmation text.
     [`${args.var_key}_cross_sell`]: crossSellAside,
+    __capture_batch_var: args.var_key,
     ...(crossSellAside ? { __cross_sell_shown: true } : {}),
   };
   let capErr = (
@@ -1469,6 +1697,55 @@ async function handleReplyForActiveRun(
   const currentNode = nodes.get(run.current_node_key) ?? null;
   if (!currentNode) {
     await endRun(db, run.id, "failed", "current_node_not_found");
+    return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+  }
+
+  const currentCollectCfg =
+    currentNode.node_type === "collect_input"
+      ? (currentNode.config as unknown as CollectInputNodeConfig)
+      : undefined;
+  const currentTextFallback =
+    currentNode.node_type === "send_buttons"
+      ? (currentNode.config as unknown as SendButtonsNodeConfig).text_fallback
+      : undefined;
+
+  // Voice notes, videos, stickers and documents used to arrive as an
+  // empty text, fail the capture, burn a reprompt and — after two —
+  // hand off silently. Say plainly what we can't read instead, without
+  // counting it against the customer. A document IS accepted where an
+  // image is (a transfer receipt often comes as a PDF); a sticker is
+  // usually just an "ok" and gets no reply.
+  if (message.kind === "other") {
+    const acceptsDocument =
+      message.message_type === "document" &&
+      message.media_url &&
+      currentCollectCfg?.accept === "image";
+    if (acceptsDocument) {
+      const next = await captureTextIntoVar(db, run, currentNode.node_key, {
+        var_key: currentCollectCfg.var_key,
+        append: currentCollectCfg.append,
+        lowercase: false,
+        cross_sell: false,
+        next_node_key: currentCollectCfg.next_node_key,
+        text: message.media_url!,
+      });
+      if (next) {
+        const outcome = await advanceFromNodeKey(db, run, next, nodes);
+        return { consumed: true, flow_run_id: run.id, outcome: outcome.outcome };
+      }
+    }
+    if (message.message_type !== "sticker") {
+      await sendEngineText(db, run, currentNode.node_key, NON_TEXT_REPLY_TEXT, "non_text_reply");
+    }
+    return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+  }
+
+  // Liquor can't be sold over WhatsApp (Meta Commerce Policy) — decline
+  // it on any node that accumulates an order list, before it's captured.
+  const capturesOrderList =
+    currentCollectCfg?.append === true || currentTextFallback?.append === true;
+  if (message.kind === "text" && capturesOrderList && isAlcoholRequest(message.text)) {
+    await sendEngineText(db, run, currentNode.node_key, ALCOHOL_REPLY, "alcohol_declined");
     return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
   }
 
@@ -1626,6 +1903,23 @@ async function handleReplyForActiveRun(
     });
     debounceMs = cfg.debounce_ms;
   } else if (
+    message.kind === "order" &&
+    (currentCollectCfg?.append === true || currentTextFallback?.append === true)
+  ) {
+    // A catalog cart lands wherever typed order lines would (an
+    // order-list collect_input, or a send_buttons text_fallback like
+    // "¿algo más?"). No disambiguation — the items are exact catalog
+    // picks — and no debounce: a cart is one complete message.
+    const target = (currentCollectCfg?.append ? currentCollectCfg : currentTextFallback)!;
+    matched = await captureTextIntoVar(db, run, currentNode.node_key, {
+      var_key: target.var_key,
+      append: true,
+      lowercase: false,
+      cross_sell: false,
+      next_node_key: target.next_node_key,
+      text: message.text,
+    });
+  } else if (
     message.kind === "image" &&
     currentNode.node_type === "collect_input" &&
     (currentNode.config as unknown as CollectInputNodeConfig).accept === "image"
@@ -1734,7 +2028,7 @@ async function handleReplyForActiveRun(
           userId: run.user_id,
           conversationId: run.conversation_id!,
           contactId: run.contact_id!,
-          text: "Perdón, no logré registrar eso último 🙁 ¿Puedes escribirlo de nuevo?",
+          text: CAPTURE_FAILED_TEXT,
         });
       } catch (err) {
         await logEvent(db, run.id, "error", currentNode.node_key, {
@@ -1778,6 +2072,23 @@ async function handleReplyForActiveRun(
       reason: "fallback_exhausted",
     });
     await endRun(db, run.id, "handed_off", "fallback_exhausted");
+    // This path used to end silently: the customer got no reply at all
+    // and no one on staff was told, so the conversation just sat in
+    // "pending" until somebody happened to open the inbox.
+    await sendEngineText(
+      db,
+      run,
+      run.current_node_key,
+      FALLBACK_HANDOFF_TEXT,
+      "fallback_handoff_ack",
+    );
+    const orderSoFar =
+      typeof run.vars.order_text === "string" && run.vars.order_text.trim()
+        ? ` Pedido hasta ahora: ${run.vars.order_text}`
+        : "";
+    await notifyHandoff(db, run, run.current_node_key, {
+      summary: `El bot no logró entender al cliente (paso "${run.current_node_key}").${orderSoFar}`,
+    });
     return { consumed: true, flow_run_id: run.id, outcome: "handed_off" };
   }
   // action.type === 'end'
@@ -1891,6 +2202,27 @@ async function startNewRun(
   if (incErr) {
     // Non-fatal — the run itself succeeded; only the counter is off.
     console.error("[flows] execution_count rpc error:", incErr.message);
+  }
+
+  // A catalog cart that opened the conversation is treated as the
+  // customer's answer to the entry node (e.g. the greeting's "type your
+  // order" text_fallback) rather than something to greet over. If the
+  // entry node can't take an order list, fall back to a normal start —
+  // the cart itself is still in the inbox for staff.
+  if (input.message.kind === "order") {
+    const entry = nodes.get(flow.entry_node_id!);
+    const entryTakesOrder =
+      (entry?.node_type === "send_buttons" &&
+        (entry.config as unknown as SendButtonsNodeConfig).text_fallback?.append === true) ||
+      (entry?.node_type === "collect_input" &&
+        (entry.config as unknown as CollectInputNodeConfig).append === true);
+    if (entryTakesOrder) {
+      const result = await handleReplyForActiveRun(db, run, input.message, nodes);
+      return {
+        ...result,
+        outcome: result.outcome === "advanced" ? "started" : result.outcome,
+      };
+    }
   }
 
   // Run the advance loop starting from the entry node.

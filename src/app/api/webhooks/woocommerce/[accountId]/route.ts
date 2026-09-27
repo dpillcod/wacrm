@@ -33,6 +33,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import crypto from "crypto";
 
 import { resolveConversationByPhone } from "@/lib/whatsapp/resolve-conversation";
+import { toEcuadorInternational } from "@/lib/whatsapp/phone-utils";
 import { SendMessageError } from "@/lib/whatsapp/send-message";
 import { startFlowRunForExternalEvent } from "@/lib/flows/engine";
 
@@ -141,7 +142,10 @@ export async function POST(
     return NextResponse.json({ error: "malformed json" }, { status: 400 });
   }
 
-  const phone = order.billing?.phone;
+  // Checkout phones are typed the local way ("0991234567"), which fails
+  // E.164 validation — every such order used to be skipped silently.
+  const rawPhone = order.billing?.phone;
+  const phone = rawPhone ? toEcuadorInternational(rawPhone) : "";
   if (!phone) {
     console.error("[woocommerce webhook] order has no billing phone", {
       accountId,

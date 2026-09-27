@@ -6,6 +6,7 @@ import {
   phoneVariants,
   phonesMatch,
   sanitizePhoneForMeta,
+  toEcuadorInternational,
 } from "./phone-utils";
 
 describe("sanitizePhoneForMeta", () => {
@@ -160,5 +161,21 @@ describe("isRecipientNotAllowedError", () => {
       false,
     );
     expect(isRecipientNotAllowedError("")).toBe(false);
+  });
+});
+
+describe("toEcuadorInternational", () => {
+  it("converts the local 0-prefixed mobile form", () => {
+    expect(toEcuadorInternational("0981414182")).toBe("593981414182");
+    expect(toEcuadorInternational("096 937 2944")).toBe("593969372944");
+  });
+
+  it("converts a bare 9-digit mobile", () => {
+    expect(toEcuadorInternational("987143251")).toBe("593987143251");
+  });
+
+  it("leaves international numbers as digits only", () => {
+    expect(toEcuadorInternational("+593 99 367 9794")).toBe("593993679794");
+    expect(toEcuadorInternational("+14155550123")).toBe("14155550123");
   });
 });

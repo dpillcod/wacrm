@@ -33,6 +33,22 @@ export function phonesMatch(phone1: string, phone2: string): boolean {
 }
 
 /**
+ * Turn an Ecuadorian number written the local way into international
+ * digits: "099 367 9794" / "0993679794" → "593993679794", and a bare
+ * 9-digit mobile "993679794" → "593993679794". Anything else (already
+ * international, other countries) is just digit-sanitized. Customers
+ * type the local form in the web checkout and staff lists, and Meta
+ * only accepts international numbers — a local one fails E.164
+ * validation outright.
+ */
+export function toEcuadorInternational(phone: string): string {
+  const digits = sanitizePhoneForMeta(phone)
+  if (/^0\d{9}$/.test(digits)) return `593${digits.slice(1)}`
+  if (/^9\d{8}$/.test(digits)) return `593${digits}`
+  return digits
+}
+
+/**
  * Validate phone number is E.164-like format (7-15 digits starting with non-zero).
  * Accepts with or without + prefix.
  */

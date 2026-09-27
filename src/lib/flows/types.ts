@@ -528,7 +528,43 @@ export type ParsedInbound =
       /** Optional caption the customer sent alongside the photo. */
       caption: string | null;
       meta_message_id: string;
+    }
+  | {
+      /**
+       * A cart the customer built in the WhatsApp catalog and sent
+       * (Meta message type "order"). Every item carries the exact
+       * catalog retailer id and the price Meta showed the customer, so
+       * — unlike free text matched against the catalog — there is no
+       * guessing about WHICH product they meant.
+       */
+      kind: "order";
+      items: OrderItem[];
+      /** One human-readable line per item, newline-joined — what gets
+       *  captured into the order var, same shape as typed order lines. */
+      text: string;
+      meta_message_id: string;
+    }
+  | {
+      /**
+       * Anything the runner can't read as text: audio (voice notes),
+       * video, sticker, document. `media_url` is set when the media
+       * could be verified with Meta (documents can still satisfy an
+       * image-capture node — a transfer receipt often arrives as PDF).
+       */
+      kind: "other";
+      message_type: string;
+      media_url: string | null;
+      meta_message_id: string;
     };
+
+export interface OrderItem {
+  retailer_id: string;
+  /** Catalog name when the retailer id is known locally, else the id. */
+  name: string;
+  quantity: number;
+  unit_price: number | null;
+  currency: string | null;
+}
 
 export interface DispatchInboundInput {
   /** Account tenancy key. Drives the lookup of active flows and the

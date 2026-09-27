@@ -29,7 +29,7 @@ describe('pickCrossSellSuggestion', () => {
     ]
     // A second, unrelated cross-sell trigger later in the same thread
     // should stay quiet — one nudge per conversation, not one per item.
-    expect(pickCrossSellSuggestion('y también cerveza', alreadyShownHistory)).toBeNull()
+    expect(pickCrossSellSuggestion('y también arroz', alreadyShownHistory)).toBeNull()
   })
 
   it('is case-insensitive and ignores punctuation', () => {

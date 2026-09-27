@@ -36,6 +36,10 @@ yarn-error.log*
 !.env.local.example
 !.env.example
 
+# Private business notes (decisions, Meta IDs, internal context) —
+# this repo is a public fork, so they stay local. Imported by CLAUDE.md.
+ESTADO.md
+
 # vercel
 .vercel
 

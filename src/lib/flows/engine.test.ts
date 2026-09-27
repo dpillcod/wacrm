@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   matchReplyId,
   matchesKeywordTrigger,
+  isRestartCommand,
+  isBotAddressableNonText,
   isAutoAdvancing,
   isSuspending,
   isTerminal,
@@ -174,6 +176,52 @@ describe("matchesKeywordTrigger", () => {
     const cfg = { keywords: ["", "support", ""] };
     expect(matchesKeywordTrigger("support center", cfg)).toBe(true);
     expect(matchesKeywordTrigger("nope", cfg)).toBe(false);
+  });
+});
+
+describe("matchesKeywordTrigger — whole words, accent-insensitive", () => {
+  const cfg = { keywords: ["hola", "menú", "buenas tardes"] };
+
+  it("no longer matches a keyword buried inside another word", () => {
+    expect(matchesKeywordTrigger("2 cholas", cfg)).toBe(false);
+    expect(matchesKeywordTrigger("1 libra de menudencia", { keywords: ["menu"] })).toBe(false);
+  });
+
+  it("matches regardless of accents and punctuation", () => {
+    expect(matchesKeywordTrigger("¡Hola!", cfg)).toBe(true);
+    expect(matchesKeywordTrigger("menu", cfg)).toBe(true);
+    expect(matchesKeywordTrigger("Buenas tardes, una consulta", cfg)).toBe(true);
+  });
+});
+
+describe("isRestartCommand", () => {
+  const cfg = { keywords: ["hola", "menu", "ayuda"] };
+
+  it("restarts on a short message that is essentially the command", () => {
+    expect(isRestartCommand("Hola", cfg)).toBe(true);
+    expect(isRestartCommand("menú por favor", cfg)).toBe(true);
+  });
+
+  it("does not restart on an order line that happens to include a keyword", () => {
+    expect(isRestartCommand("hola, también quiero 2 panes", cfg)).toBe(false);
+    expect(isRestartCommand("necesito ayuda con una llave de paso", cfg)).toBe(false);
+  });
+});
+
+describe("isBotAddressableNonText", () => {
+  it("covers catalog carts and voice notes/videos, not stickers", () => {
+    expect(
+      isBotAddressableNonText({ kind: "order", items: [], text: "", meta_message_id: "m" }),
+    ).toBe(true);
+    expect(
+      isBotAddressableNonText({ kind: "other", message_type: "audio", media_url: null, meta_message_id: "m" }),
+    ).toBe(true);
+    expect(
+      isBotAddressableNonText({ kind: "other", message_type: "sticker", media_url: null, meta_message_id: "m" }),
+    ).toBe(false);
+    expect(
+      isBotAddressableNonText({ kind: "text", text: "hola", meta_message_id: "m" }),
+    ).toBe(false);
   });
 });
 

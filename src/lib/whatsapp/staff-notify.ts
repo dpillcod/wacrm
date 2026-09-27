@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { decrypt } from './encryption'
 import { sendTemplateMessage } from './meta-api'
-import { sanitizePhoneForMeta } from './phone-utils'
+import { toEcuadorInternational } from './phone-utils'
 
 /**
  * Internal ops notification sent to the business's own staff numbers
@@ -42,7 +42,9 @@ export async function notifyStaffOfHandoff(
 ): Promise<NotifyStaffResult> {
   const phones = (process.env.ORDER_NOTIFICATION_PHONES ?? '')
     .split(',')
-    .map((p) => sanitizePhoneForMeta(p.trim()))
+    // Local "09..." numbers are accepted too — staff lists get typed
+    // the way people say them.
+    .map((p) => toEcuadorInternational(p.trim()))
     .filter(Boolean)
   if (phones.length === 0) return { sent: [], failed: [] }
 
