@@ -1872,6 +1872,21 @@ async function handleReplyForActiveRun(
       currentNode.node_type === "send_list")
   ) {
     matched = matchReplyId(currentNode, message.reply_id);
+    if (matched) {
+      // Remember which option was tapped as `{{vars.<node_key>_choice}}`
+      // (e.g. "Efectivo" on ask_payment), so later text — above all the
+      // handoff note staff receive — can say what the customer chose.
+      // Without this a button path left no trace in vars at all.
+      const choiceVars = {
+        ...run.vars,
+        [`${currentNode.node_key}_choice`]: message.reply_title,
+      };
+      const { error } = await db
+        .from("flow_runs")
+        .update({ vars: choiceVars })
+        .eq("id", run.id);
+      if (!error) run.vars = choiceVars;
+    }
   } else if (
     message.kind === "text" &&
     currentNode.node_type === "collect_input" &&
