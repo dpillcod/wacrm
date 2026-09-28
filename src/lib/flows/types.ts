@@ -78,6 +78,8 @@ export interface TextFallbackConfig {
   disambiguate_products?: boolean;
   /** See CollectInputNodeConfig.disambiguation_show_price. */
   disambiguation_show_price?: boolean;
+  /** See CollectInputNodeConfig.ai_clarify. */
+  ai_clarify?: boolean;
   next_node_key: string;
 }
 
@@ -340,6 +342,14 @@ export interface CollectInputNodeConfig {
    * name instead.
    */
   disambiguation_show_price?: boolean;
+  /**
+   * Before confirming a batch of captured order lines, let the account's
+   * AI tidy each line and — if one is too vague for a clerk to pick the
+   * right product ("1 coca cola grande") — ask the customer ONE short
+   * question, then fold the answer back in. Never quotes prices. Any AI
+   * failure keeps the lines exactly as typed. See flows/order-clarify.ts.
+   */
+  ai_clarify?: boolean;
   /** Node to advance to after capture. */
   next_node_key: string;
 }
@@ -624,7 +634,8 @@ export interface DispatchInboundResult {
     | "duplicate_inbound_ignored"
     | "no_match"
     | "debounced"
-    | "awaiting_disambiguation";
+    | "awaiting_disambiguation"
+    | "awaiting_clarification";
 }
 
 // ============================================================

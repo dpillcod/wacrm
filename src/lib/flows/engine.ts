@@ -52,6 +52,11 @@ import { INTERACTIVE_LIMITS } from "../whatsapp/meta-api";
 import { isPriceQuestion } from "./price-question";
 import { isGeneralQuestion } from "./general-question";
 import {
+  applyClarificationAnswer,
+  replaceTrailingLines,
+  reviewOrderLines,
+} from "./order-clarify";
+import {
   ALCOHOL_REPLY,
   isAlcoholRequest,
   isWithinBusinessHours,
@@ -906,6 +911,7 @@ async function advanceFromNodeKey(
   if (run.vars.__capture_batch_var !== undefined) {
     const closedVars: Record<string, unknown> = { ...run.vars };
     delete closedVars.__capture_batch_var;
+    delete closedVars.__capture_batch_lines;
     const { error } = await db
       .from("flow_runs")
       .update({ vars: closedVars })
@@ -1417,6 +1423,8 @@ async function flushDebouncedAdvance(
     await db.from("flow_runs").update({ reprompt_count: 0 }).eq("id", runId);
     freshRun.reprompt_count = 0;
   }
+  const node = nodes.get(expectedNodeKey);
+  if (node && (await clarifyCapturedBatch(db, freshRun, node))) return;
   await advanceFromNodeKey(db, freshRun, nextNodeKey, nodes);
 }
 
@@ -1435,6 +1443,97 @@ function scheduleDebouncedAdvance(
     });
   }, delayMs);
   pendingDebounces.set(runId, timer);
+}
+
+// ============================================================
+// AI clarification of captured order lines — see
+// CollectInputNodeConfig.ai_clarify and flows/order-clarify.ts.
+// ============================================================
+
+/** Stashed in `vars.__pending_clarification` while the customer is
+ *  answering the one question asked about their last batch of lines. */
+interface PendingClarification {
+  var_key: string;
+  next_node_key: string;
+  /** The batch as reviewed — the trailing lines of the order var. */
+  lines: string[];
+  question: string;
+}
+
+/** The node's text-capture config: collect_input's own, or a text_fallback. */
+function captureConfigOf(
+  node: FlowNodeRow,
+): (DisambiguationConfig & { ai_clarify?: boolean }) | undefined {
+  if (node.node_type === "collect_input") {
+    return node.config as unknown as CollectInputNodeConfig;
+  }
+  return textFallbackOf(node);
+}
+
+/** Rewrite the order var's trailing `count` lines and its derived vars. */
+function withReplacedLines(
+  vars: Record<string, unknown>,
+  varKey: string,
+  count: number,
+  lines: string[],
+): Record<string, unknown> {
+  const current = typeof vars[varKey] === "string" ? (vars[varKey] as string) : "";
+  const updated = replaceTrailingLines(current, count, lines);
+  return {
+    ...vars,
+    [varKey]: updated,
+    [`${varKey}_numbered`]: numberLines(updated),
+    [`${varKey}_last`]: lines.join(", "),
+  };
+}
+
+/**
+ * Run the just-captured batch past the AI before it's confirmed. Tidies
+ * the lines in place; if one is too vague, sends ONE question and
+ * returns true — the caller must then stay on this node instead of
+ * advancing (the answer is handled in handleReplyForActiveRun). Returns
+ * false (advance as usual) when clarification is off, there's nothing
+ * to review, or the AI is unavailable.
+ */
+async function clarifyCapturedBatch(
+  db: AdminClient,
+  run: FlowRunRow,
+  node: FlowNodeRow,
+): Promise<boolean> {
+  const cfg = captureConfigOf(node);
+  const lines = run.vars.__capture_batch_lines;
+  if (
+    !cfg?.ai_clarify ||
+    !cfg.append ||
+    run.vars.__capture_batch_var !== cfg.var_key ||
+    !Array.isArray(lines) ||
+    lines.length === 0
+  ) {
+    return false;
+  }
+  const review = await reviewOrderLines(db, run.account_id, run.conversation_id, lines as string[]);
+  if (!review) return false;
+
+  let vars = withReplacedLines(run.vars, cfg.var_key, lines.length, review.lines);
+  if (review.question) {
+    const pending: PendingClarification = {
+      var_key: cfg.var_key,
+      next_node_key: cfg.next_node_key,
+      lines: review.lines,
+      question: review.question,
+    };
+    vars = { ...vars, __pending_clarification: pending };
+    // The batch is now owned by the pending question.
+    delete vars.__capture_batch_var;
+    delete vars.__capture_batch_lines;
+  }
+  const { error } = await db.from("flow_runs").update({ vars }).eq("id", run.id);
+  if (error) return false;
+  run.vars = vars;
+
+  if (!review.question) return false;
+  await sendEngineText(db, run, node.node_key, review.question, "ai_clarify_question");
+  return true;
 }
 
 // ============================================================
@@ -1706,6 +1805,15 @@ async function captureTextIntoVar(
     batchOpen && typeof prevLast === "string" && prevLast.length > 0
       ? `${prevLast}, ${captured}`
       : captured;
+  // The same batch as individual lines, for AI clarification (see
+  // clarifyCapturedBatch) — a multi-line message counts line by line.
+  const prevBatchLines = batchOpen && Array.isArray(run.vars.__capture_batch_lines)
+    ? (run.vars.__capture_batch_lines as string[])
+    : [];
+  const batchLines = [
+    ...prevBatchLines,
+    ...captured.split("\n").map((l) => l.trim()).filter(Boolean),
+  ];
 
   let crossSellAside = "";
   if (args.cross_sell && !run.vars.__cross_sell_shown) {
@@ -1732,6 +1840,7 @@ async function captureTextIntoVar(
     // step (e.g. "{{vars.order_text_numbered}}").
     ...(args.append ? { [`${args.var_key}_numbered`]: numberLines(newValue) } : {}),
     __capture_batch_var: args.var_key,
+    __capture_batch_lines: batchLines,
     ...(crossSellAside ? { __cross_sell_shown: true } : {}),
   };
   let capErr = (
@@ -1827,7 +1936,11 @@ async function handleReplyForActiveRun(
   // A typed option number counts as tapping that option — unless a
   // product pick list is open, where the number means one of ITS rows
   // (handled in the pending-disambiguation branch below).
-  if (message.kind === "text" && !run.vars.__pending_disambiguation) {
+  if (
+    message.kind === "text" &&
+    !run.vars.__pending_disambiguation &&
+    !run.vars.__pending_clarification
+  ) {
     const picked = optionByNumber(currentNode, message.text);
     if (picked) {
       message = {
@@ -1961,6 +2074,49 @@ async function handleReplyForActiveRun(
   // anything else (a stale tap, or the customer typing instead of
   // tapping) just drops it and falls through to the branches below,
   // where a text reply re-enters the disambiguation check fresh.
+  // The customer is answering the question clarifyCapturedBatch asked.
+  // A text answer is folded into those lines and the run moves on (no
+  // second question, ever); anything else just drops the question —
+  // the lines already stand as reviewed.
+  const pendingClarification = run.vars.__pending_clarification as
+    | PendingClarification
+    | undefined;
+  if (pendingClarification) {
+    const restVars: Record<string, unknown> = { ...run.vars };
+    delete restVars.__pending_clarification;
+    if (message.kind === "text" && message.text.trim()) {
+      const answer = message.text.trim();
+      const answered = await applyClarificationAnswer(
+        db,
+        run.account_id,
+        run.conversation_id,
+        { lines: pendingClarification.lines, question: pendingClarification.question, answer },
+      );
+      // AI unavailable: keep the answer next to the last line rather
+      // than lose it — the clerk reads the list, not a model.
+      const newLines = answered ?? [
+        ...pendingClarification.lines.slice(0, -1),
+        `${pendingClarification.lines.at(-1)} (${answer})`,
+      ];
+      const vars = withReplacedLines(
+        restVars,
+        pendingClarification.var_key,
+        pendingClarification.lines.length,
+        newLines,
+      );
+      await db.from("flow_runs").update({ vars, reprompt_count: 0 }).eq("id", run.id);
+      run.vars = vars;
+      run.reprompt_count = 0;
+      await logEvent(db, run.id, "node_entered", currentNode.node_key, {
+        clarification_applied: answered !== null,
+      });
+      const outcome = await advanceFromNodeKey(db, run, pendingClarification.next_node_key, nodes);
+      return { consumed: true, flow_run_id: run.id, outcome: outcome.outcome };
+    }
+    await db.from("flow_runs").update({ vars: restVars }).eq("id", run.id);
+    run.vars = restVars;
+  }
+
   const pendingDisambiguation = run.vars.__pending_disambiguation as
     | PendingDisambiguation
     | undefined;
@@ -2152,6 +2308,9 @@ async function handleReplyForActiveRun(
       return { consumed: true, flow_run_id: run.id, outcome: "debounced" };
     }
 
+    if (message.kind === "text" && (await clarifyCapturedBatch(db, run, currentNode))) {
+      return { consumed: true, flow_run_id: run.id, outcome: "awaiting_clarification" };
+    }
     const outcome = await advanceFromNodeKey(db, run, matched, nodes);
     return {
       consumed: true,
