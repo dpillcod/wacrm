@@ -15,7 +15,7 @@ export async function PATCH(
   const { id } = await params
   let ctx
   try {
-    ctx = await requireRole('agent')
+    ctx = await requireRole('admin')
   } catch (err) {
     return toErrorResponse(err)
   }
@@ -88,7 +88,7 @@ export async function DELETE(
   const { id } = await params
   let ctx
   try {
-    ctx = await requireRole('agent')
+    ctx = await requireRole('admin')
   } catch (err) {
     return toErrorResponse(err)
   }

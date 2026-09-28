@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { canAccessPath } from "@/lib/auth/roles";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
@@ -12,8 +13,12 @@ import { PresenceHeartbeat } from "@/components/presence/presence-heartbeat";
 // client components can't export Next's metadata object.
 
 function DashboardShellInner({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, profileLoading, accountRole } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
+  // Inbox-only members (see canAccessPath) are sent to the inbox from
+  // any other page — including /dashboard, where login lands everyone.
+  const pathAllowed = !accountRole || canAccessPath(accountRole, pathname);
 
   // Sidebar drawer state — only used on mobile. On lg+ the sidebar is
   // always visible and this stays at `false` (ignored by the component).
@@ -26,7 +31,15 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
     }
   }, [user, loading, router]);
 
-  if (loading) {
+  useEffect(() => {
+    if (!loading && user && !pathAllowed) {
+      router.replace("/inbox");
+    }
+  }, [user, loading, pathAllowed, router]);
+
+  // Wait for the role too, so an inbox-only member never glimpses a
+  // page they are about to be redirected away from.
+  if (loading || (user && profileLoading)) {
     return (
       <div className="flex h-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-3">
@@ -37,7 +50,7 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!user) return null;
+  if (!user || !pathAllowed) return null;
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">

@@ -29,7 +29,7 @@ export async function POST(
   // below bypasses RLS, so enforce the role here (a viewer passes the
   // membership-only ownership check).
   try {
-    await requireRole('agent')
+    await requireRole('admin')
   } catch (err) {
     return toErrorResponse(err)
   }

@@ -13,7 +13,7 @@ export async function POST(
   // (the service-role client below bypasses the agent-gated
   // automations_insert RLS).
   try {
-    await requireRole('agent')
+    await requireRole('admin')
   } catch (err) {
     return toErrorResponse(err)
   }

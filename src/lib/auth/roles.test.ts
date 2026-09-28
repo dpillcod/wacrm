@@ -2,14 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   ACCOUNT_ROLES,
   type AccountRole,
+  canAccessPath,
   canDeleteAccount,
   canEditSettings,
+  canManageAutomation,
   canManageMembers,
   canSendMessages,
   canTransferOwnership,
   canViewOnly,
   hasMinRole,
   isAccountRole,
+  isInboxOnly,
   roleRank,
 } from "./roles";
 
@@ -126,5 +129,31 @@ describe("capability predicates", () => {
     expect(canTransferOwnership("admin")).toBe(false);
     expect(canTransferOwnership("agent")).toBe(false);
     expect(canTransferOwnership("viewer")).toBe(false);
+  });
+});
+
+describe("inbox-only members", () => {
+  it("agents and viewers get the inbox-only app; admins and owners don't", () => {
+    expect(isInboxOnly("agent")).toBe(true);
+    expect(isInboxOnly("viewer")).toBe(true);
+    expect(isInboxOnly("admin")).toBe(false);
+    expect(isInboxOnly("owner")).toBe(false);
+  });
+
+  it("limits inbox-only members to the inbox and notifications", () => {
+    expect(canAccessPath("agent", "/inbox")).toBe(true);
+    expect(canAccessPath("agent", "/inbox/abc")).toBe(true);
+    expect(canAccessPath("agent", "/notifications")).toBe(true);
+    expect(canAccessPath("agent", "/flows")).toBe(false);
+    expect(canAccessPath("agent", "/dashboard")).toBe(false);
+    expect(canAccessPath("agent", "/inboxes")).toBe(false);
+    expect(canAccessPath("admin", "/flows")).toBe(true);
+  });
+
+  it("only admins and owners manage flows, automations and broadcasts", () => {
+    expect(canManageAutomation("owner")).toBe(true);
+    expect(canManageAutomation("admin")).toBe(true);
+    expect(canManageAutomation("agent")).toBe(false);
+    expect(canManageAutomation("viewer")).toBe(false);
   });
 });

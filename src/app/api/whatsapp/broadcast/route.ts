@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { canManageAutomation, isAccountRole } from '@/lib/auth/roles'
 import { createClient } from '@/lib/supabase/server'
 import { sendTemplateMessage } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
@@ -85,13 +86,20 @@ export async function POST(request: Request) {
     // by a teammate.
     const { data: profile } = await supabase
       .from('profiles')
-      .select('account_id')
+      .select('account_id, account_role')
       .eq('user_id', user.id)
       .maybeSingle()
     const accountId = profile?.account_id as string | undefined
     if (!accountId) {
       return NextResponse.json(
         { error: 'Your profile is not linked to an account.' },
+        { status: 403 },
+      )
+    }
+    const role = profile?.account_role
+    if (!isAccountRole(role) || !canManageAutomation(role)) {
+      return NextResponse.json(
+        { error: 'Only admins can send broadcasts.' },
         { status: 403 },
       )
     }

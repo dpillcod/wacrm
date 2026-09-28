@@ -82,8 +82,8 @@ export function canEditSettings(role: AccountRole): boolean {
 
 /**
  * Owner / admin / agent: write operational data — send messages,
- * create contacts, move deals, run broadcasts, edit automations.
- * Viewers are read-only.
+ * create contacts, move deals. Viewers are read-only. (Broadcasts and
+ * automations need canManageAutomation.)
  */
 export function canSendMessages(role: AccountRole): boolean {
   return hasMinRole(role, "agent");
@@ -96,6 +96,33 @@ export function canSendMessages(role: AccountRole): boolean {
  */
 export function canViewOnly(role: AccountRole): boolean {
   return role === "viewer";
+}
+
+/**
+ * Owner / admin: change what the bot and campaigns do — flows,
+ * automations, broadcasts, quick replies, the AI playground. Agents
+ * work conversations; they don't reconfigure the business's bot.
+ */
+export function canManageAutomation(role: AccountRole): boolean {
+  return hasMinRole(role, "admin");
+}
+
+/**
+ * Pages an inbox-only member (agent / viewer) may open. Staff on shared
+ * shop-floor PCs answer and read chats; everything else (flows,
+ * contacts, broadcasts, settings…) is for admins.
+ */
+export const INBOX_ONLY_PATHS: readonly string[] = ["/inbox", "/notifications"];
+
+/** Agents and viewers get the inbox-only app (see INBOX_ONLY_PATHS). */
+export function isInboxOnly(role: AccountRole): boolean {
+  return !hasMinRole(role, "admin");
+}
+
+/** Whether `role` may open the dashboard page at `pathname`. */
+export function canAccessPath(role: AccountRole, pathname: string): boolean {
+  if (!isInboxOnly(role)) return true;
+  return INBOX_ONLY_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
 /** Owner only: irreversible destructive operations. */
