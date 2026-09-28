@@ -58,21 +58,27 @@ export interface SendButtonsNodeConfig {
    * append semantics as collect_input) and the run advances to
    * `next_node_key` instead of reprompting.
    */
-  text_fallback?: {
-    var_key: string;
-    /** See CollectInputNodeConfig.cross_sell — same rationale. */
-    cross_sell?: boolean;
-    append?: boolean;
-    /** See CollectInputNodeConfig.lowercase — same rationale. */
-    lowercase?: boolean;
-    /** See CollectInputNodeConfig.price_question_reply — same rationale. */
-    price_question_reply?: string;
-    /** See CollectInputNodeConfig.general_info_reply — same rationale. */
-    general_info_reply?: string;
-    /** See CollectInputNodeConfig.debounce_ms — same rationale. */
-    debounce_ms?: number;
-    next_node_key: string;
-  };
+  text_fallback?: TextFallbackConfig;
+}
+
+export interface TextFallbackConfig {
+  var_key: string;
+  /** See CollectInputNodeConfig.cross_sell — same rationale. */
+  cross_sell?: boolean;
+  append?: boolean;
+  /** See CollectInputNodeConfig.lowercase — same rationale. */
+  lowercase?: boolean;
+  /** See CollectInputNodeConfig.price_question_reply — same rationale. */
+  price_question_reply?: string;
+  /** See CollectInputNodeConfig.general_info_reply — same rationale. */
+  general_info_reply?: string;
+  /** See CollectInputNodeConfig.debounce_ms — same rationale. */
+  debounce_ms?: number;
+  /** See CollectInputNodeConfig.disambiguate_products — same rationale. */
+  disambiguate_products?: boolean;
+  /** See CollectInputNodeConfig.disambiguation_show_price. */
+  disambiguation_show_price?: boolean;
+  next_node_key: string;
 }
 
 export interface SendListNodeConfig {
@@ -91,6 +97,12 @@ export interface SendListNodeConfig {
       next_node_key: string;
     }>;
   }>;
+  /**
+   * Same as SendButtonsNodeConfig.text_fallback: a customer who types
+   * instead of opening the list (e.g. writes their order straight at a
+   * list-style main menu) is captured and routed, not reprompted.
+   */
+  text_fallback?: TextFallbackConfig;
 }
 
 /**
@@ -313,6 +325,14 @@ export interface CollectInputNodeConfig {
    * false — existing flows are unaffected unless authored to opt in.
    */
   disambiguate_products?: boolean;
+  /**
+   * Show each candidate's price in the disambiguation list (default
+   * true). The store may choose to never quote prices in chat — the
+   * catalog is only used to pin down WHICH product was meant, and a
+   * human quotes it — in which case the row shows the full product
+   * name instead.
+   */
+  disambiguation_show_price?: boolean;
   /** Node to advance to after capture. */
   next_node_key: string;
 }

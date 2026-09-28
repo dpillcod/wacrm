@@ -937,12 +937,16 @@ function outgoingEdges(node: NodeInput): string[] {
     case "send_list": {
       const cfg = node.config as {
         sections?: Array<{ rows?: Array<{ next_node_key?: string }> }>;
+        text_fallback?: { next_node_key?: string };
       };
       const out: string[] = [];
       for (const s of cfg.sections ?? []) {
         for (const r of s.rows ?? []) {
           if (r.next_node_key) out.push(r.next_node_key);
         }
+      }
+      if (cfg.text_fallback?.next_node_key) {
+        out.push(cfg.text_fallback.next_node_key);
       }
       return out;
     }

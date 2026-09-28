@@ -77,6 +77,7 @@ import {
   type SetTagNodeConfig,
   type StartNodeConfig,
   type KeywordTriggerConfig,
+  type TextFallbackConfig,
 } from "./types";
 
 // ============================================================
@@ -122,6 +123,47 @@ export function matchReplyId(
     return null;
   }
   return null;
+}
+
+/** The node's free-text capture, if it has one (see TextFallbackConfig). */
+export function textFallbackOf(node: {
+  node_type: string;
+  config: Record<string, unknown>;
+}): TextFallbackConfig | undefined {
+  if (node.node_type === "send_buttons" || node.node_type === "send_list") {
+    return (node.config as { text_fallback?: TextFallbackConfig }).text_fallback;
+  }
+  return undefined;
+}
+
+/** "1", "2." or "3)" → zero-based index; null for any other text. */
+export function parseOptionNumber(text: string): number | null {
+  const m = text.trim().match(/^(\d{1,2})\s*[.)-]?$/);
+  return m ? Number(m[1]) - 1 : null;
+}
+
+/**
+ * "1", "2." or "3)" typed at a buttons/list node picks that option, in
+ * display order — customers used to numbered WhatsApp menus reply that
+ * way instead of tapping, and without this a bare "1" was captured as
+ * if it were an order line. Returns null for anything else.
+ */
+export function optionByNumber(
+  node: { node_type: string; config: Record<string, unknown> },
+  text: string,
+): { reply_id: string; title: string } | null {
+  const index = parseOptionNumber(text);
+  if (index === null) return null;
+  let options: Array<{ reply_id: string; title: string }> = [];
+  if (node.node_type === "send_buttons") {
+    options = (node.config as unknown as SendButtonsNodeConfig).buttons ?? [];
+  } else if (node.node_type === "send_list") {
+    options = ((node.config as unknown as SendListNodeConfig).sections ?? []).flatMap(
+      (section) => section.rows ?? [],
+    );
+  }
+  const hit = options[index];
+  return hit ? { reply_id: hit.reply_id, title: hit.title } : null;
 }
 
 /**
@@ -771,6 +813,37 @@ async function sendEngineText(
   }
 }
 
+/**
+ * `{{vars.foo}}` interpolation for a URL: each value is URL-encoded, so
+ * a cta_url can carry captured data — e.g. a wa.me link whose `?text=`
+ * pre-fills the customer's whole order list into a chat with the call
+ * center. Values are capped so a very long order can't push the link
+ * past what WhatsApp will open.
+ */
+const URL_VAR_MAX_CHARS = 900;
+
+function interpolateVarsForUrl(template: string, vars: Record<string, unknown>): string {
+  if (!template) return "";
+  return template.replace(/\{\{vars\.([a-zA-Z0-9_]+)\}\}/g, (_, key) => {
+    const v = vars[key];
+    if (v === undefined || v === null) return "";
+    const text = String(v);
+    const capped =
+      text.length > URL_VAR_MAX_CHARS ? `${text.slice(0, URL_VAR_MAX_CHARS)}…` : text;
+    return encodeURIComponent(capped);
+  });
+}
+
+/** "a\nb" → "1. a\n2. b" — for echoing an accumulated list back. */
+export function numberLines(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line, i) => `${i + 1}. ${line}`)
+    .join("\n");
+}
+
 async function endRun(
   db: AdminClient,
   runId: string,
@@ -925,7 +998,7 @@ async function advanceFromNodeKey(
             ? interpolateVars(cfg.footer_text, run.vars)
             : cfg.footer_text,
           buttonText: cfg.button_text,
-          url: cfg.url,
+          url: interpolateVarsForUrl(cfg.url, run.vars),
         });
         await logEvent(db, run.id, "message_sent", node.node_key, {
           node_type: "send_cta_url",
@@ -1438,6 +1511,23 @@ interface PendingDisambiguation {
   cross_sell: boolean | undefined;
   quantity: string | null;
   candidates: Record<string, string>;
+  /** What the customer typed — captured as-is on "No es ninguno". */
+  original_text?: string;
+}
+
+/** Row id for "none of these" in a product pick list. */
+const NONE_OF_THESE_ID = "__none__";
+
+/** The subset of a capture config product disambiguation needs —
+ *  satisfied by both collect_input and a text_fallback. */
+interface DisambiguationConfig {
+  var_key: string;
+  next_node_key: string;
+  append?: boolean;
+  lowercase?: boolean;
+  cross_sell?: boolean;
+  disambiguate_products?: boolean;
+  disambiguation_show_price?: boolean;
 }
 
 /**
@@ -1476,7 +1566,7 @@ async function tryStartProductDisambiguation(
   db: AdminClient,
   run: FlowRunRow,
   node: FlowNodeRow,
-  cfg: CollectInputNodeConfig,
+  cfg: DisambiguationConfig,
   text: string,
 ): Promise<DispatchInboundResult | null> {
   if (!cfg.disambiguate_products) return null;
@@ -1503,14 +1593,25 @@ async function tryStartProductDisambiguation(
     buttonLabel: "Ver opciones",
     sections: [
       {
-        rows: candidates.map((c) => ({
-          id: c.retailerId,
-          title: c.name.slice(0, INTERACTIVE_LIMITS.listRowTitleMaxLength),
-          description: formatCandidatePrice(c).slice(
-            0,
-            INTERACTIVE_LIMITS.listRowDescriptionMaxLength,
-          ),
-        })),
+        rows: [
+          ...candidates.map((c) => ({
+            id: c.retailerId,
+            title: c.name.slice(0, INTERACTIVE_LIMITS.listRowTitleMaxLength),
+            // Without prices, the description carries the full name — row
+            // titles cap at 24 chars, which cuts most catalog names.
+            description: (cfg.disambiguation_show_price === false
+              ? c.name.length > INTERACTIVE_LIMITS.listRowTitleMaxLength
+                ? c.name
+                : ""
+              : formatCandidatePrice(c)
+            ).slice(0, INTERACTIVE_LIMITS.listRowDescriptionMaxLength),
+          })),
+          {
+            id: NONE_OF_THESE_ID,
+            title: "No es ninguno",
+            description: "Lo anoto tal como lo escribió",
+          },
+        ],
       },
     ],
   });
@@ -1525,6 +1626,7 @@ async function tryStartProductDisambiguation(
     cross_sell: cfg.cross_sell,
     quantity,
     candidates: candidateMap,
+    original_text: text.trim(),
   };
   const newVars = { ...run.vars, __pending_disambiguation: pending };
   await db.from("flow_runs").update({ vars: newVars }).eq("id", run.id);
@@ -1613,6 +1715,9 @@ async function captureTextIntoVar(
     // aside from an earlier capture on a different var_key can't leak
     // into this node's confirmation text.
     [`${args.var_key}_cross_sell`]: crossSellAside,
+    // The whole accumulated list, numbered — for a "confirm your list"
+    // step (e.g. "{{vars.order_text_numbered}}").
+    ...(args.append ? { [`${args.var_key}_numbered`]: numberLines(newValue) } : {}),
     __capture_batch_var: args.var_key,
     ...(crossSellAside ? { __cross_sell_shown: true } : {}),
   };
@@ -1704,10 +1809,22 @@ async function handleReplyForActiveRun(
     currentNode.node_type === "collect_input"
       ? (currentNode.config as unknown as CollectInputNodeConfig)
       : undefined;
-  const currentTextFallback =
-    currentNode.node_type === "send_buttons"
-      ? (currentNode.config as unknown as SendButtonsNodeConfig).text_fallback
-      : undefined;
+  const currentTextFallback = textFallbackOf(currentNode);
+
+  // A typed option number counts as tapping that option — unless a
+  // product pick list is open, where the number means one of ITS rows
+  // (handled in the pending-disambiguation branch below).
+  if (message.kind === "text" && !run.vars.__pending_disambiguation) {
+    const picked = optionByNumber(currentNode, message.text);
+    if (picked) {
+      message = {
+        kind: "interactive_reply",
+        reply_id: picked.reply_id,
+        reply_title: picked.title,
+        meta_message_id: message.meta_message_id,
+      };
+    }
+  }
 
   // Voice notes, videos, stickers and documents used to arrive as an
   // empty text, fail the capture, burn a reprompt and — after two —
@@ -1759,10 +1876,7 @@ async function handleReplyForActiveRun(
     const priceReply =
       currentNode.node_type === "collect_input"
         ? (currentNode.config as unknown as CollectInputNodeConfig).price_question_reply
-        : currentNode.node_type === "send_buttons"
-          ? (currentNode.config as unknown as SendButtonsNodeConfig).text_fallback
-              ?.price_question_reply
-          : undefined;
+        : currentTextFallback?.price_question_reply;
     if (priceReply && isPriceQuestion(message.text)) {
       try {
         await engineSendText({
@@ -1795,10 +1909,7 @@ async function handleReplyForActiveRun(
     const generalReply =
       currentNode.node_type === "collect_input"
         ? (currentNode.config as unknown as CollectInputNodeConfig).general_info_reply
-        : currentNode.node_type === "send_buttons"
-          ? (currentNode.config as unknown as SendButtonsNodeConfig).text_fallback
-              ?.general_info_reply
-          : undefined;
+        : currentTextFallback?.general_info_reply;
     if (generalReply && isGeneralQuestion(message.text)) {
       try {
         await engineSendText({
@@ -1844,22 +1955,51 @@ async function handleReplyForActiveRun(
     const restVars: Record<string, unknown> = { ...run.vars };
     delete restVars.__pending_disambiguation;
     run.vars = restVars;
-    const pickedName =
-      message.kind === "interactive_reply"
-        ? pendingDisambiguation.candidates[message.reply_id]
-        : undefined;
-    if (pickedName) {
+    const candidateIds = Object.keys(pendingDisambiguation.candidates);
+    // A tap, or the row's number typed ("2"); one past the candidates is
+    // the trailing "No es ninguno" row.
+    let pickedId: string | undefined;
+    if (message.kind === "interactive_reply") {
+      pickedId = message.reply_id;
+    } else if (message.kind === "text") {
+      const index = parseOptionNumber(message.text);
+      if (index !== null) {
+        pickedId =
+          index === candidateIds.length ? NONE_OF_THESE_ID : candidateIds[index];
+      }
+    }
+    const pickedName = pickedId ? pendingDisambiguation.candidates[pickedId] : undefined;
+    const pickedText =
+      pickedId === NONE_OF_THESE_ID
+        ? pendingDisambiguation.original_text
+        : pickedName
+          ? pendingDisambiguation.quantity
+            ? `${pendingDisambiguation.quantity} ${pickedName}`
+            : pickedName
+          : undefined;
+    if (pickedText) {
       matched = await captureTextIntoVar(db, run, currentNode.node_key, {
         var_key: pendingDisambiguation.var_key,
         append: pendingDisambiguation.append,
         lowercase: pendingDisambiguation.lowercase,
         cross_sell: pendingDisambiguation.cross_sell,
         next_node_key: pendingDisambiguation.next_node_key,
-        text: pendingDisambiguation.quantity
-          ? `${pendingDisambiguation.quantity} ${pickedName}`
-          : pickedName,
+        text: pickedText,
       });
       // Resolving an ambiguity IS the "reply now" signal — no debounce.
+    } else if (message.kind === "text" && pendingDisambiguation.original_text) {
+      // They moved on and typed the next item instead of picking one
+      // (common when listing items quickly). Keep the unresolved item as
+      // written rather than dropping it, then handle this new text
+      // normally below — the advance is left to that new text.
+      await captureTextIntoVar(db, run, currentNode.node_key, {
+        var_key: pendingDisambiguation.var_key,
+        append: pendingDisambiguation.append,
+        lowercase: pendingDisambiguation.lowercase,
+        cross_sell: false,
+        next_node_key: pendingDisambiguation.next_node_key,
+        text: pendingDisambiguation.original_text,
+      });
     }
   }
 
@@ -1948,19 +2088,22 @@ async function handleReplyForActiveRun(
       next_node_key: cfg.next_node_key,
       text: message.media_url,
     });
-  } else if (
-    message.kind === "text" &&
-    currentNode.node_type === "send_buttons" &&
-    (currentNode.config as unknown as SendButtonsNodeConfig).text_fallback
-  ) {
+  } else if (message.kind === "text" && currentTextFallback) {
     // Customers reliably keep typing instead of tapping a button —
     // most commonly to list another item after "¿algo más?". Route
     // that text into the configured var/next node (see
     // SendButtonsNodeConfig.text_fallback) instead of letting it fall
     // to the fallback policy's reprompt, which would silently discard
-    // whatever they just said.
-    const fallbackCfg = (currentNode.config as unknown as SendButtonsNodeConfig)
-      .text_fallback!;
+    // whatever they just said. Same for a list-style menu.
+    const fallbackCfg = currentTextFallback;
+    const disambiguation = await tryStartProductDisambiguation(
+      db,
+      run,
+      currentNode,
+      fallbackCfg,
+      message.text,
+    );
+    if (disambiguation) return disambiguation;
     matched = await captureTextIntoVar(db, run, currentNode.node_key, {
       var_key: fallbackCfg.var_key,
       append: fallbackCfg.append,
@@ -2025,11 +2168,7 @@ async function handleReplyForActiveRun(
   }
   if (action.type === "reprompt") {
     // Re-send the same prompt. Same node, no current_node_key change.
-    const textFallbackCfg =
-      currentNode.node_type === "send_buttons"
-        ? (currentNode.config as unknown as SendButtonsNodeConfig).text_fallback
-        : undefined;
-    if (message.kind === "text" && textFallbackCfg) {
+    if (message.kind === "text" && currentTextFallback) {
       // A text_fallback node accepts ANY non-empty text, so landing
       // here means the capture write itself failed (see
       // captureTextIntoVar) — not that the customer said something
@@ -2227,8 +2366,7 @@ async function startNewRun(
   if (input.message.kind === "order") {
     const entry = nodes.get(flow.entry_node_id!);
     const entryTakesOrder =
-      (entry?.node_type === "send_buttons" &&
-        (entry.config as unknown as SendButtonsNodeConfig).text_fallback?.append === true) ||
+      (entry && textFallbackOf(entry)?.append === true) ||
       (entry?.node_type === "collect_input" &&
         (entry.config as unknown as CollectInputNodeConfig).append === true);
     if (entryTakesOrder) {

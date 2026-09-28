@@ -3,6 +3,10 @@ import {
   matchReplyId,
   matchesKeywordTrigger,
   isRestartCommand,
+  optionByNumber,
+  parseOptionNumber,
+  numberLines,
+  textFallbackOf,
   isBotAddressableNonText,
   isAutoAdvancing,
   isSuspending,
@@ -222,6 +226,58 @@ describe("isBotAddressableNonText", () => {
     expect(
       isBotAddressableNonText({ kind: "text", text: "hola", meta_message_id: "m" }),
     ).toBe(false);
+  });
+});
+
+describe("option numbers typed instead of tapped", () => {
+  const list = {
+    node_type: "send_list",
+    config: {
+      sections: [
+        { rows: [{ reply_id: "pedido", title: "Hacer un pedido", next_node_key: "a" }] },
+        {
+          rows: [
+            { reply_id: "asesor", title: "Hablar con un asesor", next_node_key: "b" },
+            { reply_id: "horario", title: "Horario y ubicación", next_node_key: "c" },
+          ],
+        },
+      ],
+    },
+  };
+
+  it("parses bare option numbers only", () => {
+    expect(parseOptionNumber("2")).toBe(1);
+    expect(parseOptionNumber(" 3) ")).toBe(2);
+    expect(parseOptionNumber("2 cocas")).toBeNull();
+  });
+
+  it("maps the number across list sections in display order", () => {
+    expect(optionByNumber(list, "3")).toEqual({ reply_id: "horario", title: "Horario y ubicación" });
+    expect(optionByNumber(list, "9")).toBeNull();
+  });
+
+  it("works for buttons and ignores other node types", () => {
+    const buttons = {
+      node_type: "send_buttons",
+      config: { buttons: [{ reply_id: "x", title: "Agregar más", next_node_key: "a" }] },
+    };
+    expect(optionByNumber(buttons, "1")?.reply_id).toBe("x");
+    expect(optionByNumber({ node_type: "collect_input", config: {} }, "1")).toBeNull();
+  });
+});
+
+describe("textFallbackOf", () => {
+  it("reads text_fallback from both buttons and lists", () => {
+    const tf = { var_key: "order_text", next_node_key: "n" };
+    expect(textFallbackOf({ node_type: "send_list", config: { text_fallback: tf } })).toBe(tf);
+    expect(textFallbackOf({ node_type: "send_buttons", config: { text_fallback: tf } })).toBe(tf);
+    expect(textFallbackOf({ node_type: "collect_input", config: { text_fallback: tf } })).toBeUndefined();
+  });
+});
+
+describe("numberLines", () => {
+  it("numbers non-empty lines", () => {
+    expect(numberLines("2 coca cola\n\n1 foco led ")).toBe("1. 2 coca cola\n2. 1 foco led");
   });
 });
 
