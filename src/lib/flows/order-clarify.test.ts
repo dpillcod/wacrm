@@ -3,6 +3,8 @@ import {
   extractJson,
   hintQuery,
   parseApplyResponse,
+  parseDuplicatesResponse,
+  parseEditResponse,
   parseReviewResponse,
   replaceTrailingLines,
 } from "./order-clarify";
@@ -68,5 +70,24 @@ describe("hintQuery", () => {
 
   it("falls back to the raw line if nothing meaningful is left", () => {
     expect(hintQuery("2 grandes")).toBe("2 grandes");
+  });
+});
+
+describe("parseEditResponse", () => {
+  it("accepts an edited list, which may be shorter or longer", () => {
+    expect(parseEditResponse('{"lines": ["1 Coca-Cola de 3 litros", "12 panes"], "understood": true}'))
+      .toEqual(["1 Coca-Cola de 3 litros", "12 panes"]);
+  });
+
+  it("returns null when the model didn't understand the change", () => {
+    expect(parseEditResponse('{"lines": ["a"], "understood": false}')).toBeNull();
+    expect(parseEditResponse('{"lines": [], "understood": true}')).toBeNull();
+  });
+});
+
+describe("parseDuplicatesResponse", () => {
+  it("returns the question, or null when there are no duplicates", () => {
+    expect(parseDuplicatesResponse('{"question": "¿Suma el queso?"}')).toBe("¿Suma el queso?");
+    expect(parseDuplicatesResponse('{"question": null}')).toBeNull();
   });
 });

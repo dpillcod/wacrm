@@ -47,6 +47,14 @@ export interface SendButtonsNodeConfig {
     title: string;
     /** node_key the runner advances to when this button is tapped. */
     next_node_key: string;
+    /**
+     * Before following this button, have the account's AI check the
+     * list in this var for a product written twice ("1 libra de queso"
+     * + "2 libras de queso") and ask ONE question about it; the answer
+     * is applied to the list and this node is shown again. Checked once
+     * per version of the list, so confirming again moves on.
+     */
+    check_duplicates_var?: string;
   }>;
   /**
    * Optional escape hatch for when the customer types a plain-text
@@ -80,6 +88,8 @@ export interface TextFallbackConfig {
   disambiguation_show_price?: boolean;
   /** See CollectInputNodeConfig.ai_clarify. */
   ai_clarify?: boolean;
+  /** See CollectInputNodeConfig.edit_list_var. */
+  edit_list_var?: string;
   next_node_key: string;
 }
 
@@ -350,6 +360,17 @@ export interface CollectInputNodeConfig {
    * failure keeps the lines exactly as typed. See flows/order-clarify.ts.
    */
   ai_clarify?: boolean;
+  /**
+   * Treat the reply as a CORRECTION to the list stored in this var
+   * (newline-joined, e.g. "order_text") instead of capturing it: the
+   * account's AI applies free text ("quita el 3 y los panes que sean
+   * 12") and the run moves on to next_node_key (typically back to the
+   * "confirm your list" step, so the customer sees the result). A bare
+   * line number starts a by-number edit ("¿cómo debe quedar el 3?");
+   * if the AI can't apply the text, the customer is asked for a line
+   * number instead. `var_key` is unused in this mode.
+   */
+  edit_list_var?: string;
   /** Node to advance to after capture. */
   next_node_key: string;
 }

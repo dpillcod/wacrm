@@ -59,6 +59,20 @@ Tarea: al cliente se le hizo una pregunta sobre su pedido y respondió. Reescrib
 
 Formato: {"lines": ["línea 1", "línea 2"]}`;
 
+const EDIT_INSTRUCTIONS = `${SHARED_RULES}
+
+Tarea: el cliente revisó su lista y pide un cambio. Aplica EXACTAMENTE lo que pide: quitar, cambiar cantidad, reemplazar o agregar productos. Los números que menciona se refieren a la numeración de la lista ("quitar el 3" = quitar la línea 3). No toques las demás líneas.
+Si no se entiende qué quiere cambiar, devuelve la lista sin cambios con "understood": false.
+
+Formato: {"lines": ["línea 1", "línea 2"], "understood": true}`;
+
+const DUPLICATES_INSTRUCTIONS = `${SHARED_RULES}
+
+Tarea: revisa si en la lista hay productos repetidos o que parecen el mismo producto escrito dos veces (ej. "1 libra de queso fresco" y "2 libras de queso fresco"). Productos distintos de la misma familia NO son repetidos (ej. "Coca-Cola de 2 litros" y "Coca-Cola de 3 litros" son distintos).
+Si hay repetidos, escribe UNA pregunta corta para saber si el cliente quiere sumar las cantidades o si una de las líneas era una corrección, nombrando el producto y las cantidades. Si no hay, "question": null.
+
+Formato: {"question": "pregunta" o null}`;
+
 /**
  * The catalog search query for a line: without the quantity and vague
  * size words, which only dilute trigram matching — "1 coca cola grande"
@@ -121,6 +135,24 @@ export function parseApplyResponse(raw: string, minCount: number): string[] | nu
   const json = extractJson(raw);
   const lines = json ? cleanLines(json.lines) : null;
   return lines && lines.length >= minCount ? lines : null;
+}
+
+/**
+ * An edit may add, remove or change lines. `understood: false` (or an
+ * empty/invalid list) means "couldn't apply it" → null, so the caller
+ * can fall back to editing by line number.
+ */
+export function parseEditResponse(raw: string): string[] | null {
+  const json = extractJson(raw);
+  if (!json || json.understood === false) return null;
+  return cleanLines(json.lines);
+}
+
+export function parseDuplicatesResponse(raw: string): string | null {
+  const json = extractJson(raw);
+  return json && typeof json.question === "string" && json.question.trim()
+    ? json.question.trim()
+    : null;
 }
 
 /** Replace the last `count` lines of a newline-joined list. */
@@ -192,7 +224,7 @@ export async function reviewOrderLines(
     );
     const content =
       "Líneas del pedido:\n" +
-      lines.map((l, i) => `${i + 1}. ${l}`).join("\n") +
+      numbered(lines) +
       "\n\nReferencias del catálogo (nombres abreviados del sistema; solo para sugerir opciones, pueden no coincidir):\n" +
       lines
         .map((_, i) => `${i + 1}. ${hints[i].map((h) => h.name).join(" | ") || "(sin referencias)"}`)
@@ -216,13 +248,71 @@ export async function applyClarificationAnswer(
   try {
     const content =
       "Líneas del pedido:\n" +
-      args.lines.map((l, i) => `${i + 1}. ${l}`).join("\n") +
+      numbered(args.lines) +
       `\n\nPregunta que se le hizo al cliente: ${args.question}` +
       `\nRespuesta del cliente: ${args.answer}`;
     const raw = await callModel(db, config, accountId, conversationId, APPLY_INSTRUCTIONS, content);
     return parseApplyResponse(raw, args.lines.length);
   } catch (err) {
     console.error("[order-clarify] apply failed:", err);
+    return null;
+  }
+}
+
+function numbered(lines: string[]): string {
+  return lines.map((l, i) => `${i + 1}. ${l}`).join("\n");
+}
+
+/**
+ * Apply a customer's free-text correction ("quita el 3 y los panes que
+ * sean 12") to their list. Null when it couldn't be understood or the
+ * AI is unavailable — the caller then asks for a line number instead.
+ */
+export async function editOrderList(
+  db: SupabaseClient,
+  accountId: string,
+  conversationId: string | null,
+  args: { lines: string[]; instruction: string },
+): Promise<string[] | null> {
+  const config = await loadConfig(db, accountId);
+  if (!config) return null;
+  try {
+    const content =
+      `Lista actual:\n${numbered(args.lines)}\n\nCambio que pide el cliente: ${args.instruction}`;
+    const raw = await callModel(db, config, accountId, conversationId, EDIT_INSTRUCTIONS, content);
+    return parseEditResponse(raw);
+  } catch (err) {
+    console.error("[order-clarify] edit failed:", err);
+    return null;
+  }
+}
+
+/**
+ * One question about a product that appears twice, or null when there
+ * are no duplicates (or the AI is unavailable — the list then just
+ * proceeds as confirmed).
+ */
+export async function findDuplicateQuestion(
+  db: SupabaseClient,
+  accountId: string,
+  conversationId: string | null,
+  lines: string[],
+): Promise<string | null> {
+  if (lines.length < 2) return null;
+  const config = await loadConfig(db, accountId);
+  if (!config) return null;
+  try {
+    const raw = await callModel(
+      db,
+      config,
+      accountId,
+      conversationId,
+      DUPLICATES_INSTRUCTIONS,
+      `Lista:\n${numbered(lines)}`,
+    );
+    return parseDuplicatesResponse(raw);
+  } catch (err) {
+    console.error("[order-clarify] duplicate check failed:", err);
     return null;
   }
 }

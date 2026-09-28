@@ -53,6 +53,8 @@ import { isPriceQuestion } from "./price-question";
 import { isGeneralQuestion } from "./general-question";
 import {
   applyClarificationAnswer,
+  editOrderList,
+  findDuplicateQuestion,
   replaceTrailingLines,
   reviewOrderLines,
 } from "./order-clarify";
@@ -98,6 +100,12 @@ const CAPTURE_FAILED_TEXT =
   "Disculpe, no logré registrar eso último 🙁 ¿Me lo puede escribir de nuevo?";
 const FALLBACK_HANDOFF_TEXT =
   "Disculpe, no logré entenderle bien 🙏 Le comunico con uno de nuestros asesores para que le ayude.";
+const EDIT_FAILED_TEXT =
+  "Disculpe, no logré aplicar ese cambio 🙏 Escríbame el *número* del producto que desea cambiar.";
+const editLinePrompt = (n: number, line: string) =>
+  `Escriba cómo debe quedar el *${n}* (_${line}_), o escriba *borrar* para quitarlo.`;
+const editOutOfRangeText = (max: number) =>
+  `Ese número no está en su lista 🙂 Escriba un número del 1 al ${max}.`;
 const NON_TEXT_REPLY_TEXT =
   "Por ahora no puedo escuchar audios ni ver ese tipo de mensajes 🙏 ¿Me lo puede escribir, por favor?";
 
@@ -1537,6 +1545,182 @@ async function clarifyCapturedBatch(
 }
 
 // ============================================================
+// List corrections (edit_list_var) and the duplicate check
+// (check_duplicates_var) — both edit a newline-joined list var.
+// ============================================================
+
+/** Waiting for the new text of one line ("¿cómo debe quedar el 3?"). */
+interface PendingLineEdit {
+  list_var: string;
+  index: number;
+  next_node_key: string;
+}
+
+/** Waiting for the answer to a duplicate-product question. */
+interface PendingListAnswer {
+  list_var: string;
+  lines: string[];
+  question: string;
+  /** Where to go once answered — the node that shows the list again. */
+  return_node_key: string;
+}
+
+function listLines(vars: Record<string, unknown>, listVar: string): string[] {
+  const raw = vars[listVar];
+  return typeof raw === "string" ? raw.split("\n").map((l) => l.trim()).filter(Boolean) : [];
+}
+
+/** Persist a rewritten list (and its derived vars), then move on. */
+async function saveListAndAdvance(
+  db: AdminClient,
+  run: FlowRunRow,
+  nodes: Map<string, FlowNodeRow>,
+  vars: Record<string, unknown>,
+  listVar: string,
+  lines: string[],
+  nextNodeKey: string,
+  extra: Record<string, unknown> = {},
+): Promise<DispatchInboundResult> {
+  const list = lines.join("\n");
+  const updated = {
+    ...vars,
+    ...extra,
+    [listVar]: list,
+    [`${listVar}_numbered`]: numberLines(list),
+  };
+  await db.from("flow_runs").update({ vars: updated, reprompt_count: 0 }).eq("id", run.id);
+  run.vars = updated;
+  run.reprompt_count = 0;
+  const outcome = await advanceFromNodeKey(db, run, nextNodeKey, nodes);
+  return { consumed: true, flow_run_id: run.id, outcome: outcome.outcome };
+}
+
+async function saveVars(
+  db: AdminClient,
+  run: FlowRunRow,
+  vars: Record<string, unknown>,
+): Promise<void> {
+  await db.from("flow_runs").update({ vars }).eq("id", run.id);
+  run.vars = vars;
+}
+
+/**
+ * Handles a reply that belongs to list editing: a pending by-number
+ * edit, a pending duplicate question, or a correction typed at a node
+ * with `edit_list_var`. Returns null when the message isn't about list
+ * editing (the caller continues as usual). A non-text reply simply
+ * drops any pending edit state.
+ */
+async function handleListEditing(
+  db: AdminClient,
+  run: FlowRunRow,
+  node: FlowNodeRow,
+  message: ParsedInbound,
+  nodes: Map<string, FlowNodeRow>,
+): Promise<DispatchInboundResult | null> {
+  const stay: DispatchInboundResult = { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+  const lineEdit = run.vars.__pending_line_edit as PendingLineEdit | undefined;
+  const listAnswer = run.vars.__pending_list_answer as PendingListAnswer | undefined;
+  const rest: Record<string, unknown> = { ...run.vars };
+  delete rest.__pending_line_edit;
+  delete rest.__pending_list_answer;
+
+  if (message.kind !== "text" || !message.text.trim()) {
+    if (lineEdit || listAnswer) await saveVars(db, run, rest);
+    return null;
+  }
+  const text = message.text.trim();
+
+  if (lineEdit) {
+    const lines = listLines(rest, lineEdit.list_var);
+    if (lineEdit.index < lines.length) {
+      if (/^(borrar|quitar|eliminar|sacar)\b/i.test(text)) {
+        lines.splice(lineEdit.index, 1);
+      } else {
+        lines[lineEdit.index] = text;
+      }
+    }
+    return saveListAndAdvance(db, run, nodes, rest, lineEdit.list_var, lines, lineEdit.next_node_key);
+  }
+
+  if (listAnswer) {
+    const edited = await editOrderList(db, run.account_id, run.conversation_id, {
+      lines: listAnswer.lines,
+      instruction: `Se le preguntó: "${listAnswer.question}". El cliente respondió: "${text}".`,
+    });
+    const lines = edited ?? listAnswer.lines;
+    // Mark this version of the list as checked so confirming it again
+    // moves on instead of asking about duplicates a second time.
+    return saveListAndAdvance(db, run, nodes, rest, listAnswer.list_var, lines, listAnswer.return_node_key, {
+      __dups_checked_for: lines.join("\n"),
+    });
+  }
+
+  const cfg = captureConfigOf(node) as { edit_list_var?: string; next_node_key: string } | undefined;
+  if (!cfg?.edit_list_var) return null;
+  const lines = listLines(run.vars, cfg.edit_list_var);
+
+  // A bare number → edit that line in a second step.
+  const index = parseOptionNumber(text);
+  if (index !== null) {
+    if (index < 0 || index >= lines.length) {
+      await sendEngineText(db, run, node.node_key, editOutOfRangeText(lines.length), "list_edit_out_of_range");
+      return stay;
+    }
+    const pending: PendingLineEdit = {
+      list_var: cfg.edit_list_var,
+      index,
+      next_node_key: cfg.next_node_key,
+    };
+    await saveVars(db, run, { ...run.vars, __pending_line_edit: pending });
+    await sendEngineText(db, run, node.node_key, editLinePrompt(index + 1, lines[index]), "list_edit_line");
+    return stay;
+  }
+
+  const edited = await editOrderList(db, run.account_id, run.conversation_id, {
+    lines,
+    instruction: text,
+  });
+  if (!edited) {
+    await sendEngineText(db, run, node.node_key, EDIT_FAILED_TEXT, "list_edit_failed");
+    return stay;
+  }
+  return saveListAndAdvance(db, run, nodes, run.vars, cfg.edit_list_var, edited, cfg.next_node_key);
+}
+
+/**
+ * The duplicate check behind a button's `check_duplicates_var`. Returns
+ * true when a question was sent (the caller stays on this node). Each
+ * version of the list is checked once, so a customer who confirms the
+ * same list again moves on.
+ */
+async function askAboutDuplicates(
+  db: AdminClient,
+  run: FlowRunRow,
+  node: FlowNodeRow,
+  listVar: string,
+): Promise<boolean> {
+  const lines = listLines(run.vars, listVar);
+  const list = lines.join("\n");
+  if (run.vars.__dups_checked_for === list) return false;
+  const question = await findDuplicateQuestion(db, run.account_id, run.conversation_id, lines);
+  const vars: Record<string, unknown> = { ...run.vars, __dups_checked_for: list };
+  if (question) {
+    const pending: PendingListAnswer = {
+      list_var: listVar,
+      lines,
+      question,
+      return_node_key: node.node_key,
+    };
+    vars.__pending_list_answer = pending;
+  }
+  await saveVars(db, run, vars);
+  if (!question) return false;
+  await sendEngineText(db, run, node.node_key, question, "duplicate_question");
+  return true;
+}
+
+// ============================================================
 // Idle nudge — see FlowFallbackPolicy.idle_nudge_minutes. A customer
 // who goes quiet mid-order otherwise hears nothing again until the
 // on_timeout_hours sweep, hours later. Same in-memory-timer model and
@@ -1936,10 +2120,15 @@ async function handleReplyForActiveRun(
   // A typed option number counts as tapping that option — unless a
   // product pick list is open, where the number means one of ITS rows
   // (handled in the pending-disambiguation branch below).
+  // Likewise when a list edit is in progress or this node takes list
+  // corrections — there "3" means line 3 of the customer's list.
   if (
     message.kind === "text" &&
     !run.vars.__pending_disambiguation &&
-    !run.vars.__pending_clarification
+    !run.vars.__pending_clarification &&
+    !run.vars.__pending_line_edit &&
+    !run.vars.__pending_list_answer &&
+    !currentTextFallback?.edit_list_var
   ) {
     const picked = optionByNumber(currentNode, message.text);
     if (picked) {
@@ -2074,6 +2263,11 @@ async function handleReplyForActiveRun(
   // anything else (a stale tap, or the customer typing instead of
   // tapping) just drops it and falls through to the branches below,
   // where a text reply re-enters the disambiguation check fresh.
+  // List corrections — see CollectInputNodeConfig.edit_list_var and
+  // SendButtonsNodeConfig buttons' check_duplicates_var.
+  const listResult = await handleListEditing(db, run, currentNode, message, nodes);
+  if (listResult) return listResult;
+
   // The customer is answering the question clarifyCapturedBatch asked.
   // A text answer is folded into those lines and the run moves on (no
   // second question, ever); anything else just drops the question —
@@ -2181,6 +2375,17 @@ async function handleReplyForActiveRun(
       currentNode.node_type === "send_list")
   ) {
     matched = matchReplyId(currentNode, message.reply_id);
+    if (matched && currentNode.node_type === "send_buttons") {
+      const tapped = (currentNode.config as unknown as SendButtonsNodeConfig).buttons.find(
+        (b) => b.reply_id === message.reply_id,
+      );
+      if (
+        tapped?.check_duplicates_var &&
+        (await askAboutDuplicates(db, run, currentNode, tapped.check_duplicates_var))
+      ) {
+        return { consumed: true, flow_run_id: run.id, outcome: "awaiting_clarification" };
+      }
+    }
     if (matched) {
       // Remember which option was tapped as `{{vars.<node_key>_choice}}`
       // (e.g. "Efectivo" on ask_payment), so later text — above all the
