@@ -136,9 +136,11 @@ export function textFallbackOf(node: {
   return undefined;
 }
 
-/** "1", "2." or "3)" → zero-based index; null for any other text. */
+/** "1", "2.", "3)" or "4️⃣" → zero-based index; null for any other text. */
 export function parseOptionNumber(text: string): number | null {
-  const m = text.trim().match(/^(\d{1,2})\s*[.)-]?$/);
+  // Keycap emoji ("1️⃣") count too — some customers copy them from the menu.
+  const plain = text.replace(/\uFE0F?\u20E3/g, "");
+  const m = plain.trim().match(/^(\d{1,2})\s*[.)-]?$/);
   return m ? Number(m[1]) - 1 : null;
 }
 
@@ -557,25 +559,36 @@ async function sendListAndSuspend(
   node: FlowNodeRow,
 ): Promise<{ outcome: "advanced"; node_key: string }> {
   const cfg = node.config as unknown as SendListNodeConfig;
-  const { whatsapp_message_id } = await engineSendInteractiveList({
-    accountId: run.account_id,
-    userId: run.user_id,
-    conversationId: run.conversation_id!,
-    contactId: run.contact_id!,
-    // Same gap as send_buttons (see comment there) — never interpolated.
-    bodyText: interpolateVars(cfg.text, run.vars),
-    buttonLabel: cfg.button_label,
-    headerText: cfg.header_text ? interpolateVars(cfg.header_text, run.vars) : cfg.header_text,
-    footerText: cfg.footer_text ? interpolateVars(cfg.footer_text, run.vars) : cfg.footer_text,
-    sections: cfg.sections.map((s) => ({
-      title: s.title,
-      rows: s.rows.map((r) => ({
-        id: r.reply_id,
-        title: r.title,
-        description: r.description,
-      })),
-    })),
-  });
+  const { whatsapp_message_id } = cfg.send_as_text
+    ? // A plain numbered menu (the customer replies with a number — see
+      // optionByNumber). `text` must already list the options in row
+      // order; a plain text also keeps any link in it tappable.
+      await engineSendText({
+        accountId: run.account_id,
+        userId: run.user_id,
+        conversationId: run.conversation_id!,
+        contactId: run.contact_id!,
+        text: interpolateVars(cfg.text, run.vars),
+      })
+    : await engineSendInteractiveList({
+        accountId: run.account_id,
+        userId: run.user_id,
+        conversationId: run.conversation_id!,
+        contactId: run.contact_id!,
+        // Same gap as send_buttons (see comment there) — never interpolated.
+        bodyText: interpolateVars(cfg.text, run.vars),
+        buttonLabel: cfg.button_label,
+        headerText: cfg.header_text ? interpolateVars(cfg.header_text, run.vars) : cfg.header_text,
+        footerText: cfg.footer_text ? interpolateVars(cfg.footer_text, run.vars) : cfg.footer_text,
+        sections: cfg.sections.map((s) => ({
+          title: s.title,
+          rows: s.rows.map((r) => ({
+            id: r.reply_id,
+            title: r.title,
+            description: r.description,
+          })),
+        })),
+      });
   await logEvent(db, run.id, "message_sent", node.node_key, {
     node_type: "send_list",
     whatsapp_message_id,

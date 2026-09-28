@@ -102,7 +102,14 @@ export interface SendListNodeConfig {
    * instead of opening the list (e.g. writes their order straight at a
    * list-style main menu) is captured and routed, not reprompted.
    */
-  text_fallback?: TextFallbackConfig;
+  text_fallback?: TextFallbackConfig;  /**
+   * Send `text` as a plain WhatsApp message instead of an interactive
+   * list — a classic numbered menu ("1. Pedir desde aquí…") the
+   * customer answers by typing the number. `text` must list the
+   * options in the same order as the rows; the rows still define where
+   * each number leads.
+   */
+  send_as_text?: boolean;
 }
 
 /**

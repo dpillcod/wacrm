@@ -249,6 +249,7 @@ describe("option numbers typed instead of tapped", () => {
     expect(parseOptionNumber("2")).toBe(1);
     expect(parseOptionNumber(" 3) ")).toBe(2);
     expect(parseOptionNumber("2 cocas")).toBeNull();
+    expect(parseOptionNumber("4️⃣")).toBe(3);
   });
 
   it("maps the number across list sections in display order", () => {
