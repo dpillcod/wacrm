@@ -3,6 +3,7 @@ import {
   matchReplyId,
   matchesKeywordTrigger,
   isRestartCommand,
+  extractValidInput,
   optionByNumber,
   parseOptionNumber,
   numberLines,
@@ -279,6 +280,28 @@ describe("textFallbackOf", () => {
 describe("numberLines", () => {
   it("numbers non-empty lines", () => {
     expect(numberLines("2 coca cola\n\n1 foco led ")).toBe("1. 2 coca cola\n2. 1 foco led");
+  });
+});
+
+describe("extractValidInput", () => {
+  const cedula = { validation: "regex" as const, regex: String.raw`\b(\d{13}|\d{10})\b` };
+
+  it("passes any text through by default", () => {
+    expect(extractValidInput({}, "lo que sea")).toBe("lo que sea");
+    expect(extractValidInput({ validation: "any" }, "x")).toBe("x");
+  });
+
+  it("captures just the valid part of the reply", () => {
+    expect(extractValidInput(cedula, "mi cédula es 0105280069 gracias")).toBe("0105280069");
+    expect(extractValidInput(cedula, "RUC 0105280069001")).toBe("0105280069001");
+  });
+
+  it("rejects a reply with nothing valid in it", () => {
+    expect(extractValidInput(cedula, "🛒 *Nuevo Pedido - Ferrotienda* Pedido 45632")).toBeNull();
+  });
+
+  it("never blocks the customer on a broken pattern", () => {
+    expect(extractValidInput({ validation: "regex", regex: "(" }, "hola")).toBe("hola");
   });
 });
 

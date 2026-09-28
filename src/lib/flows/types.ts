@@ -401,6 +401,15 @@ export interface CollectInputNodeConfig {
    */
   ai_clarify?: boolean;
   /**
+   * Don't send `prompt_text` on entering the node — the question was
+   * already asked elsewhere (typically inside a WhatsApp template, the
+   * only thing that can reach a customer outside the 24h window). The
+   * node just waits for the reply; `prompt_text` is still used when
+   * re-asking after an invalid reply (by then the customer has written,
+   * so a normal message can reach them). No idle nudge either.
+   */
+  silent?: boolean;
+  /**
    * Treat the reply as a CORRECTION to the list stored in this var
    * (newline-joined, e.g. "order_text") instead of capturing it: the
    * account's AI applies free text ("quita el 3 y los panes que sean

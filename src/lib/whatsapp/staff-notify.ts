@@ -25,6 +25,21 @@ import { toEcuadorInternational } from './phone-utils'
  * here once went unnoticed across several live tests for exactly that
  * reason.
  */
+/**
+ * Meta rejects a template parameter outright (error 132018) if it
+ * contains a newline/tab or 4+ consecutive spaces — found live: every
+ * real handoff note is multi-line (order items, one per line, plus
+ * billing/location), so every notification was silently failing until
+ * this was caught. " · " keeps the structure legible on one line
+ * instead of just collapsing to spaces.
+ */
+export function sanitizeForTemplateParam(text: string): string {
+  return text
+    .replace(/[\n\t]+/g, ' · ')
+    .replace(/ {4,}/g, '   ')
+    .trim()
+}
+
 export interface NotifyStaffResult {
   sent: string[]
   failed: { phone: string; error: string }[]
@@ -62,17 +77,6 @@ export async function notifyStaffOfHandoff(
   }
 
   const accessToken = decrypt(config.access_token)
-  // Meta rejects a template parameter outright (error 132018) if it
-  // contains a newline/tab or 4+ consecutive spaces — found live: every
-  // real handoff note is multi-line (order items, one per line, plus
-  // billing/location), so every notification was silently failing
-  // until this was caught. " · " keeps the structure legible on one
-  // line instead of just collapsing to spaces.
-  const sanitizeForTemplateParam = (text: string): string =>
-    text
-      .replace(/[\n\t]+/g, ' · ')
-      .replace(/ {4,}/g, '   ')
-      .trim()
   // Meta also caps a template body variable's length; a very long
   // running order shouldn't blow past that and fail every send.
   const summary = sanitizeForTemplateParam(args.summary).slice(0, 900) || '(sin detalle)'

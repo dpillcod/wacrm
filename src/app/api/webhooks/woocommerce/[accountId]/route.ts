@@ -57,12 +57,28 @@ interface WooCommerceOrderPayload {
   id?: number | string;
   total?: string;
   payment_method?: string;
+  /** The gateway's customer-facing name ("Transferencia bancaria"). */
+  payment_method_title?: string;
   billing?: {
     first_name?: string;
     last_name?: string;
     phone?: string;
   };
   line_items?: WooCommerceLineItem[];
+}
+
+/**
+ * The items summary is sent inside a WhatsApp template parameter, which
+ * Meta caps in length — a big web order must not make the confirmation
+ * fail. The full order is always in WooCommerce.
+ */
+const ITEMS_SUMMARY_MAX_CHARS = 600;
+
+export function capItemsSummary(summary: string): string {
+  if (summary.length <= ITEMS_SUMMARY_MAX_CHARS) return summary;
+  const cut = summary.slice(0, ITEMS_SUMMARY_MAX_CHARS);
+  const lastComma = cut.lastIndexOf(", ");
+  return `${lastComma > 0 ? cut.slice(0, lastComma) : cut}… (ver pedido completo en la web)`;
 }
 
 /** True when `signature` (base64) is a valid HMAC-SHA256 of `rawBody`
@@ -166,10 +182,11 @@ export async function POST(
       customerName || undefined,
     );
 
-    const itemsSummary =
+    const itemsSummary = capItemsSummary(
       (order.line_items ?? [])
         .map((li) => `${li.quantity ?? 1}x ${li.name ?? "?"}`)
-        .join(", ") || "(sin detalle)";
+        .join(", ") || "(sin detalle)",
+    );
 
     const result = await startFlowRunForExternalEvent(
       db,
@@ -181,6 +198,10 @@ export async function POST(
           order_id: String(order.id ?? ""),
           order_total: order.total ?? "",
           payment_method: order.payment_method ?? "",
+          payment_method_title: order.payment_method_title ?? order.payment_method ?? "",
+          // Plain first name for templates ("Hola Andrés") — the flow's
+          // own contact_name carries a leading space for "¡Hola{{…}}!".
+          customer_first_name: order.billing?.first_name?.trim() || "cliente",
           order_items_summary: itemsSummary,
         },
       },

@@ -47,7 +47,7 @@ import {
   retrieveCatalogProducts,
   type CatalogProductCandidate,
 } from "../ai/catalog";
-import { notifyStaffOfHandoff } from "../whatsapp/staff-notify";
+import { notifyStaffOfHandoff, sanitizeForTemplateParam } from "../whatsapp/staff-notify";
 import { localEcuadorPhone } from "../whatsapp/phone-utils";
 import { INTERACTIVE_LIMITS } from "../whatsapp/meta-api";
 import { isPriceQuestion } from "./price-question";
@@ -879,6 +879,39 @@ function interpolateVarsForUrl(template: string, vars: Record<string, unknown>):
   });
 }
 
+/**
+ * Apply a collect_input's `validation` to a text reply. Returns the
+ * value to capture — for email / phone / regex, just the matching part
+ * ("mi cédula es 0105280069" → "0105280069") — or null when nothing in
+ * the reply is valid. `any` (the default) passes the text through.
+ */
+export function extractValidInput(
+  cfg: Pick<CollectInputNodeConfig, "validation" | "regex">,
+  text: string,
+): string | null {
+  let pattern: RegExp | null = null;
+  switch (cfg.validation) {
+    case "email":
+      pattern = /[^\s@]+@[^\s@]+\.[^\s@]+/;
+      break;
+    case "phone":
+      pattern = /\+?\d[\d\s-]{6,}\d/;
+      break;
+    case "regex":
+      if (cfg.regex) {
+        try {
+          pattern = new RegExp(cfg.regex, "i");
+        } catch {
+          pattern = null; // invalid pattern: don't block the customer
+        }
+      }
+      break;
+  }
+  if (!pattern) return text;
+  const m = text.match(pattern);
+  return m ? m[0].trim() : null;
+}
+
 /** "a\nb" → "1. a\n2. b" — for echoing an accumulated list back. */
 export function numberLines(text: string): string {
   return text
@@ -1075,7 +1108,9 @@ async function advanceFromNodeKey(
           contactId: run.contact_id!,
           templateName: cfg.template_name,
           language: cfg.template_language,
-          params: cfg.params?.map((p) => interpolateVars(p, run.vars)),
+          // Order data (item lists, notes) can be multi-line; Meta
+          // rejects a template parameter containing newlines.
+          params: cfg.params?.map((p) => sanitizeForTemplateParam(interpolateVars(p, run.vars)) || "-"),
         });
         await logEvent(db, run.id, "message_sent", node.node_key, {
           node_type: "send_template",
@@ -1096,6 +1131,23 @@ async function advanceFromNodeKey(
       // Send the prompt and suspend. Customer's next TEXT reply will
       // wake us up via handleReplyForActiveRun's collect_input branch.
       const cfg = node.config as unknown as CollectInputNodeConfig;
+      if (cfg.silent) {
+        // The question already went out (e.g. in a template) — just
+        // wait. No idle nudge: outside the 24h window it couldn't be
+        // delivered anyway.
+        const advancedSilently = await advanceCurrentNodeKey(
+          db,
+          run.id,
+          run.current_node_key,
+          node.node_key,
+        );
+        if (!advancedSilently) {
+          await logEvent(db, run.id, "error", node.node_key, {
+            reason: "lost_race_during_advance",
+          });
+        }
+        return { outcome: "advanced" };
+      }
       try {
         const { whatsapp_message_id } = await engineSendText({
           accountId: run.account_id,
@@ -2643,23 +2695,29 @@ async function handleReplyForActiveRun(
     // instead of silently discarded, and the run advances rather than
     // reprompting for the photo.
     const cfg = currentNode.config as unknown as CollectInputNodeConfig;
-    const disambiguation = await tryStartProductDisambiguation(
-      db,
-      run,
-      currentNode,
-      cfg,
-      message.text,
-    );
-    if (disambiguation) return disambiguation;
-    matched = await captureTextIntoVar(db, run, currentNode.node_key, {
-      var_key: cfg.var_key,
-      append: cfg.append,
-      lowercase: cfg.lowercase,
-      cross_sell: cfg.cross_sell,
-      next_node_key: cfg.next_node_key,
-      text: message.text,
-    });
-    debounceMs = cfg.debounce_ms;
+    // A reply that doesn't pass the node's validation (e.g. a pasted
+    // order summary where a cédula was asked) leaves `matched` null, so
+    // the fallback policy re-asks with prompt_text.
+    const validated = extractValidInput(cfg, message.text);
+    if (validated !== null) {
+      const disambiguation = await tryStartProductDisambiguation(
+        db,
+        run,
+        currentNode,
+        cfg,
+        validated,
+      );
+      if (disambiguation) return disambiguation;
+      matched = await captureTextIntoVar(db, run, currentNode.node_key, {
+        var_key: cfg.var_key,
+        append: cfg.append,
+        lowercase: cfg.lowercase,
+        cross_sell: cfg.cross_sell,
+        next_node_key: cfg.next_node_key,
+        text: validated,
+      });
+      debounceMs = cfg.debounce_ms;
+    }
   } else if (
     message.kind === "order" &&
     (currentCollectCfg?.append === true || currentTextFallback?.append === true)

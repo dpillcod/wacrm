@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import crypto from "crypto";
-import { isValidWooCommerceSignature } from "./route";
+import { capItemsSummary, isValidWooCommerceSignature } from "./route";
 
 function sign(body: string, secret: string): string {
   return crypto.createHmac("sha256", secret).update(body, "utf8").digest("base64");
@@ -37,5 +37,18 @@ describe("isValidWooCommerceSignature", () => {
     expect(isValidWooCommerceSignature(body, "not-base64-hmac", secret)).toBe(
       false,
     );
+  });
+});
+
+describe("capItemsSummary", () => {
+  it("leaves a normal order untouched", () => {
+    expect(capItemsSummary("2x Coca-Cola 3 litros, 1x Pan")).toBe("2x Coca-Cola 3 litros, 1x Pan");
+  });
+
+  it("cuts a very long order at an item boundary", () => {
+    const long = Array.from({ length: 100 }, (_, i) => `1x Producto número ${i}`).join(", ");
+    const capped = capItemsSummary(long);
+    expect(capped.length).toBeLessThan(700);
+    expect(capped).toMatch(/Producto número \d+… \(ver pedido completo en la web\)$/);
   });
 });
