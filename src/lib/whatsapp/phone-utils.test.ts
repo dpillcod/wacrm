@@ -6,6 +6,7 @@ import {
   phoneVariants,
   phonesMatch,
   sanitizePhoneForMeta,
+  localEcuadorPhone,
   toEcuadorInternational,
 } from "./phone-utils";
 
@@ -177,5 +178,17 @@ describe("toEcuadorInternational", () => {
   it("leaves international numbers as digits only", () => {
     expect(toEcuadorInternational("+593 99 367 9794")).toBe("593993679794");
     expect(toEcuadorInternational("+14155550123")).toBe("14155550123");
+  });
+});
+
+describe("localEcuadorPhone", () => {
+  it("shows Ecuadorian numbers the local way", () => {
+    expect(localEcuadorPhone("593981414182")).toBe("0981414182");
+    expect(localEcuadorPhone("+593 98 141 4182")).toBe("0981414182");
+  });
+
+  it("keeps other countries international", () => {
+    expect(localEcuadorPhone("14155550123")).toBe("+14155550123");
+    expect(localEcuadorPhone("")).toBe("");
   });
 });

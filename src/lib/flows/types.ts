@@ -198,6 +198,12 @@ export interface SendCtaUrlNodeConfig {
   text: string;
   /** Optional plain-text header (≤ 60 chars). */
   header_text?: string;
+  /**
+   * Optional image header (public https URL), instead of header_text —
+   * e.g. a payment QR shown together with the button in one message,
+   * since a separately-sent image often arrives after later messages.
+   */
+  header_image_url?: string;
   /** Optional grey footer line (≤ 60 chars). */
   footer_text?: string;
   /** Visible button label (≤ 20 chars per Meta). */
@@ -207,6 +213,26 @@ export interface SendCtaUrlNodeConfig {
   url: string;
   /** Auto-advance target after the send lands at Meta. */
   next_node_key: string;
+}
+
+/**
+ * Any node may set this: on entering it, the run gets a sequential
+ * per-account order number in `{{vars.order_number}}` ("0015") if it
+ * doesn't have one yet — shown to the customer and staff so both refer
+ * to the same order. Place it on a node before the text that shows it.
+ */
+export interface OrderNumberConfig {
+  assign_order_number?: boolean;
+}
+
+/** Keeping a handed-off customer company — see HandoffNodeConfig.follow_up. */
+export interface HandoffFollowUpConfig {
+  /** Minutes between checks (e.g. 10). */
+  every_minutes: number;
+  /** Most times the customer is asked, and the most staff reminders. */
+  max: number;
+  /** Asked with [✅ Sí] [⏳ Aún no] buttons, e.g. "¿Ya le respondió nuestro asesor?". */
+  question: string;
 }
 
 export interface HandoffNodeConfig {
@@ -226,6 +252,20 @@ export interface HandoffNodeConfig {
    * owner's (deduplicated against `assign_to` by the runner).
    */
   notify_user_ids?: string[];
+  /**
+   * During opening hours, every `every_minutes` ask the customer whether
+   * a person has answered yet ([✅ Sí] [⏳ Aún no]) and re-alert staff,
+   * at most `max` times each. "Sí" — or staff replying from the inbox,
+   * or the conversation being closed — stops it; "Aún no" re-alerts
+   * staff right away. In-memory timers: a restart drops pending checks.
+   */
+  follow_up?: HandoffFollowUpConfig;
+  /**
+   * Sent (at most every 30 min, for 12h) when the customer writes again
+   * after the handoff and no one from staff has replied in the inbox —
+   * instead of silence. `{{vars.*}}` are interpolated.
+   */
+  after_handoff_reply?: string;
 }
 
 /**

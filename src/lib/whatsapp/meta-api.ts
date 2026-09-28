@@ -881,6 +881,13 @@ export interface SendInteractiveCtaUrlArgs {
   headerText?: string
   /** Optional grey footer line under the button (≤ 60 chars). */
   footerText?: string
+  /**
+   * Optional image header (public https URL), used instead of
+   * `headerText`. Lets an image and its button arrive as ONE message —
+   * sent separately, WhatsApp often delivers the image after later
+   * texts, burying the button above it.
+   */
+  headerImageUrl?: string
   /** Visible button label (≤ 20 chars per Meta). */
   buttonText: string
   /** Must start with http:// or https:// — Meta rejects anything else. */
@@ -903,7 +910,7 @@ export async function sendInteractiveCtaUrl(
 ): Promise<MetaSendResult> {
   const {
     phoneNumberId, accessToken, to,
-    bodyText, headerText, footerText, buttonText, url, contextMessageId,
+    bodyText, headerText, footerText, headerImageUrl, buttonText, url, contextMessageId,
   } = args
   validateInteractiveBody(bodyText)
   validateInteractiveHeaderFooter(headerText, footerText)
@@ -925,7 +932,11 @@ export async function sendInteractiveCtaUrl(
       parameters: { display_text: buttonText, url },
     },
   }
-  if (headerText) interactive.header = { type: 'text', text: headerText }
+  if (headerImageUrl) {
+    interactive.header = { type: 'image', image: { link: headerImageUrl } }
+  } else if (headerText) {
+    interactive.header = { type: 'text', text: headerText }
+  }
   if (footerText) interactive.footer = { text: footerText }
 
   const body: Record<string, unknown> = {

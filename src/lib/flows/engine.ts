@@ -48,6 +48,7 @@ import {
   type CatalogProductCandidate,
 } from "../ai/catalog";
 import { notifyStaffOfHandoff } from "../whatsapp/staff-notify";
+import { localEcuadorPhone } from "../whatsapp/phone-utils";
 import { INTERACTIVE_LIMITS } from "../whatsapp/meta-api";
 import { isPriceQuestion } from "./price-question";
 import { isGeneralQuestion } from "./general-question";
@@ -73,7 +74,9 @@ import {
   type FlowNodeRow,
   type FlowRow,
   type FlowRunRow,
+  type HandoffFollowUpConfig,
   type HandoffNodeConfig,
+  type OrderNumberConfig,
   type ParsedInbound,
   type SendButtonsNodeConfig,
   type SendListNodeConfig,
@@ -106,6 +109,10 @@ const editLinePrompt = (n: number, line: string) =>
   `Escriba cómo debe quedar el *${n}* (_${line}_), o escriba *borrar* para quitarlo.`;
 const editOutOfRangeText = (max: number) =>
   `Ese número no está en su lista 🙂 Escriba un número del 1 al ${max}.`;
+const FOLLOW_UP_YES_TEXT =
+  "¡Qué bueno! Gracias por confirmarnos 🙂 Si necesita algo más, escriba *menú*.";
+const FOLLOW_UP_NO_TEXT =
+  "Ya le recordamos a nuestro equipo, en breve le escriben 🙏";
 const NON_TEXT_REPLY_TEXT =
   "Por ahora no puedo escuchar audios ni ver ese tipo de mensajes 🙏 ¿Me lo puede escribir, por favor?";
 
@@ -651,6 +658,23 @@ async function executeHandoff(
     assignTo: cfg.assign_to,
     notifyUserIds: cfg.notify_user_ids,
   });
+
+  // Keep the customer company after the handoff (see HandoffNodeConfig).
+  // State lives on the ended run's vars: it's the record of this order.
+  if (cfg.follow_up || cfg.after_handoff_reply) {
+    const followUp: FollowUpState | undefined = cfg.follow_up
+      ? { ...cfg.follow_up, asked: 0, reminded: 0, done: false, summary: resolvedNote ?? "" }
+      : undefined;
+    const vars = {
+      ...run.vars,
+      ...(followUp ? { __follow_up: followUp } : {}),
+      ...(cfg.after_handoff_reply ? { __after_handoff_reply: cfg.after_handoff_reply } : {}),
+    };
+    await saveVars(db, run, vars);
+    if (followUp && isWithinBusinessHours()) {
+      scheduleFollowUp(db, run.id, followUp.every_minutes);
+    }
+  }
 }
 
 /**
@@ -682,12 +706,7 @@ async function notifyHandoff(
   // a newline-in-parameter bug here once silently failed every real
   // handoff across several live tests before anyone noticed.
   try {
-    const contactNameVar = run.vars.contact_name;
-    const result = await notifyStaffOfHandoff(db, {
-      accountId: run.account_id,
-      contactName: typeof contactNameVar === "string" ? contactNameVar.trim() : "",
-      summary: args.summary,
-    });
+    const result = await alertStaff(db, run, args.summary);
     if (result.failed.length > 0) {
       await logEvent(db, run.id, "error", nodeKey, {
         reason: "staff_notify_failed",
@@ -948,6 +967,9 @@ async function advanceFromNodeKey(
     await logEvent(db, run.id, "node_entered", node.node_key, {
       node_type: node.node_type,
     });
+    if ((node.config as OrderNumberConfig).assign_order_number) {
+      await assignOrderNumber(db, run);
+    }
 
     if (node.node_type === "start") {
       currentKey = (node.config as unknown as StartNodeConfig).next_node_key;
@@ -1024,6 +1046,7 @@ async function advanceFromNodeKey(
           footerText: cfg.footer_text
             ? interpolateVars(cfg.footer_text, run.vars)
             : cfg.footer_text,
+          headerImageUrl: cfg.header_image_url,
           buttonText: cfg.button_text,
           url: interpolateVarsForUrl(cfg.url, run.vars),
         });
@@ -1270,6 +1293,13 @@ export async function dispatchInboundToFlows(
 ): Promise<DispatchInboundResult> {
   const db = supabaseAdmin();
   try {
+    // A tap on a post-handoff follow-up question belongs to that ended
+    // run, whatever the contact is doing now.
+    if (input.message.kind === "interactive_reply") {
+      const followUpResult = await handleFollowUpReply(db, input, input.message.reply_id);
+      if (followUpResult) return followUpResult;
+    }
+
     const activeRun = await loadActiveRunForContact(
       db,
       input.accountId,
@@ -1365,7 +1395,7 @@ export async function dispatchInboundToFlows(
       input.isFirstInboundMessage,
     );
     if (!flow || !flow.entry_node_id) {
-      return { consumed: false, outcome: "no_match" };
+      return (await replyAfterHandoff(db, input)) ?? { consumed: false, outcome: "no_match" };
     }
     const nodes = await loadAllNodes(db, flow.id);
     return startNewRun(db, flow, input, nodes);
@@ -1718,6 +1748,205 @@ async function askAboutDuplicates(
   if (!question) return false;
   await sendEngineText(db, run, node.node_key, question, "duplicate_question");
   return true;
+}
+
+// ============================================================
+// Order numbers, post-handoff follow-ups and replies — see
+// OrderNumberConfig and HandoffNodeConfig.follow_up /
+// after_handoff_reply.
+// ============================================================
+
+async function assignOrderNumber(db: AdminClient, run: FlowRunRow): Promise<void> {
+  if (run.vars.order_number) return;
+  // Count-based, not a DB sequence: two orders confirmed in the same
+  // instant could share a number — rare at this volume, and the number
+  // is a human reference, never a key.
+  const { count } = await db
+    .from("flow_runs")
+    .select("id", { count: "exact", head: true })
+    .eq("account_id", run.account_id)
+    .not("vars->>order_number", "is", null);
+  await saveVars(db, run, {
+    ...run.vars,
+    order_number: String((count ?? 0) + 1).padStart(4, "0"),
+  });
+}
+
+/** WhatsApp-template alert to staff numbers, with the customer's phone
+ *  (staff act from their own phones, often before the customer reaches
+ *  them, so a name alone isn't enough to get back to them). */
+async function alertStaff(db: AdminClient, run: FlowRunRow, summary: string) {
+  const contactNameVar = run.vars.contact_name;
+  const { data: contactRow } = await db
+    .from("contacts")
+    .select("phone")
+    .eq("id", run.contact_id!)
+    .maybeSingle();
+  const phone = localEcuadorPhone((contactRow as { phone?: string } | null)?.phone ?? "");
+  return notifyStaffOfHandoff(db, {
+    accountId: run.account_id,
+    contactName: typeof contactNameVar === "string" ? contactNameVar.trim() : "",
+    summary: phone ? `📞 ${phone} · ${summary}` : summary,
+  });
+}
+
+interface FollowUpState extends HandoffFollowUpConfig {
+  asked: number;
+  reminded: number;
+  done: boolean;
+  /** The handoff note, repeated in staff reminders. */
+  summary: string;
+}
+
+const FOLLOW_UP_YES_PREFIX = "followup_yes:";
+const FOLLOW_UP_NO_PREFIX = "followup_no:";
+const pendingFollowUps = new Map<string, ReturnType<typeof setTimeout>>();
+
+function scheduleFollowUp(db: AdminClient, runId: string, minutes: number): void {
+  const existing = pendingFollowUps.get(runId);
+  if (existing) clearTimeout(existing);
+  if (!minutes || minutes <= 0) return;
+  const timer = setTimeout(() => {
+    pendingFollowUps.delete(runId);
+    runFollowUp(db, runId).catch((err) => console.error("[flows] follow-up failed:", err));
+  }, minutes * 60_000);
+  pendingFollowUps.set(runId, timer);
+}
+
+async function loadRun(db: AdminClient, runId: string): Promise<FlowRunRow | null> {
+  const { data } = await db.from("flow_runs").select("*").eq("id", runId).maybeSingle();
+  return (data as FlowRunRow | null) ?? null;
+}
+
+/**
+ * True once someone is evidently handling it: the conversation was
+ * closed, or staff replied from the inbox after the handoff.
+ */
+async function humanHasTakenOver(db: AdminClient, run: FlowRunRow): Promise<boolean> {
+  if (!run.conversation_id) return true;
+  const { data: conv } = await db
+    .from("conversations")
+    .select("status")
+    .eq("id", run.conversation_id)
+    .maybeSingle();
+  if ((conv as { status?: string } | null)?.status === "closed") return true;
+  const { count } = await db
+    .from("messages")
+    .select("id", { count: "exact", head: true })
+    .eq("conversation_id", run.conversation_id)
+    .eq("sender_type", "agent")
+    .gt("created_at", run.ended_at ?? run.started_at);
+  return (count ?? 0) > 0;
+}
+
+async function remindStaff(db: AdminClient, run: FlowRunRow, state: FollowUpState): Promise<void> {
+  state.reminded += 1;
+  const order = run.vars.order_number ? `Pedido N° ${run.vars.order_number} · ` : "";
+  await alertStaff(
+    db,
+    run,
+    `⚠️ RECORDATORIO ${state.reminded}/${state.max}: sigue sin atender · ${order}${state.summary}`,
+  ).catch((err) => console.error("[flows] staff reminder failed:", err));
+}
+
+async function runFollowUp(db: AdminClient, runId: string): Promise<void> {
+  const run = await loadRun(db, runId);
+  const state = run?.vars.__follow_up as FollowUpState | undefined;
+  if (!run || !state || state.done) return;
+  // Opening hours only; out of hours the customer already has the
+  // "we'll attend you when we open" note.
+  if (!isWithinBusinessHours() || (await humanHasTakenOver(db, run))) return;
+
+  if (state.asked < state.max) {
+    state.asked += 1;
+    try {
+      await engineSendInteractiveButtons({
+        accountId: run.account_id,
+        userId: run.user_id,
+        conversationId: run.conversation_id!,
+        contactId: run.contact_id!,
+        bodyText: interpolateVars(state.question, run.vars),
+        buttons: [
+          { id: `${FOLLOW_UP_YES_PREFIX}${run.id}`, title: "✅ Sí" },
+          { id: `${FOLLOW_UP_NO_PREFIX}${run.id}`, title: "⏳ Aún no" },
+        ],
+      });
+    } catch (err) {
+      console.error("[flows] follow-up question failed:", err);
+    }
+  }
+  if (state.reminded < state.max) await remindStaff(db, run, state);
+  await saveVars(db, run, { ...run.vars, __follow_up: state });
+  if (state.asked < state.max) scheduleFollowUp(db, run.id, state.every_minutes);
+}
+
+/** Handles a tap on a follow-up question; null if it isn't one. */
+async function handleFollowUpReply(
+  db: AdminClient,
+  input: DispatchInboundInput,
+  replyId: string,
+): Promise<DispatchInboundResult | null> {
+  const yes = replyId.startsWith(FOLLOW_UP_YES_PREFIX);
+  if (!yes && !replyId.startsWith(FOLLOW_UP_NO_PREFIX)) return null;
+  const runId = replyId.slice((yes ? FOLLOW_UP_YES_PREFIX : FOLLOW_UP_NO_PREFIX).length);
+  const run = await loadRun(db, runId);
+  if (!run || run.account_id !== input.accountId || run.contact_id !== input.contactId) {
+    return { consumed: true, outcome: "no_match" };
+  }
+  const state = run.vars.__follow_up as FollowUpState | undefined;
+  if (!state) return { consumed: true, outcome: "no_match" };
+
+  if (yes) {
+    state.done = true;
+    const timer = pendingFollowUps.get(run.id);
+    if (timer) clearTimeout(timer);
+    pendingFollowUps.delete(run.id);
+    await saveVars(db, run, { ...run.vars, __follow_up: state });
+    await sendEngineText(db, run, null, FOLLOW_UP_YES_TEXT, "follow_up_yes");
+  } else {
+    if (state.reminded < state.max) await remindStaff(db, run, state);
+    await saveVars(db, run, { ...run.vars, __follow_up: state });
+    await sendEngineText(db, run, null, FOLLOW_UP_NO_TEXT, "follow_up_no");
+  }
+  return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+}
+
+const AFTER_HANDOFF_WINDOW_MS = 12 * 3_600_000;
+const AFTER_HANDOFF_MIN_GAP_MS = 30 * 60_000;
+
+/**
+ * A customer writing again after their order was handed off used to
+ * get silence (the conversation is a human's now, so the AI stays
+ * quiet). Until staff actually reply, answer with the handoff node's
+ * `after_handoff_reply` — at most every 30 minutes, for 12 hours.
+ */
+async function replyAfterHandoff(
+  db: AdminClient,
+  input: DispatchInboundInput,
+): Promise<DispatchInboundResult | null> {
+  if (input.message.kind !== "text") return null;
+  const { data } = await db
+    .from("flow_runs")
+    .select("*")
+    .eq("account_id", input.accountId)
+    .eq("contact_id", input.contactId)
+    .eq("status", "handed_off")
+    .order("ended_at", { ascending: false })
+    .limit(1);
+  const run = ((data as FlowRunRow[] | null) ?? [])[0];
+  const template = run?.vars.__after_handoff_reply;
+  if (!run || typeof template !== "string" || !run.ended_at) return null;
+  const now = Date.now();
+  if (now - new Date(run.ended_at).getTime() > AFTER_HANDOFF_WINDOW_MS) return null;
+  const lastAck = typeof run.vars.__after_handoff_ack_at === "string"
+    ? new Date(run.vars.__after_handoff_ack_at).getTime()
+    : 0;
+  if (now - lastAck < AFTER_HANDOFF_MIN_GAP_MS) return null;
+  if (await humanHasTakenOver(db, run)) return null;
+
+  await saveVars(db, run, { ...run.vars, __after_handoff_ack_at: new Date(now).toISOString() });
+  await sendEngineText(db, run, null, interpolateVars(template, run.vars), "after_handoff_reply");
+  return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
 }
 
 // ============================================================

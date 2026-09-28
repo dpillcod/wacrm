@@ -522,6 +522,7 @@ interface SendCtaUrlEngineArgs {
   bodyText: string
   headerText?: string
   footerText?: string
+  headerImageUrl?: string
   buttonText: string
   url: string
 }
@@ -574,6 +575,7 @@ export async function engineSendCtaUrl(
       bodyText: args.bodyText,
       headerText: args.headerText,
       footerText: args.footerText,
+      headerImageUrl: args.headerImageUrl,
       buttonText: args.buttonText,
       url: args.url,
     })

@@ -49,6 +49,18 @@ export function toEcuadorInternational(phone: string): string {
 }
 
 /**
+ * The reverse of toEcuadorInternational, for showing a number to
+ * people: "593981414182" → "0981414182". Non-Ecuadorian numbers come
+ * back as "+<digits>".
+ */
+export function localEcuadorPhone(phone: string): string {
+  const digits = sanitizePhoneForMeta(phone)
+  if (!digits) return ''
+  if (/^593\d{9}$/.test(digits)) return `0${digits.slice(3)}`
+  return `+${digits}`
+}
+
+/**
  * Validate phone number is E.164-like format (7-15 digits starting with non-zero).
  * Accepts with or without + prefix.
  */
