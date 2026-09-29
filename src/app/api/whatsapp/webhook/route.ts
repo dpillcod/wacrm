@@ -6,7 +6,7 @@ import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
-import { dispatchInboundToFlows } from '@/lib/flows/engine'
+import { dispatchInboundToFlows, recordDeliveryFailure } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import {
@@ -89,6 +89,8 @@ interface WhatsAppWebhookEntry {
         status: string
         timestamp: string
         recipient_id: string
+        /** Present on status "failed": Meta's reason (code, title, details). */
+        errors?: Array<{ code?: number; title?: string; message?: string; error_data?: { details?: string } }>
       }>
     }
     field: string
@@ -364,7 +366,17 @@ async function handleStatusUpdate(status: {
   status: string
   timestamp: string
   recipient_id: string
+  errors?: Array<{ code?: number; title?: string; message?: string; error_data?: { details?: string } }>
 }) {
+  // Keep Meta's reason for a failed delivery — it was being dropped,
+  // which made "the customer never got it" (e.g. a blocked payment
+  // method, error 141006/131042) impossible to diagnose.
+  if (status.status === 'failed') {
+    await recordDeliveryFailure(status.id, status.errors ?? []).catch((err) =>
+      console.error('[webhook] recordDeliveryFailure failed:', err),
+    )
+  }
+
   // 1) Mirror onto messages (legacy behavior) — Meta's status values
   //    already match the CHECK constraint on messages.status. No
   //    `.select()`: message_id is NOT unique (migration 009 — Meta ids

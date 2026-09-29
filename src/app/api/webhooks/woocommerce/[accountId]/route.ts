@@ -33,9 +33,9 @@ import { NextResponse, type NextRequest } from "next/server";
 import crypto from "crypto";
 
 import { resolveConversationByPhone } from "@/lib/whatsapp/resolve-conversation";
-import { toEcuadorInternational } from "@/lib/whatsapp/phone-utils";
+import { localEcuadorPhone, toEcuadorInternational } from "@/lib/whatsapp/phone-utils";
 import { SendMessageError } from "@/lib/whatsapp/send-message";
-import { startFlowRunForExternalEvent } from "@/lib/flows/engine";
+import { catchUpWaitingRun, startFlowRunForExternalEvent } from "@/lib/flows/engine";
 
 let _adminClient: SupabaseClient | null = null;
 function supabaseAdmin(): SupabaseClient {
@@ -65,6 +65,36 @@ interface WooCommerceOrderPayload {
     phone?: string;
   };
   line_items?: WooCommerceLineItem[];
+}
+
+/** In-app notification (no WhatsApp cost) to every member of the account. */
+async function notifyTeamOfWebOrder(
+  db: SupabaseClient,
+  accountId: string,
+  args: { conversationId: string; contactId: string; text: string },
+): Promise<void> {
+  try {
+    const { data: members } = await db
+      .from("profiles")
+      .select("user_id")
+      .eq("account_id", accountId);
+    const rows = ((members ?? []) as { user_id: string | null }[])
+      .filter((m) => m.user_id)
+      .map((m) => ({
+        account_id: accountId,
+        user_id: m.user_id,
+        type: "conversation_assigned",
+        conversation_id: args.conversationId,
+        contact_id: args.contactId,
+        title: "🛒 Nuevo pedido web",
+        body: args.text,
+      }));
+    if (rows.length === 0) return;
+    const { error } = await db.from("notifications").insert(rows);
+    if (error) console.error("[woocommerce webhook] notify team failed:", error.message);
+  } catch (err) {
+    console.error("[woocommerce webhook] notify team threw:", err);
+  }
 }
 
 /**
@@ -194,6 +224,10 @@ export async function POST(
       {
         contactId,
         conversationId,
+        // The flow waits for the buyer to write first (their message
+        // opens WhatsApp's free 24h window); a stale chat of theirs must
+        // not block the order.
+        supersedeActive: true,
         vars: {
           order_id: String(order.id ?? ""),
           order_total: order.total ?? "",
@@ -206,6 +240,21 @@ export async function POST(
         },
       },
     );
+
+    // The buyer may already have written before this webhook arrived.
+    if (result.flow_run_id) {
+      await catchUpWaitingRun(db, result.flow_run_id).catch((err) =>
+        console.error("[woocommerce webhook] catch-up failed:", err),
+      );
+    }
+
+    // Staff learn about the order right away inside the CRM — free, and
+    // independent of whether (or from which phone) the buyer writes.
+    await notifyTeamOfWebOrder(db, accountId, {
+      conversationId,
+      contactId,
+      text: `Pedido N° ${order.id ?? "?"} · ${customerName || "Cliente"} (${localEcuadorPhone(phone)}) · $${order.total ?? "?"} · ${order.payment_method_title ?? order.payment_method ?? ""}. Esperando que el cliente escriba por WhatsApp.`,
+    });
 
     return NextResponse.json({ ok: true, outcome: result.outcome });
   } catch (err) {

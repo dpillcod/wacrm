@@ -410,6 +410,16 @@ export interface CollectInputNodeConfig {
    */
   silent?: boolean;
   /**
+   * On a `silent` node waiting for a customer to write first (e.g. after
+   * a web order): a message from ANY contact of the account whose text
+   * matches this regex, with capture group 1 equal to
+   * `vars[claim_var]`, claims the run — it moves to that contact and
+   * conversation and continues. Covers a buyer who writes from a
+   * different phone than the one on the order ("Pedido N°: 45635").
+   */
+  claim_pattern?: string;
+  claim_var?: string;
+  /**
    * Treat the reply as a CORRECTION to the list stored in this var
    * (newline-joined, e.g. "order_text") instead of capturing it: the
    * account's AI applies free text ("quita el 3 y los panes que sean

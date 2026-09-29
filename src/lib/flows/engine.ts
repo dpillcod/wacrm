@@ -1352,6 +1352,13 @@ export async function dispatchInboundToFlows(
       if (followUpResult) return followUpResult;
     }
 
+    // A message naming a run that's waiting for its customer (web order
+    // reference) claims it, even from a different phone.
+    if (input.message.kind === "text") {
+      const claimed = await claimWaitingRun(db, input);
+      if (claimed) return claimed;
+    }
+
     const activeRun = await loadActiveRunForContact(
       db,
       input.accountId,
@@ -1388,7 +1395,16 @@ export async function dispatchInboundToFlows(
         input.isFirstInboundMessage,
         true,
       );
-      if (restartFlow?.entry_node_id) {
+      // A run waiting for its customer to write first (silent node, e.g.
+      // a web order) must not be thrown away by a "hola": that "hola" IS
+      // the customer showing up, and continues the run below.
+      const waitingNode = activeRun.current_node_key
+        ? await loadNode(db, activeRun.flow_id, activeRun.current_node_key)
+        : null;
+      const isWaitingForCustomer =
+        waitingNode?.node_type === "collect_input" &&
+        (waitingNode.config as unknown as CollectInputNodeConfig).silent === true;
+      if (restartFlow?.entry_node_id && !isWaitingForCustomer) {
         await endRun(db, activeRun.id, "timed_out", "restarted_by_keyword");
         const restartNodes = await loadAllNodes(db, restartFlow.id);
         return startNewRun(db, restartFlow, input, restartNodes);
@@ -1999,6 +2015,178 @@ async function replyAfterHandoff(
   await saveVars(db, run, { ...run.vars, __after_handoff_ack_at: new Date(now).toISOString() });
   await sendEngineText(db, run, null, interpolateVars(template, run.vars), "after_handoff_reply");
   return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+}
+
+// ============================================================
+// Runs waiting for their customer to write first — see
+// CollectInputNodeConfig.silent / claim_pattern.
+// ============================================================
+
+async function loadNode(
+  db: AdminClient,
+  flowId: string,
+  nodeKey: string,
+): Promise<FlowNodeRow | null> {
+  const { data } = await db
+    .from("flow_nodes")
+    .select("*")
+    .eq("flow_id", flowId)
+    .eq("node_key", nodeKey)
+    .maybeSingle();
+  return (data as FlowNodeRow | null) ?? null;
+}
+
+/**
+ * If this text names a run that's waiting for its customer at a node
+ * with `claim_pattern` (e.g. "Pedido N°: 45635" for a web order placed
+ * with another phone), move that run to the sender and continue it with
+ * this message. Null when nothing is claimed — including when the run
+ * already belongs to this sender (the normal path handles that).
+ */
+async function claimWaitingRun(
+  db: AdminClient,
+  input: DispatchInboundInput,
+): Promise<DispatchInboundResult | null> {
+  if (input.message.kind !== "text") return null;
+  const text = input.message.text;
+  const { data } = await db
+    .from("flow_runs")
+    .select("*")
+    .eq("account_id", input.accountId)
+    .eq("status", "active")
+    .neq("contact_id", input.contactId)
+    .limit(200);
+  for (const run of (data as FlowRunRow[] | null) ?? []) {
+    if (!run.current_node_key) continue;
+    const node = await loadNode(db, run.flow_id, run.current_node_key);
+    const cfg = node?.config as unknown as CollectInputNodeConfig | undefined;
+    if (!node || node.node_type !== "collect_input" || !cfg?.silent) continue;
+    if (!cfg.claim_pattern || !cfg.claim_var) continue;
+    let match: RegExpMatchArray | null = null;
+    try {
+      match = text.match(new RegExp(cfg.claim_pattern, "i"));
+    } catch {
+      continue;
+    }
+    if (!match?.[1] || String(run.vars[cfg.claim_var] ?? "") !== match[1]) continue;
+
+    // The sender can only have one active run: theirs gives way.
+    const theirs = await loadActiveRunForContact(db, input.accountId, input.contactId);
+    if (theirs) await endRun(db, theirs.id, "timed_out", "superseded_by_claimed_run");
+    const { error } = await db
+      .from("flow_runs")
+      .update({ contact_id: input.contactId, conversation_id: input.conversationId })
+      .eq("id", run.id)
+      .eq("status", "active");
+    if (error) {
+      console.error("[flows] claim run failed:", error.message);
+      return null;
+    }
+    run.contact_id = input.contactId;
+    run.conversation_id = input.conversationId;
+    await logEvent(db, run.id, "node_entered", node.node_key, {
+      claimed_by_contact: input.contactId,
+      claimed_ref: match[1],
+    });
+    const nodes = await loadAllNodes(db, run.flow_id);
+    return handleReplyForActiveRun(db, run, input.message, nodes);
+  }
+  return null;
+}
+
+const CATCH_UP_WINDOW_MS = 30 * 60_000;
+
+/**
+ * WooCommerce can deliver its order webhook after the buyer already
+ * wrote ("🛒 Nuevo Pedido … N°: 45635"). A run that starts waiting for
+ * that message would then wait forever — so right after starting, look
+ * back 30 minutes for a customer message naming this run's reference
+ * (per the waiting node's claim_pattern), from any phone, and continue
+ * with it. Returns null when there's nothing to catch up on.
+ */
+export async function catchUpWaitingRun(
+  db: AdminClient,
+  runId: string,
+): Promise<DispatchInboundResult | null> {
+  const run = await loadRun(db, runId);
+  if (!run || run.status !== "active" || !run.current_node_key) return null;
+  const node = await loadNode(db, run.flow_id, run.current_node_key);
+  const cfg = node?.config as unknown as CollectInputNodeConfig | undefined;
+  if (!node || !cfg?.silent || !cfg.claim_pattern || !cfg.claim_var) return null;
+  const ref = String(run.vars[cfg.claim_var] ?? "");
+  if (!ref) return null;
+
+  const { data } = await db
+    .from("messages")
+    .select("message_id, content_text, conversation_id, conversations!inner(account_id, contact_id)")
+    .eq("sender_type", "customer")
+    .eq("conversations.account_id", run.account_id)
+    .ilike("content_text", `%${ref}%`)
+    .gte("created_at", new Date(Date.now() - CATCH_UP_WINDOW_MS).toISOString())
+    .order("created_at", { ascending: false })
+    .limit(20);
+  let pattern: RegExp;
+  try {
+    pattern = new RegExp(cfg.claim_pattern, "i");
+  } catch {
+    return null;
+  }
+  const hit = ((data ?? []) as unknown as Array<{
+    message_id: string;
+    content_text: string | null;
+    conversation_id: string;
+    conversations: { account_id: string; contact_id: string };
+  }>).find((m) => m.content_text?.match(pattern)?.[1] === ref);
+  if (!hit) return null;
+
+  if (hit.conversations.contact_id !== run.contact_id) {
+    const theirs = await loadActiveRunForContact(db, run.account_id, hit.conversations.contact_id);
+    if (theirs) await endRun(db, theirs.id, "timed_out", "superseded_by_claimed_run");
+    await db
+      .from("flow_runs")
+      .update({ contact_id: hit.conversations.contact_id, conversation_id: hit.conversation_id })
+      .eq("id", run.id);
+    run.contact_id = hit.conversations.contact_id;
+    run.conversation_id = hit.conversation_id;
+  }
+  await logEvent(db, run.id, "node_entered", node.node_key, { caught_up_ref: ref });
+  const nodes = await loadAllNodes(db, run.flow_id);
+  return handleReplyForActiveRun(
+    db,
+    run,
+    { kind: "text", text: hit.content_text ?? "", meta_message_id: hit.message_id },
+    nodes,
+  );
+}
+
+/**
+ * Meta reports a failed delivery asynchronously (a status webhook), long
+ * after the send call succeeded. Record why on the flow run that sent
+ * it, so a silent "the customer never got it" is visible and explained.
+ */
+export async function recordDeliveryFailure(
+  whatsappMessageId: string,
+  errors: Array<{ code?: number; title?: string; message?: string; error_data?: { details?: string } }>,
+): Promise<void> {
+  const db = supabaseAdmin();
+  const first = errors[0] ?? {};
+  const detail = {
+    reason: "delivery_failed",
+    whatsapp_message_id: whatsappMessageId,
+    code: first.code ?? null,
+    title: first.title ?? first.message ?? null,
+    details: first.error_data?.details ?? null,
+  };
+  console.error("[flows] WhatsApp delivery failed:", detail);
+  const { data } = await db
+    .from("flow_run_events")
+    .select("flow_run_id, node_key")
+    .eq("event_type", "message_sent")
+    .filter("payload->>whatsapp_message_id", "eq", whatsappMessageId)
+    .limit(1)
+    .maybeSingle();
+  const sent = data as { flow_run_id: string; node_key: string | null } | null;
+  if (sent) await logEvent(db, sent.flow_run_id, "error", sent.node_key, detail);
 }
 
 // ============================================================
@@ -3081,6 +3269,12 @@ export async function startFlowRunForExternalEvent(
     contactId: string;
     conversationId: string;
     vars: Record<string, unknown>;
+    /**
+     * End the contact's current active run (if any) instead of giving
+     * up. A web order is more important than whatever chat the buyer
+     * left half-way; a birthday greeting is not, so it stays off there.
+     */
+    supersedeActive?: boolean;
   },
 ): Promise<DispatchInboundResult> {
   const flow = await loadFlow(db, flowId);
@@ -3102,6 +3296,11 @@ export async function startFlowRunForExternalEvent(
     }
   } catch (err) {
     console.error("[flows] contact name lookup failed:", err);
+  }
+
+  if (args.supersedeActive) {
+    const existing = await loadActiveRunForContact(db, flow.account_id, args.contactId);
+    if (existing) await endRun(db, existing.id, "timed_out", "superseded_by_external_event");
   }
 
   const { data: inserted, error: insErr } = await db
