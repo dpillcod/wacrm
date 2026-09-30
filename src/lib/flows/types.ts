@@ -225,6 +225,29 @@ export interface OrderNumberConfig {
   assign_order_number?: boolean;
 }
 
+/**
+ * Side effects any node may declare, run when the run enters it (after
+ * assign_order_number, before the node's own action). Each is
+ * best-effort: a failure is logged on the run, never stops it.
+ */
+export interface NodeSideEffectsConfig {
+  /**
+   * Act on the run's web order (`vars.order_id`) in WooCommerce — e.g.
+   * `{ "status": "cancelled", "note": "Cancelado por el cliente por
+   * WhatsApp" }`. `{{vars.*}}` in the note are interpolated. A no-op
+   * until WOOCOMMERCE_URL / _KEY / _SECRET are set on the server.
+   */
+  woo?: { status?: string; note?: string };
+  /**
+   * Move the run's order card (`vars.__deal_id`) to the board column of
+   * this kind: "paid" | "ready" | "delivered" | "cancelled" | … (see
+   * lib/pipelines/order-stages.ts). No customer message is sent for it.
+   */
+  order_card_stage?: string;
+  /** In-app notification to the whole team; `{{vars.*}}` interpolated. */
+  notify_team?: string;
+}
+
 /** Keeping a handed-off customer company — see HandoffNodeConfig.follow_up. */
 export interface HandoffFollowUpConfig {
   /** Minutes between checks (e.g. 10). */

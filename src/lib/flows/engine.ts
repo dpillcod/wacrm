@@ -55,7 +55,8 @@ import {
 } from "../whatsapp/staff-notify";
 import { localEcuadorPhone, toEcuadorInternational } from "../whatsapp/phone-utils";
 import { notifyAccountInApp, upsertOrderCard } from "../pipelines/order-cards";
-import { csatThanks, parseCsatReplyId } from "../pipelines/order-stages";
+import { csatThanks, orderStageKind, parseCsatReplyId } from "../pipelines/order-stages";
+import { updateWooOrder } from "../woocommerce/client";
 import { INTERACTIVE_LIMITS } from "../whatsapp/meta-api";
 import { isPriceQuestion } from "./price-question";
 import { isGeneralQuestion } from "./general-question";
@@ -83,6 +84,7 @@ import {
   type FlowRunRow,
   type HandoffFollowUpConfig,
   type HandoffNodeConfig,
+  type NodeSideEffectsConfig,
   type OrderNumberConfig,
   type ParsedInbound,
   type SendButtonsNodeConfig,
@@ -998,6 +1000,7 @@ async function advanceFromNodeKey(
     if ((node.config as OrderNumberConfig).assign_order_number) {
       await assignOrderNumber(db, run);
     }
+    await runNodeSideEffects(db, run, node);
 
     if (node.node_type === "start") {
       currentKey = (node.config as unknown as StartNodeConfig).next_node_key;
@@ -1824,6 +1827,58 @@ async function askAboutDuplicates(
 // OrderNumberConfig and HandoffNodeConfig.follow_up /
 // after_handoff_reply.
 // ============================================================
+
+/** See NodeSideEffectsConfig. Best-effort; outcomes are logged on the run. */
+async function runNodeSideEffects(
+  db: AdminClient,
+  run: FlowRunRow,
+  node: FlowNodeRow,
+): Promise<void> {
+  const cfg = node.config as NodeSideEffectsConfig;
+
+  if (cfg.woo && run.vars.order_id) {
+    const result = await updateWooOrder(String(run.vars.order_id), {
+      status: cfg.woo.status,
+      note: cfg.woo.note ? interpolateVars(cfg.woo.note, run.vars) : undefined,
+    });
+    await logEvent(db, run.id, result.ok ? "node_entered" : "error", node.node_key, {
+      reason: result.ok ? "woo_updated" : "woo_update_failed",
+      woo: cfg.woo,
+      detail: result.error ?? null,
+    });
+  }
+
+  if (cfg.order_card_stage && typeof run.vars.__deal_id === "string") {
+    const { data: deal } = await db
+      .from("deals")
+      .select("pipeline_id")
+      .eq("id", run.vars.__deal_id)
+      .maybeSingle();
+    const pipelineId = (deal as { pipeline_id?: string } | null)?.pipeline_id;
+    if (pipelineId) {
+      const { data: stages } = await db
+        .from("pipeline_stages")
+        .select("id, name")
+        .eq("pipeline_id", pipelineId);
+      const target = ((stages ?? []) as { id: string; name: string }[]).find(
+        (s) => orderStageKind(s.name) === cfg.order_card_stage,
+      );
+      if (target) {
+        await db
+          .from("deals")
+          .update({ stage_id: target.id, updated_at: new Date().toISOString() })
+          .eq("id", run.vars.__deal_id);
+      }
+    }
+  }
+
+  if (cfg.notify_team) {
+    await notifyTeamInApp(db, run, node.node_key, {
+      title: orderTitle(run, "Pedido"),
+      body: interpolateVars(cfg.notify_team, run.vars),
+    });
+  }
+}
 
 async function assignOrderNumber(db: AdminClient, run: FlowRunRow): Promise<void> {
   if (run.vars.order_number) return;
