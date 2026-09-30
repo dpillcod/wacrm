@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  GOOGLE_REVIEW_URL,
   csatReplyId,
+  csatThanks,
   orderRefFromTitle,
   orderStageKind,
   parseCsatReplyId,
@@ -35,5 +37,13 @@ describe('csat reply ids', () => {
   it('round-trips the rating and the card', () => {
     expect(parseCsatReplyId(csatReplyId('mal', 'deal-123'))).toEqual({ key: 'mal', dealId: 'deal-123' })
     expect(parseCsatReplyId('followup_yes:abc')).toBeNull()
+  })
+})
+
+describe('csatThanks', () => {
+  it('asks only delighted customers for a Google review', () => {
+    expect(csatThanks('excelente')).toContain(GOOGLE_REVIEW_URL)
+    expect(csatThanks('bien')).not.toContain(GOOGLE_REVIEW_URL)
+    expect(csatThanks('mal')).not.toContain(GOOGLE_REVIEW_URL)
   })
 })

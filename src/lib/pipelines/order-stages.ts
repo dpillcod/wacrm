@@ -88,8 +88,16 @@ export function parseCsatReplyId(replyId: string): { key: CsatKey; dealId: strin
   return m ? { key: m[1] as CsatKey, dealId: m[2] } : null
 }
 
+/** The store's Google Business Profile review form. */
+export const GOOGLE_REVIEW_URL = 'https://g.page/r/CRa1Vf7odqVJEBM/review'
+
 export function csatThanks(key: CsatKey): string {
-  return key === 'mal'
-    ? 'Lamentamos que no haya sido una buena experiencia 🙏 Una persona de nuestro equipo le escribirá para saber qué pasó.'
-    : '¡Muchas gracias por su calificación! 🙂'
+  if (key === 'mal') {
+    return 'Lamentamos que no haya sido una buena experiencia 🙏 Una persona de nuestro equipo le escribirá para saber qué pasó.'
+  }
+  if (key === 'excelente') {
+    // Happy customers are the ones worth asking for a public review.
+    return `¡Muchas gracias! 🙂 Si tiene un minuto, nos ayudaría mucho su reseña en Google ⭐\n${GOOGLE_REVIEW_URL}`
+  }
+  return '¡Muchas gracias por su calificación! 🙂'
 }
