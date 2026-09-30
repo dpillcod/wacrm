@@ -36,6 +36,7 @@ import { resolveConversationByPhone } from "@/lib/whatsapp/resolve-conversation"
 import { localEcuadorPhone, toEcuadorInternational } from "@/lib/whatsapp/phone-utils";
 import { SendMessageError } from "@/lib/whatsapp/send-message";
 import { catchUpWaitingRun, startFlowRunForExternalEvent } from "@/lib/flows/engine";
+import { tagContact, WEB_ORIGIN_TAG } from "@/lib/contacts/origin";
 
 let _adminClient: SupabaseClient | null = null;
 function supabaseAdmin(): SupabaseClient {
@@ -144,7 +145,7 @@ export async function POST(
 
   const { data: config, error: configError } = await db
     .from("whatsapp_config")
-    .select("woocommerce_webhook_secret, woocommerce_order_flow_id")
+    .select("woocommerce_webhook_secret, woocommerce_order_flow_id, user_id")
     .eq("account_id", accountId)
     .maybeSingle();
   if (configError || !config?.woocommerce_webhook_secret) {
@@ -240,6 +241,14 @@ export async function POST(
         },
       },
     );
+
+    await tagContact(db, {
+      accountId,
+      userId: config.user_id,
+      contactId,
+      tagName: WEB_ORIGIN_TAG,
+      color: "#16a34a",
+    }).catch((err) => console.error("[woocommerce webhook] origin tag failed:", err));
 
     // The buyer may already have written before this webhook arrived.
     if (result.flow_run_id) {

@@ -16,6 +16,7 @@ import {
   type MetaOrderPayload,
 } from '@/lib/whatsapp/catalog-order'
 import type { OrderItem, ParsedInbound } from '@/lib/flows/types'
+import { recordReferralOrigin, type MetaReferral } from '@/lib/contacts/origin'
 import {
   handleTemplateWebhookChange,
   isTemplateWebhookField,
@@ -55,6 +56,8 @@ interface WhatsAppMessage {
   reaction?: { message_id: string; emoji: string }
   /** A cart sent from the in-chat catalog (see lib/whatsapp/catalog-order). */
   order?: MetaOrderPayload
+  /** Set when the person tapped a Click-to-WhatsApp ad or post first. */
+  referral?: MetaReferral
   /**
    * Set when the customer taps a button or list row on an interactive
    * message we sent. `button_reply.id` / `list_reply.id` is whatever id
@@ -746,6 +749,17 @@ async function processMessage(
 
   if (convError) {
     console.error('Error updating conversation:', convError)
+  }
+
+  // Came from an ad or post? Tag the contact with where from (and note
+  // the ad) — lets the store see which channel brings customers.
+  if (message.referral) {
+    await recordReferralOrigin(supabaseAdmin(), {
+      accountId,
+      userId: configOwnerUserId,
+      contactId: contactRecord.id,
+      referral: message.referral,
+    })
   }
 
   // If this contact was a recent broadcast recipient, flag the reply
