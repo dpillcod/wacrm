@@ -109,10 +109,11 @@ export function canManageAutomation(role: AccountRole): boolean {
 
 /**
  * Pages an inbox-only member (agent / viewer) may open. Staff on shared
- * shop-floor PCs answer and read chats; everything else (flows,
- * contacts, broadcasts, settings…) is for admins.
+ * shop-floor PCs answer chats and move order cards on the board
+ * (pipeline settings stay admin-only via canEditSettings); everything
+ * else (flows, contacts, broadcasts, settings…) is for admins.
  */
-export const INBOX_ONLY_PATHS: readonly string[] = ["/inbox", "/notifications"];
+export const INBOX_ONLY_PATHS: readonly string[] = ["/inbox", "/notifications", "/pipelines"];
 
 /** Agents and viewers get the inbox-only app (see INBOX_ONLY_PATHS). */
 export function isInboxOnly(role: AccountRole): boolean {

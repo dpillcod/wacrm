@@ -261,6 +261,13 @@ export interface HandoffNodeConfig {
    */
   follow_up?: HandoffFollowUpConfig;
   /**
+   * Put the order on the "Pedidos" board (see lib/pipelines): a card in
+   * the first column titled with the order number and customer, the
+   * handoff note as its notes. If the run already has a card (a web
+   * order's, made when the order arrived) its notes are refreshed.
+   */
+  create_order_card?: boolean;
+  /**
    * Sent (at most every 30 min, for 12h) when the customer writes again
    * after the handoff and no one from staff has replied in the inbox —
    * instead of silence. `{{vars.*}}` are interpolated.

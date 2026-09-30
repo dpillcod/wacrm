@@ -140,10 +140,11 @@ describe("inbox-only members", () => {
     expect(isInboxOnly("owner")).toBe(false);
   });
 
-  it("limits inbox-only members to the inbox and notifications", () => {
+  it("limits inbox-only members to the inbox, notifications and the order board", () => {
     expect(canAccessPath("agent", "/inbox")).toBe(true);
     expect(canAccessPath("agent", "/inbox/abc")).toBe(true);
     expect(canAccessPath("agent", "/notifications")).toBe(true);
+    expect(canAccessPath("agent", "/pipelines")).toBe(true);
     expect(canAccessPath("agent", "/flows")).toBe(false);
     expect(canAccessPath("agent", "/dashboard")).toBe(false);
     expect(canAccessPath("agent", "/inboxes")).toBe(false);

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { notifyStageChange } from "@/lib/pipelines/notify-stage-change";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
@@ -209,6 +210,15 @@ export function DealForm({
     toast.success(deal ? t("toastUpdated") : t("toastCreated"));
     onOpenChange(false);
     onSaved();
+
+    // Moved to another column from the form: same customer message as a
+    // drag on the order board.
+    if (deal && deal.stage_id !== stageId) {
+      const outcome = await notifyStageChange(deal.id);
+      if (outcome === "notified") toast.success(t("toastCustomerNotified"));
+      else if (outcome === "call_customer") toast.warning(t("toastCallCustomer"));
+      else if (outcome === "send_failed") toast.error(t("toastCustomerNotifyFailed"));
+    }
   }
 
   async function handleStatusChange(status: DealStatus) {

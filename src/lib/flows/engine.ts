@@ -54,6 +54,8 @@ import {
   type NotifyStaffResult,
 } from "../whatsapp/staff-notify";
 import { localEcuadorPhone, toEcuadorInternational } from "../whatsapp/phone-utils";
+import { notifyAccountInApp, upsertOrderCard } from "../pipelines/order-cards";
+import { csatThanks, parseCsatReplyId } from "../pipelines/order-stages";
 import { INTERACTIVE_LIMITS } from "../whatsapp/meta-api";
 import { isPriceQuestion } from "./price-question";
 import { isGeneralQuestion } from "./general-question";
@@ -663,6 +665,23 @@ async function executeHandoff(
     assignTo: cfg.assign_to,
     notifyUserIds: cfg.notify_user_ids,
   });
+
+  if (cfg.create_order_card) {
+    const total = Number(String(run.vars.order_total ?? "").replace(",", "."));
+    const cardId = await upsertOrderCard(db, {
+      accountId: run.account_id,
+      userId: run.user_id,
+      contactId: run.contact_id!,
+      conversationId: run.conversation_id,
+      dealId: typeof run.vars.__deal_id === "string" ? run.vars.__deal_id : null,
+      title: orderCardTitle(run),
+      notes: resolvedNote ?? "",
+      value: Number.isFinite(total) ? total : undefined,
+    });
+    if (cardId && cardId !== run.vars.__deal_id) {
+      await saveVars(db, run, { ...run.vars, __deal_id: cardId });
+    }
+  }
 
   // Keep the customer company after the handoff (see HandoffNodeConfig).
   // State lives on the ended run's vars: it's the record of this order.
@@ -1330,6 +1349,8 @@ export async function dispatchInboundToFlows(
     if (input.message.kind === "interactive_reply") {
       const followUpResult = await handleFollowUpReply(db, input, input.message.reply_id);
       if (followUpResult) return followUpResult;
+      const csatResult = await handleCsatReply(db, input, input.message.reply_id);
+      if (csatResult) return csatResult;
     }
 
     // A message naming a run that's waiting for its customer (web order
@@ -1860,6 +1881,17 @@ async function alertStaff(
   return result;
 }
 
+/** "Pedido N° 0015 — Juan" / "Pedido web N° 45637 — Diego" for the board. */
+function orderCardTitle(run: FlowRunRow): string {
+  const name =
+    typeof run.vars.contact_name === "string" && run.vars.contact_name.trim()
+      ? ` — ${run.vars.contact_name.trim()}`
+      : "";
+  if (run.vars.order_number) return `Pedido N° ${run.vars.order_number}${name}`;
+  if (run.vars.order_id) return `Pedido web N° ${run.vars.order_id}${name}`;
+  return `Pedido${name}`;
+}
+
 function orderTitle(run: FlowRunRow, fallback: string): string {
   const name =
     typeof run.vars.contact_name === "string" && run.vars.contact_name.trim()
@@ -1878,30 +1910,18 @@ async function notifyTeamInApp(
   args: { title: string; body: string; extraUserIds?: string[] },
 ): Promise<void> {
   try {
-    const { data: members } = await db
-      .from("profiles")
-      .select("user_id")
-      .eq("account_id", run.account_id);
-    const userIds = new Set<string>(args.extraUserIds ?? []);
-    for (const m of (members ?? []) as { user_id: string | null }[]) {
-      if (m.user_id) userIds.add(m.user_id);
-    }
-    if (userIds.size === 0) return;
-    const { error } = await db.from("notifications").insert(
-      [...userIds].map((userId) => ({
-        account_id: run.account_id,
-        user_id: userId,
-        type: "conversation_assigned",
-        conversation_id: run.conversation_id,
-        contact_id: run.contact_id,
-        title: args.title,
-        body: args.body.slice(0, 1000),
-      })),
-    );
+    const error = await notifyAccountInApp(db, {
+      accountId: run.account_id,
+      conversationId: run.conversation_id,
+      contactId: run.contact_id,
+      title: args.title,
+      body: args.body,
+      extraUserIds: args.extraUserIds,
+    });
     if (error) {
       await logEvent(db, run.id, "error", nodeKey, {
         reason: "in_app_notify_failed",
-        detail: error.message,
+        detail: error,
       });
     }
   } catch (err) {
@@ -2034,6 +2054,55 @@ async function handleFollowUpReply(
     await sendEngineText(db, run, null, FOLLOW_UP_NO_TEXT, "follow_up_no");
   }
   return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+}
+
+/**
+ * A tap on the satisfaction survey sent when an order card reaches
+ * "Entregado" (see lib/pipelines/order-stages.ts): the rating is added
+ * to the card's notes, the customer is thanked, and a bad rating
+ * alerts the whole team in the CRM. Null if it isn't a survey tap.
+ */
+async function handleCsatReply(
+  db: AdminClient,
+  input: DispatchInboundInput,
+  replyId: string,
+): Promise<DispatchInboundResult | null> {
+  const parsed = parseCsatReplyId(replyId);
+  if (!parsed) return null;
+  const { data } = await db
+    .from("deals")
+    .select("id, title, notes, account_id")
+    .eq("id", parsed.dealId)
+    .maybeSingle();
+  const deal = data as { id: string; title: string; notes: string | null; account_id: string } | null;
+  if (!deal || deal.account_id !== input.accountId) return { consumed: true, outcome: "no_match" };
+
+  const label = parsed.key === "excelente" ? "⭐ Excelente" : parsed.key === "bien" ? "👍 Bien" : "👎 Mal";
+  await db
+    .from("deals")
+    .update({ notes: `${deal.notes ?? ""}\n\nCalificación del cliente: ${label}`.trim() })
+    .eq("id", deal.id);
+  try {
+    await engineSendText({
+      accountId: input.accountId,
+      userId: input.userId,
+      conversationId: input.conversationId,
+      contactId: input.contactId,
+      text: csatThanks(parsed.key),
+    });
+  } catch (err) {
+    console.error("[flows] csat thanks failed:", err);
+  }
+  if (parsed.key === "mal") {
+    await notifyAccountInApp(db, {
+      accountId: input.accountId,
+      conversationId: input.conversationId,
+      contactId: input.contactId,
+      title: `👎 Cliente insatisfecho — ${deal.title}`,
+      body: "Calificó la atención como mala. Escríbale para saber qué pasó.",
+    });
+  }
+  return { consumed: true, outcome: "no_match" };
 }
 
 const AFTER_HANDOFF_WINDOW_MS = 12 * 3_600_000;

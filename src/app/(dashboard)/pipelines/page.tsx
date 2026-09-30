@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { notifyStageChange } from "@/lib/pipelines/notify-stage-change";
 import { createClient } from "@/lib/supabase/client";
 import type { Pipeline, PipelineStage, Deal } from "@/types";
 import { PipelineBoard } from "@/components/pipelines/pipeline-board";
@@ -227,7 +228,13 @@ export default function PipelinesPage() {
       if (error) {
         toast.error(t("toastFailedMoveDeal"));
         refreshDeals();
+        return;
       }
+      // On the order board, some columns message the customer.
+      const outcome = await notifyStageChange(dealId);
+      if (outcome === "notified") toast.success(t("toastCustomerNotified"));
+      else if (outcome === "call_customer") toast.warning(t("toastCallCustomer"));
+      else if (outcome === "send_failed") toast.error(t("toastCustomerNotifyFailed"));
     },
     [supabase, refreshDeals, t],
   );
