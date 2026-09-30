@@ -440,6 +440,15 @@ export interface CollectInputNodeConfig {
    */
   silent?: boolean;
   /**
+   * Ask with an in-chat form (a PUBLISHED WhatsApp Flow) instead of a
+   * plain question: `prompt_text` is sent with a `cta` button that opens
+   * the form's `screen`. The submitted answers are captured into
+   * `var_key` as "Label: value" lines (labels from `labels`, else the
+   * field name) and each field into `{{vars.<var_key>_<field>}}`. A
+   * typed reply is still accepted as plain text.
+   */
+  form?: { flow_id: string; cta: string; screen: string; labels?: Record<string, string> };
+  /**
    * On a `silent` node waiting for a customer to write first (e.g. after
    * a web order): a message from ANY contact of the account whose text
    * matches this regex, with capture group 1 equal to
@@ -689,6 +698,12 @@ export type ParsedInbound =
       /** One human-readable line per item, newline-joined — what gets
        *  captured into the order var, same shape as typed order lines. */
       text: string;
+      meta_message_id: string;
+    }
+  | {
+      /** A submitted in-chat form (WhatsApp Flow): field name → value. */
+      kind: "form_reply";
+      data: Record<string, string>;
       meta_message_id: string;
     }
   | {

@@ -37,6 +37,7 @@ import {
   engineSendInteractiveButtons,
   engineSendInteractiveList,
   engineSendCtaUrl,
+  engineSendFlowForm,
   engineSendTemplate,
   engineSendMedia,
   engineSendText,
@@ -57,6 +58,7 @@ import { localEcuadorPhone, toEcuadorInternational } from "../whatsapp/phone-uti
 import { notifyAccountInApp, upsertOrderCard } from "../pipelines/order-cards";
 import { csatThanks, orderStageKind, parseCsatReplyId } from "../pipelines/order-stages";
 import { updateWooOrder } from "../woocommerce/client";
+import { formatFormReply } from "../whatsapp/flow-form";
 import { INTERACTIVE_LIMITS } from "../whatsapp/meta-api";
 import { isPriceQuestion } from "./price-question";
 import { isGeneralQuestion } from "./general-question";
@@ -1147,13 +1149,26 @@ async function advanceFromNodeKey(
         return { outcome: "advanced" };
       }
       try {
-        const { whatsapp_message_id } = await engineSendText({
-          accountId: run.account_id,
-    userId: run.user_id,
-          conversationId: run.conversation_id!,
-          contactId: run.contact_id!,
-          text: interpolateVars(cfg.prompt_text, run.vars),
-        });
+        const { whatsapp_message_id } = cfg.form
+          ? // Ask with an in-chat form (see CollectInputNodeConfig.form).
+            await engineSendFlowForm({
+              accountId: run.account_id,
+              userId: run.user_id,
+              conversationId: run.conversation_id!,
+              contactId: run.contact_id!,
+              bodyText: interpolateVars(cfg.prompt_text, run.vars),
+              flowId: cfg.form.flow_id,
+              flowCta: cfg.form.cta,
+              screen: cfg.form.screen,
+              flowToken: run.id,
+            })
+          : await engineSendText({
+              accountId: run.account_id,
+              userId: run.user_id,
+              conversationId: run.conversation_id!,
+              contactId: run.contact_id!,
+              text: interpolateVars(cfg.prompt_text, run.vars),
+            });
         await logEvent(db, run.id, "message_sent", node.node_key, {
           node_type: "collect_input",
           whatsapp_message_id,
@@ -3136,6 +3151,25 @@ async function handleReplyForActiveRun(
         text: validated,
       });
       debounceMs = cfg.debounce_ms;
+    }
+  } else if (message.kind === "form_reply" && currentCollectCfg) {
+    // A submitted in-chat form: all its answers as one capture, plus one
+    // var per field.
+    const cfg = currentCollectCfg;
+    matched = await captureTextIntoVar(db, run, currentNode.node_key, {
+      var_key: cfg.var_key,
+      append: cfg.append,
+      lowercase: false,
+      cross_sell: false,
+      next_node_key: cfg.next_node_key,
+      text: formatFormReply(message.data, cfg.form?.labels),
+    });
+    if (matched) {
+      const fieldVars: Record<string, unknown> = { ...run.vars };
+      for (const [field, value] of Object.entries(message.data)) {
+        fieldVars[`${cfg.var_key}_${field}`] = value;
+      }
+      await saveVars(db, run, fieldVars);
     }
   } else if (
     message.kind === "order" &&

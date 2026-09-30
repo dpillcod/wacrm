@@ -4,6 +4,7 @@ import {
   sendInteractiveProduct,
   sendInteractiveProductList,
   sendInteractiveCtaUrl,
+  sendInteractiveFlow,
   sendMediaMessage,
   sendTextMessage,
   sendTemplateMessage,
@@ -635,6 +636,93 @@ export async function engineSendCtaUrl(
     })
     .eq('id', args.conversationId)
 
+  return { whatsapp_message_id: waMessageId }
+}
+
+interface SendFlowFormEngineArgs {
+  accountId: string
+  userId: string
+  conversationId: string
+  contactId: string
+  bodyText: string
+  flowId: string
+  flowCta: string
+  screen: string
+  flowToken: string
+}
+
+/**
+ * Send an in-chat form (WhatsApp Flow) from the Flows engine — used by a
+ * collect_input with `form`. Same contact/config lookup, phone-variant
+ * retry and persistence as the other engine senders; stored as a plain
+ * text row (body + the button label) so the inbox shows it without a
+ * dedicated renderer.
+ */
+export async function engineSendFlowForm(
+  args: SendFlowFormEngineArgs,
+): Promise<{ whatsapp_message_id: string }> {
+  const db = supabaseAdmin()
+  const { data: contact, error: contactErr } = await db
+    .from('contacts')
+    .select('id, phone')
+    .eq('id', args.contactId)
+    .eq('account_id', args.accountId)
+    .maybeSingle()
+  if (contactErr || !contact?.phone) throw new Error('contact not found for this account')
+  const sanitized = sanitizePhoneForMeta(contact.phone)
+  if (!isValidE164(sanitized)) throw new Error(`contact phone invalid: ${contact.phone}`)
+
+  const { data: config, error: configErr } = await db
+    .from('whatsapp_config')
+    .select('*')
+    .eq('account_id', args.accountId)
+    .single()
+  if (configErr || !config) throw new Error('WhatsApp not configured for this account')
+  const accessToken = decrypt(config.access_token)
+
+  let waMessageId = ''
+  let lastError: unknown = null
+  for (const phone of phoneVariants(sanitized)) {
+    try {
+      const r = await sendInteractiveFlow({
+        phoneNumberId: config.phone_number_id,
+        accessToken,
+        to: phone,
+        bodyText: args.bodyText,
+        flowId: args.flowId,
+        flowCta: args.flowCta,
+        screen: args.screen,
+        flowToken: args.flowToken,
+      })
+      waMessageId = r.messageId
+      lastError = null
+      break
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (!isRecipientNotAllowedError(msg)) throw err
+      lastError = err
+    }
+  }
+  if (lastError) throw lastError
+
+  const shown = `${args.bodyText}\n[📝 ${args.flowCta}]`
+  const { error: msgErr } = await db.from('messages').insert({
+    conversation_id: args.conversationId,
+    sender_type: 'bot',
+    content_type: 'text',
+    content_text: shown,
+    message_id: waMessageId,
+    status: 'sent',
+  })
+  if (msgErr) throw new Error(`sent to Meta but DB insert failed: ${msgErr.message}`)
+  await db
+    .from('conversations')
+    .update({
+      last_message_text: shown,
+      last_message_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', args.conversationId)
   return { whatsapp_message_id: waMessageId }
 }
 

@@ -964,6 +964,65 @@ export async function sendInteractiveCtaUrl(
   return { messageId: data.messages[0].id }
 }
 
+export interface SendInteractiveFlowArgs {
+  phoneNumberId: string
+  accessToken: string
+  to: string
+  bodyText: string
+  /** A PUBLISHED WhatsApp Flow (in-chat form) of this WABA. */
+  flowId: string
+  /** Button that opens the form (≤ 20 chars). */
+  flowCta: string
+  /** The form's first screen id. */
+  screen: string
+  /** Echoed back in the reply — lets a reply be tied to what sent it. */
+  flowToken: string
+}
+
+/**
+ * Send a WhatsApp Flow (a native in-chat form) as an interactive
+ * message: the customer taps `flowCta`, fills the form inside WhatsApp,
+ * and the answers come back as an `nfm_reply` interactive message.
+ * Like any non-template message it's free inside the 24h window.
+ */
+export async function sendInteractiveFlow(args: SendInteractiveFlowArgs): Promise<MetaSendResult> {
+  validateInteractiveBody(args.bodyText)
+  if (!args.flowCta || args.flowCta.length > INTERACTIVE_LIMITS.buttonTitleMaxLength) {
+    throw new Error(`Flow button label must be 1-${INTERACTIVE_LIMITS.buttonTitleMaxLength} chars.`)
+  }
+  const body = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: args.to,
+    type: 'interactive',
+    interactive: {
+      type: 'flow',
+      body: { text: args.bodyText },
+      action: {
+        name: 'flow',
+        parameters: {
+          flow_message_version: '3',
+          flow_token: args.flowToken,
+          flow_id: args.flowId,
+          flow_cta: args.flowCta,
+          flow_action: 'navigate',
+          flow_action_payload: { screen: args.screen },
+        },
+      },
+    },
+  }
+  const response = await fetch(`${META_API_BASE}/${args.phoneNumberId}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${args.accessToken}` },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  const data = await response.json()
+  return { messageId: data.messages[0].id }
+}
+
 export interface InteractiveListRow {
   /** Stable id sent back in the webhook when tapped (≤ 200 chars). */
   id: string

@@ -16,6 +16,7 @@ import {
   type MetaOrderPayload,
 } from '@/lib/whatsapp/catalog-order'
 import type { OrderItem, ParsedInbound } from '@/lib/flows/types'
+import { formatFormReply, parseFormReply } from '@/lib/whatsapp/flow-form'
 import { recordReferralOrigin, type MetaReferral } from '@/lib/contacts/origin'
 import {
   handleTemplateWebhookChange,
@@ -65,9 +66,11 @@ interface WhatsAppMessage {
    * to advance the per-contact run.
    */
   interactive?: {
-    type: 'button_reply' | 'list_reply'
+    type: 'button_reply' | 'list_reply' | 'nfm_reply'
     button_reply?: { id: string; title: string }
     list_reply?: { id: string; title: string; description?: string }
+    /** A submitted in-chat form (WhatsApp Flow). */
+    nfm_reply?: { response_json?: string; body?: string; name?: string }
   }
   /** Present when the customer swipe-replies to one of our messages. */
   context?: { id: string }
@@ -664,6 +667,13 @@ async function processMessage(
     contentText = formatOrderSummary(orderItems, message.order.text)
   }
 
+  // A submitted in-chat form: show its answers in the inbox.
+  const formData =
+    message.interactive?.type === 'nfm_reply'
+      ? parseFormReply(message.interactive.nfm_reply?.response_json)
+      : null
+  if (formData) contentText = `📝 ${formatFormReply(formData)}`
+
   // Resolve swipe-reply context if present. A missing parent is fine —
   // we just store NULL and the UI renders the message without a quote.
   let replyToInternalId: string | null = null
@@ -791,7 +801,7 @@ async function processMessage(
     userId: configOwnerUserId,
     contactId: contactRecord.id,
     conversationId: conversation.id,
-    message: toFlowInbound(message, contentText, mediaUrl, interactiveReplyId, orderItems),
+    message: toFlowInbound(message, contentText, mediaUrl, interactiveReplyId, orderItems, formData),
     isFirstInboundMessage,
   })
   const flowConsumed = flowResult.consumed
@@ -902,7 +912,11 @@ function toFlowInbound(
   mediaUrl: string | null,
   interactiveReplyId: string | null,
   orderItems: OrderItem[] | null,
+  formData: Record<string, string> | null,
 ): ParsedInbound {
+  if (formData) {
+    return { kind: 'form_reply', data: formData, meta_message_id: message.id }
+  }
   if (interactiveReplyId) {
     return {
       kind: 'interactive_reply',
