@@ -12,19 +12,23 @@ import { toEcuadorInternational } from './phone-utils'
  * reuse the flows/automations senders (they all require an existing
  * contact + conversation to attach the outbound message to).
  *
- * Meta requires an approved template outside the 24h customer-service
- * window, and staff won't be in an active session with the bot number
- * — so this always sends via `aviso_pedido_nuevo` (or whichever
- * template name is configured), never a free-form text.
+ * It goes out as a template (`aviso_pedido_nuevo` by default). A
+ * template is free only inside a staff member's 24h customer-service
+ * window — i.e. if they wrote to the bot in the last 24h. The store
+ * runs without a Meta payment method, so outside that window Meta
+ * rejects it (131042). Staff therefore "clock in" by writing *turno*
+ * to the bot each day (see the flows engine's staff check-in), and
+ * only numbers with an open window are messaged at all.
  *
  * Best-effort by design: a failed staff notification must never break
  * the handoff itself. Callers should fire this and swallow/log errors
- * — the return value exists so a caller CAN record per-phone failures
+ * — the return value exists so a caller CAN record per-phone outcomes
  * somewhere inspectable (e.g. flow_run_events) instead of only a
  * server console log nobody's watching; a newline-in-parameter bug
  * here once went unnoticed across several live tests for exactly that
  * reason.
  */
+
 /**
  * Meta rejects a template parameter outright (error 132018) if it
  * contains a newline/tab or 4+ consecutive spaces — found live: every
@@ -40,9 +44,58 @@ export function sanitizeForTemplateParam(text: string): string {
     .trim()
 }
 
+/** ORDER_NOTIFICATION_PHONES as international digits ("0981…" accepted). */
+export function getStaffPhones(): string[] {
+  return (process.env.ORDER_NOTIFICATION_PHONES ?? '')
+    .split(',')
+    // Local "09..." numbers are accepted too — staff lists get typed
+    // the way people say them.
+    .map((p) => toEcuadorInternational(p.trim()))
+    .filter(Boolean)
+}
+
+const WINDOW_MS = 24 * 3_600_000
+
+/**
+ * When this phone last wrote to the bot, if within the last 24h (its
+ * WhatsApp customer-service window is open); null otherwise.
+ */
+export async function lastInboundWithinWindow(
+  db: SupabaseClient,
+  accountId: string,
+  phone: string,
+): Promise<Date | null> {
+  const { data: contacts } = await db
+    .from('contacts')
+    .select('id')
+    .eq('account_id', accountId)
+    .in('phone', [phone, `+${phone}`])
+  const contactIds = ((contacts ?? []) as { id: string }[]).map((c) => c.id)
+  if (contactIds.length === 0) return null
+  const { data: convs } = await db
+    .from('conversations')
+    .select('id')
+    .in('contact_id', contactIds)
+  const convIds = ((convs ?? []) as { id: string }[]).map((c) => c.id)
+  if (convIds.length === 0) return null
+  const { data: msg } = await db
+    .from('messages')
+    .select('created_at')
+    .in('conversation_id', convIds)
+    .eq('sender_type', 'customer')
+    .gte('created_at', new Date(Date.now() - WINDOW_MS).toISOString())
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  const createdAt = (msg as { created_at?: string } | null)?.created_at
+  return createdAt ? new Date(createdAt) : null
+}
+
 export interface NotifyStaffResult {
-  sent: string[]
+  sent: { phone: string; messageId: string }[]
   failed: { phone: string; error: string }[]
+  /** Configured numbers not messaged: no *turno* in the last 24h. */
+  skipped: string[]
 }
 
 export async function notifyStaffOfHandoff(
@@ -55,13 +108,8 @@ export async function notifyStaffOfHandoff(
     summary: string
   },
 ): Promise<NotifyStaffResult> {
-  const phones = (process.env.ORDER_NOTIFICATION_PHONES ?? '')
-    .split(',')
-    // Local "09..." numbers are accepted too — staff lists get typed
-    // the way people say them.
-    .map((p) => toEcuadorInternational(p.trim()))
-    .filter(Boolean)
-  if (phones.length === 0) return { sent: [], failed: [] }
+  const phones = getStaffPhones()
+  if (phones.length === 0) return { sent: [], failed: [], skipped: [] }
 
   const templateName = process.env.ORDER_NOTIFICATION_TEMPLATE ?? 'aviso_pedido_nuevo'
   const templateLanguage = process.env.ORDER_NOTIFICATION_TEMPLATE_LANG ?? 'es'
@@ -73,20 +121,36 @@ export async function notifyStaffOfHandoff(
     .single()
   if (configError || !config) {
     console.error('[staff-notify] no whatsapp_config for account, skipping', args.accountId)
-    return { sent: [], failed: phones.map((phone) => ({ phone, error: 'no whatsapp_config for account' })) }
+    return {
+      sent: [],
+      failed: phones.map((phone) => ({ phone, error: 'no whatsapp_config for account' })),
+      skipped: [],
+    }
   }
+
+  // Outside the 24h window Meta would reject (and, with a payment
+  // method, charge for) the template — only message staff on shift.
+  const onShift: string[] = []
+  const skipped: string[] = []
+  await Promise.all(
+    phones.map(async (phone) => {
+      const last = await lastInboundWithinWindow(db, args.accountId, phone).catch(() => null)
+      if (last) onShift.push(phone)
+      else skipped.push(phone)
+    }),
+  )
 
   const accessToken = decrypt(config.access_token)
   // Meta also caps a template body variable's length; a very long
   // running order shouldn't blow past that and fail every send.
   const summary = sanitizeForTemplateParam(args.summary).slice(0, 900) || '(sin detalle)'
 
-  const sent: string[] = []
+  const sent: { phone: string; messageId: string }[] = []
   const failed: { phone: string; error: string }[] = []
   await Promise.all(
-    phones.map(async (phone) => {
+    onShift.map(async (phone) => {
       try {
-        await sendTemplateMessage({
+        const { messageId } = await sendTemplateMessage({
           phoneNumberId: config.phone_number_id,
           accessToken,
           to: phone,
@@ -94,7 +158,7 @@ export async function notifyStaffOfHandoff(
           language: templateLanguage,
           params: [sanitizeForTemplateParam(args.contactName) || 'Cliente', summary],
         })
-        sent.push(phone)
+        sent.push({ phone, messageId })
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         console.error(`[staff-notify] failed to notify ${phone}:`, message)
@@ -102,5 +166,5 @@ export async function notifyStaffOfHandoff(
       }
     }),
   )
-  return { sent, failed }
+  return { sent, failed, skipped }
 }

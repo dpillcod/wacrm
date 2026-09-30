@@ -1761,5 +1761,9 @@
       "reindexTooltip": "Re-embed all documents (e.g. after adding an embeddings key)",
       "loading": "Loading…"
     }
+  },
+  "NotificationAlerts": {
+    "enable": "Enable order alerts",
+    "enableHint": "Play a sound and show a desktop pop-up when an order or notification arrives"
   }
 }

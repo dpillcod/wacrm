@@ -47,8 +47,13 @@ import {
   retrieveCatalogProducts,
   type CatalogProductCandidate,
 } from "../ai/catalog";
-import { notifyStaffOfHandoff, sanitizeForTemplateParam } from "../whatsapp/staff-notify";
-import { localEcuadorPhone } from "../whatsapp/phone-utils";
+import {
+  getStaffPhones,
+  notifyStaffOfHandoff,
+  sanitizeForTemplateParam,
+  type NotifyStaffResult,
+} from "../whatsapp/staff-notify";
+import { localEcuadorPhone, toEcuadorInternational } from "../whatsapp/phone-utils";
 import { INTERACTIVE_LIMITS } from "../whatsapp/meta-api";
 import { isPriceQuestion } from "./price-question";
 import { isGeneralQuestion } from "./general-question";
@@ -705,15 +710,9 @@ async function notifyHandoff(
   // result is logged to flow_run_events (not just console.error) —
   // a newline-in-parameter bug here once silently failed every real
   // handoff across several live tests before anyone noticed.
+  let staffResult: NotifyStaffResult | null = null;
   try {
-    const result = await alertStaff(db, run, args.summary);
-    if (result.failed.length > 0) {
-      await logEvent(db, run.id, "error", nodeKey, {
-        reason: "staff_notify_failed",
-        failed: result.failed,
-        sent: result.sent,
-      });
-    }
+    staffResult = await alertStaff(db, run, nodeKey, args.summary);
   } catch (err) {
     await logEvent(db, run.id, "error", nodeKey, {
       reason: "staff_notify_threw",
@@ -721,45 +720,22 @@ async function notifyHandoff(
     });
   }
 
-  // Extra in-app recipients beyond the single conversation owner — a
-  // real sale shouldn't hinge on exactly one person seeing exactly one
-  // notification. `assign_to` already gets its own row for free via
-  // the `on_conversation_assigned` DB trigger (migration 027), so it's
-  // excluded here to avoid double-notifying that same person.
-  const extraRecipients = (args.notifyUserIds ?? []).filter(
-    (id) => id && id !== args.assignTo,
-  );
-  if (extraRecipients.length > 0) {
-    try {
-      const contactNameVar = run.vars.contact_name;
-      const contactName =
-        typeof contactNameVar === "string" && contactNameVar.trim()
-          ? contactNameVar.trim()
-          : "un contacto";
-      const { error: notifyErr } = await db.from("notifications").insert(
-        extraRecipients.map((userId) => ({
-          account_id: run.account_id,
-          user_id: userId,
-          type: "conversation_assigned",
-          conversation_id: run.conversation_id,
-          contact_id: run.contact_id,
-          title: "Nueva conversación asignada",
-          body: `Ferrobot le asignó una conversación con ${contactName}`,
-        })),
-      );
-      if (notifyErr) {
-        await logEvent(db, run.id, "error", nodeKey, {
-          reason: "extra_notify_failed",
-          detail: notifyErr.message,
-        });
-      }
-    } catch (err) {
-      await logEvent(db, run.id, "error", nodeKey, {
-        reason: "extra_notify_threw",
-        detail: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
+  // In-app notifications for the whole team (free — and the one channel
+  // that works while WhatsApp alerts depend on staff being "on shift").
+  // Includes the shared shop-floor account and any notify_user_ids.
+  const noOneOnShift =
+    staffResult !== null &&
+    getStaffPhones().length > 0 &&
+    staffResult.sent.length === 0;
+  await notifyTeamInApp(db, run, nodeKey, {
+    title: orderTitle(run, "🧾 Pedido para atender"),
+    body:
+      args.summary +
+      (noOneOnShift
+        ? "\n\n⚠️ Ningún número del personal recibió el aviso por WhatsApp: nadie escribió *turno* al bot en las últimas 24 horas."
+        : ""),
+    extraUserIds: args.notifyUserIds,
+  });
 }
 
 /**
@@ -1345,6 +1321,10 @@ export async function dispatchInboundToFlows(
 ): Promise<DispatchInboundResult> {
   const db = supabaseAdmin();
   try {
+    // A staff member clocking in ("turno") — not a customer.
+    const checkIn = await handleStaffCheckIn(db, input);
+    if (checkIn) return checkIn;
+
     // A tap on a post-handoff follow-up question belongs to that ended
     // run, whatever the contact is doing now.
     if (input.message.kind === "interactive_reply") {
@@ -1842,8 +1822,15 @@ async function assignOrderNumber(db: AdminClient, run: FlowRunRow): Promise<void
 
 /** WhatsApp-template alert to staff numbers, with the customer's phone
  *  (staff act from their own phones, often before the customer reaches
- *  them, so a name alone isn't enough to get back to them). */
-async function alertStaff(db: AdminClient, run: FlowRunRow, summary: string) {
+ *  them, so a name alone isn't enough to get back to them). Each send
+ *  is logged with its message id, so a failure Meta reports later (see
+ *  recordDeliveryFailure) lands on this run instead of only in logs. */
+async function alertStaff(
+  db: AdminClient,
+  run: FlowRunRow,
+  nodeKey: string | null,
+  summary: string,
+): Promise<NotifyStaffResult> {
   const contactNameVar = run.vars.contact_name;
   const { data: contactRow } = await db
     .from("contacts")
@@ -1851,11 +1838,78 @@ async function alertStaff(db: AdminClient, run: FlowRunRow, summary: string) {
     .eq("id", run.contact_id!)
     .maybeSingle();
   const phone = localEcuadorPhone((contactRow as { phone?: string } | null)?.phone ?? "");
-  return notifyStaffOfHandoff(db, {
+  const result = await notifyStaffOfHandoff(db, {
     accountId: run.account_id,
     contactName: typeof contactNameVar === "string" ? contactNameVar.trim() : "",
     summary: phone ? `📞 ${phone} · ${summary}` : summary,
   });
+  for (const s of result.sent) {
+    await logEvent(db, run.id, "message_sent", nodeKey, {
+      reason: "staff_alert",
+      to: localEcuadorPhone(s.phone),
+      whatsapp_message_id: s.messageId,
+    });
+  }
+  if (result.failed.length > 0 || result.skipped.length > 0) {
+    await logEvent(db, run.id, "error", nodeKey, {
+      reason: result.failed.length > 0 ? "staff_notify_failed" : "staff_not_on_shift",
+      failed: result.failed,
+      not_on_shift: result.skipped.map(localEcuadorPhone),
+    });
+  }
+  return result;
+}
+
+function orderTitle(run: FlowRunRow, fallback: string): string {
+  const name =
+    typeof run.vars.contact_name === "string" && run.vars.contact_name.trim()
+      ? ` — ${run.vars.contact_name.trim()}`
+      : "";
+  if (run.vars.order_number) return `🧾 Pedido N° ${run.vars.order_number}${name}`;
+  if (run.vars.order_id) return `🛒 Pedido web N° ${run.vars.order_id}${name}`;
+  return `${fallback}${name}`;
+}
+
+/** One in-app notification per account member (plus extra user ids). */
+async function notifyTeamInApp(
+  db: AdminClient,
+  run: FlowRunRow,
+  nodeKey: string | null,
+  args: { title: string; body: string; extraUserIds?: string[] },
+): Promise<void> {
+  try {
+    const { data: members } = await db
+      .from("profiles")
+      .select("user_id")
+      .eq("account_id", run.account_id);
+    const userIds = new Set<string>(args.extraUserIds ?? []);
+    for (const m of (members ?? []) as { user_id: string | null }[]) {
+      if (m.user_id) userIds.add(m.user_id);
+    }
+    if (userIds.size === 0) return;
+    const { error } = await db.from("notifications").insert(
+      [...userIds].map((userId) => ({
+        account_id: run.account_id,
+        user_id: userId,
+        type: "conversation_assigned",
+        conversation_id: run.conversation_id,
+        contact_id: run.contact_id,
+        title: args.title,
+        body: args.body.slice(0, 1000),
+      })),
+    );
+    if (error) {
+      await logEvent(db, run.id, "error", nodeKey, {
+        reason: "in_app_notify_failed",
+        detail: error.message,
+      });
+    }
+  } catch (err) {
+    await logEvent(db, run.id, "error", nodeKey, {
+      reason: "in_app_notify_threw",
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 interface FollowUpState extends HandoffFollowUpConfig {
@@ -1910,11 +1964,14 @@ async function humanHasTakenOver(db: AdminClient, run: FlowRunRow): Promise<bool
 async function remindStaff(db: AdminClient, run: FlowRunRow, state: FollowUpState): Promise<void> {
   state.reminded += 1;
   const order = run.vars.order_number ? `Pedido N° ${run.vars.order_number} · ` : "";
-  await alertStaff(
-    db,
-    run,
-    `⚠️ RECORDATORIO ${state.reminded}/${state.max}: sigue sin atender · ${order}${state.summary}`,
-  ).catch((err) => console.error("[flows] staff reminder failed:", err));
+  const text = `⚠️ RECORDATORIO ${state.reminded}/${state.max}: sigue sin atender · ${order}${state.summary}`;
+  await alertStaff(db, run, null, text).catch((err) =>
+    console.error("[flows] staff reminder failed:", err),
+  );
+  await notifyTeamInApp(db, run, null, {
+    title: `⚠️ ${orderTitle(run, "Pedido")} sigue sin atender`,
+    body: text,
+  });
 }
 
 async function runFollowUp(db: AdminClient, runId: string): Promise<void> {
@@ -2015,6 +2072,56 @@ async function replyAfterHandoff(
   await saveVars(db, run, { ...run.vars, __after_handoff_ack_at: new Date(now).toISOString() });
   await sendEngineText(db, run, null, interpolateVars(template, run.vars), "after_handoff_reply");
   return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+}
+
+// ============================================================
+// Staff check-in — see whatsapp/staff-notify.ts. A WhatsApp alert to a
+// staff number is only free (and, without a Meta payment method, only
+// delivered at all) within 24h of that number writing to the bot. So
+// staff write "turno" when their shift starts; the bot confirms until
+// when their alerts are on, instead of showing them the customer menu.
+// ============================================================
+
+const CHECK_IN_WORDS = new Set(["turno", "avisos", "activar avisos", "activar turno"]);
+
+export function isStaffCheckInText(text: string): boolean {
+  return CHECK_IN_WORDS.has(normalizeForMatch(text));
+}
+
+export function checkInReply(now: Date = new Date()): string {
+  // Ecuador is UTC-5 year-round.
+  const until = new Date(now.getTime() + 24 * 3_600_000 - 5 * 3_600_000);
+  const hh = String(until.getUTCHours()).padStart(2, "0");
+  const mm = String(until.getUTCMinutes()).padStart(2, "0");
+  return `✅ Listo, sus avisos de pedidos por WhatsApp están activos hasta mañana a las ${hh}:${mm}. Escriba *turno* cada día al empezar 🙂`;
+}
+
+async function handleStaffCheckIn(
+  db: AdminClient,
+  input: DispatchInboundInput,
+): Promise<DispatchInboundResult | null> {
+  if (input.message.kind !== "text" || !isStaffCheckInText(input.message.text)) return null;
+  const staff = getStaffPhones();
+  if (staff.length === 0) return null;
+  const { data: contact } = await db
+    .from("contacts")
+    .select("phone")
+    .eq("id", input.contactId)
+    .maybeSingle();
+  const phone = toEcuadorInternational((contact as { phone?: string } | null)?.phone ?? "");
+  if (!phone || !staff.includes(phone)) return null;
+  try {
+    await engineSendText({
+      accountId: input.accountId,
+      userId: input.userId,
+      conversationId: input.conversationId,
+      contactId: input.contactId,
+      text: checkInReply(),
+    });
+  } catch (err) {
+    console.error("[flows] staff check-in reply failed:", err);
+  }
+  return { consumed: true, outcome: "no_match" };
 }
 
 // ============================================================
