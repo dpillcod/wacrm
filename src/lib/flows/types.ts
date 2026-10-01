@@ -55,6 +55,12 @@ export interface SendButtonsNodeConfig {
      * per version of the list, so confirming again moves on.
      */
     check_duplicates_var?: string;
+    /**
+     * Typed words that count as tapping this option ("listo", "sí",
+     * "consumidor final"…), compared ignoring case, accents and emoji.
+     * The visible title always counts too.
+     */
+    aliases?: string[];
   }>;
   /**
    * Optional escape hatch for when the customer types a plain-text
@@ -107,6 +113,12 @@ export interface SendListNodeConfig {
       title: string;
       description?: string;
       next_node_key: string;
+      /**
+       * Typed words that count as tapping this option ("listo", "sí",
+       * "consumidor final"…), compared ignoring case, accents and emoji.
+       * The visible title always counts too.
+       */
+      aliases?: string[];
     }>;
   }>;
   /**

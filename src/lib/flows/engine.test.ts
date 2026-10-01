@@ -1,4 +1,11 @@
 import { DEMO_STORE } from "../business/__fixtures__/demo-store";
+import {
+  isAckOnly,
+  isHumanRequest,
+  isPlainGreeting,
+  optionByText,
+  outOfRangeOption,
+} from "./engine";
 import { describe, it, expect } from "vitest";
 import {
   matchReplyId,
@@ -479,5 +486,60 @@ describe("evaluateConditionPredicate", () => {
         configValue: "anything",
       }),
     ).toBe(false);
+  });
+});
+
+describe("typed answers at a buttons/list node", () => {
+  const askMore = {
+    node_type: "send_buttons",
+    config: {
+      text: "¿Algo más?",
+      buttons: [{ reply_id: "done", title: "Ya terminé", next_node_key: "x", aliases: ["listo", "eso es todo"] }],
+    },
+  };
+  const menu = {
+    node_type: "send_list",
+    config: {
+      text: "Menú",
+      sections: [{ rows: [1, 2, 3].map((n) => ({ reply_id: `r${n}`, title: `Opción ${n}`, next_node_key: "x" })) }],
+    },
+  };
+
+  it("matches the title or an alias, ignoring case, accents and emoji", () => {
+    expect(optionByText(askMore, "ya termine")?.reply_id).toBe("done");
+    expect(optionByText(askMore, "Listo!")?.reply_id).toBe("done");
+    expect(optionByText(askMore, "✅ Eso es todo")?.reply_id).toBe("done");
+    expect(optionByText(askMore, "2 panes")).toBeNull();
+  });
+
+  it("flags an option number that doesn't exist", () => {
+    expect(outOfRangeOption(menu, "9")).toBe(3);
+    expect(outOfRangeOption(menu, "0")).toBe(3);
+    expect(outOfRangeOption(menu, "2")).toBeNull();
+    expect(outOfRangeOption(menu, "2 panes")).toBeNull();
+  });
+});
+
+describe("messages that are not order lines", () => {
+  it.each(["hola", "Buenas tardes", "hola qué tal", "buenos días"])("greeting: %s", (t) => {
+    expect(isPlainGreeting(t)).toBe(true);
+  });
+  it.each(["hola, quiero 2 panes", "pan", "que tal", "menú"])("not a plain greeting: %s", (t) => {
+    expect(isPlainGreeting(t)).toBe(false);
+  });
+  it.each(["sí", "Ok", "gracias", "👍", "Listo"])("acknowledgement: %s", (t) => {
+    expect(isAckOnly(t)).toBe(true);
+  });
+  it.each(["si tienen leche", "1 ok", "sal"])("not an acknowledgement: %s", (t) => {
+    expect(isAckOnly(t)).toBe(false);
+  });
+  it.each(["quiero hablar con alguien", "Necesito hablar con un asesor", "páseme con una persona", "un asesor por favor"])(
+    "asks for a person: %s",
+    (t) => {
+      expect(isHumanRequest(t)).toBe(true);
+    },
+  );
+  it.each(["2 panes", "jabón para persona sensible", "una persona me dijo que hay arroz flor"])("not a request: %s", (t) => {
+    expect(isHumanRequest(t)).toBe(false);
   });
 });

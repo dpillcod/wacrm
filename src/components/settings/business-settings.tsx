@@ -55,6 +55,10 @@ const TEXT_KEYS: (keyof Texts)[] = [
   "followUpYes",
   "followUpNo",
   "checkIn",
+  "invalidOption",
+  "orderAck",
+  "humanRequest",
+  "resumeOrder",
 ];
 const MESSAGE_KEYS: (keyof Board["messages"])[] = ["paid", "ready", "delivered", "cancelled"];
 const STATUS_KEYS: (keyof Board["statusReplies"])[] = [

@@ -1802,7 +1802,11 @@
         "editFailed": "Could not apply a list correction",
         "followUpYes": "Follow-up: customer was answered",
         "followUpNo": "Follow-up: customer still waiting",
-        "checkIn": "Staff check-in reply"
+        "checkIn": "Staff check-in reply",
+        "invalidOption": "Option number that doesn't exist",
+        "orderAck": "\"Yes\" / \"ok\" while writing the order",
+        "humanRequest": "Asks for a person while writing the order",
+        "resumeOrder": "Says hello again in the middle of an order"
       },
       "board": {
         "title": "Order board",

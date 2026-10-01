@@ -63,6 +63,14 @@ export interface BusinessSettings {
     outOfHours: string
     /** {hasta} = the time alerts stay on until. */
     checkIn: string
+    /** A typed option number that doesn't exist; {max} = the last number. */
+    invalidOption: string
+    /** "sí" / "ok" / "gracias" while an order list is being written. */
+    orderAck: string
+    /** "Quiero hablar con un asesor" while an order list is being written. */
+    humanRequest: string
+    /** A plain "hola" in the middle of an order (the list is kept). */
+    resumeOrder: string
   }
   orderBoard: {
     /** The pipeline whose cards are orders. */
@@ -130,6 +138,12 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
     outOfHours:
       'En este momento estamos fuera de nuestro horario de atención ({horario}). Su mensaje quedó registrado y le atenderemos {cuando} 🙂',
     checkIn: '✅ Listo, sus avisos de pedidos por WhatsApp están activos hasta mañana a las {hasta}. Escriba *turno* cada día al empezar 🙂',
+    invalidOption: 'Por favor escriba el número de una de las opciones (del 1 al {max}) 🙂',
+    orderAck: '👍 Escríbame el siguiente producto, o *listo* si ya terminó 🙂',
+    humanRequest:
+      'Con gusto le atiende una persona de nuestro equipo 🙂 Escriba *menú* y elija *Hablar con un asesor*. Si prefiere, primero terminamos su lista: escríbame *listo*.',
+    resumeOrder:
+      '¡Hola de nuevo! 👋 Seguimos con su pedido 🙂 Escríbame lo que le falta, o *listo* si ya terminó. Si prefiere empezar de cero, escriba *menú*.',
   },
   orderBoard: {
     pipelineName: 'Pedidos',

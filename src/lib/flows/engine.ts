@@ -197,6 +197,90 @@ export function optionByNumber(
   return hit ? { reply_id: hit.reply_id, title: hit.title } : null;
 }
 
+function optionsOf(node: {
+  node_type: string;
+  config: Record<string, unknown>;
+}): Array<{ reply_id: string; title: string; aliases?: string[] }> {
+  if (node.node_type === "send_buttons") {
+    return (node.config as unknown as SendButtonsNodeConfig).buttons ?? [];
+  }
+  if (node.node_type === "send_list") {
+    return ((node.config as unknown as SendListNodeConfig).sections ?? []).flatMap(
+      (section) => section.rows ?? [],
+    );
+  }
+  return [];
+}
+
+/**
+ * Typed text that IS an option: its title ("Ya terminé", "Consumidor
+ * final") or one of its aliases ("listo", "sí"), ignoring case, accents
+ * and emoji. Without this, "ya terminé" typed at the "¿algo más?" step
+ * was captured as if it were a product.
+ */
+export function optionByText(
+  node: { node_type: string; config: Record<string, unknown> },
+  text: string,
+): { reply_id: string; title: string } | null {
+  const said = normalizeForMatch(text);
+  if (!said) return null;
+  for (const o of optionsOf(node)) {
+    const names = [o.title, ...(o.aliases ?? [])].map(normalizeForMatch).filter(Boolean);
+    if (names.includes(said)) return { reply_id: o.reply_id, title: o.title };
+  }
+  return null;
+}
+
+/** The number of options when `text` is an option number that doesn't exist ("9" of 7), else null. */
+export function outOfRangeOption(
+  node: { node_type: string; config: Record<string, unknown> },
+  text: string,
+): number | null {
+  const index = parseOptionNumber(text);
+  const count = optionsOf(node).length;
+  return index !== null && count > 0 && (index < 0 || index >= count) ? count : null;
+}
+
+const GREETING_WORDS = new Set([
+  "hola", "ola", "holi", "buenas", "buenos", "buena", "buen", "dia", "dias", "tardes", "noches",
+  "saludos", "hello", "hi", "que", "tal", "como", "esta", "estas", "señorita", "senorita", "amigo",
+]);
+
+/** "hola", "buenas tardes", "hola que tal" — a greeting and nothing else. */
+export function isPlainGreeting(text: string): boolean {
+  const words = normalizeForMatch(text).split(" ").filter(Boolean);
+  return words.length > 0 && words.length <= 4 && words.every((w) => GREETING_WORDS.has(w)) &&
+    !words.every((w) => w === "que" || w === "tal" || w === "como" || w === "esta" || w === "estas");
+}
+
+const ACK_ONLY = new Set([
+  "si", "sii", "sip", "ok", "oki", "okey", "okay", "vale", "bueno", "bien", "perfecto", "dale",
+  "claro", "gracias", "muchas gracias", "ok gracias", "si gracias", "listo gracias", "de acuerdo",
+  "entendido", "ya", "aja", "mmm", "listo", "ya termine", "eso", "👍",
+]);
+
+/** A bare acknowledgement ("sí", "ok", "gracias") — never an order line. */
+export function isAckOnly(text: string): boolean {
+  const said = normalizeForMatch(text);
+  return said === "" ? /^\s*(👍|👌|🙏|🙂|😊)+\s*$/u.test(text) : ACK_ONLY.has(said);
+}
+
+/** "Quiero hablar con un asesor / una persona / alguien". */
+export function isHumanRequest(text: string): boolean {
+  const said = normalizeForMatch(text);
+  return said.length <= 80 && (
+    /\b(hablar|comunicar(me)?|atender?me|contactar|pasar(me)?)\b.*\b(asesor|asesora|persona|alguien|humano|agente|vendedor|vendedora|encargad[oa]|operador[a]?)\b/.test(said) ||
+    /\b(un|una) (asesor|asesora|persona|humano|agente)\b/.test(said) && said.split(" ").length <= 6
+  );
+}
+
+/** Whether the run is holding an order list the customer is still building. */
+function runHoldsList(run: FlowRunRow): boolean {
+  return Object.entries(run.vars).some(
+    ([k, v]) => k.endsWith("_numbered") && typeof v === "string" && v.trim() !== "",
+  );
+}
+
 /**
  * Case-insensitive contains/exact match against a list of keywords.
  * Used by the trigger evaluator. Stable enough that the v3 builder
@@ -750,7 +834,7 @@ async function notifyHandoff(
     getStaffPhones(biz).length > 0 &&
     staffResult.sent.length === 0;
   await notifyTeamInApp(db, run, nodeKey, {
-    title: orderTitle(run, "🧾 Pedido para atender"),
+    title: orderTitle(run, run.vars.order_text ? "🧾 Pedido para atender" : "💬 Cliente para atender"),
     body:
       args.summary +
       (noOneOnShift
@@ -1428,6 +1512,24 @@ export async function dispatchInboundToFlows(
       const isWaitingForCustomer =
         waitingNode?.node_type === "collect_input" &&
         (waitingNode.config as unknown as CollectInputNodeConfig).silent === true;
+      // A plain "hola" in the middle of an order would throw the list
+      // away; say we're still on it instead ("menú" still starts over).
+      if (
+        restartFlow?.entry_node_id &&
+        !isWaitingForCustomer &&
+        input.message.kind === "text" &&
+        isPlainGreeting(input.message.text) &&
+        runHoldsList(activeRun)
+      ) {
+        await sendEngineText(
+          db,
+          activeRun,
+          activeRun.current_node_key,
+          (await bizOf(db, input.accountId)).texts.resumeOrder,
+          "resume_order",
+        );
+        return { consumed: true, flow_run_id: activeRun.id, outcome: "no_match" };
+      }
       if (restartFlow?.entry_node_id && !isWaitingForCustomer) {
         await endRun(db, activeRun.id, "timed_out", "restarted_by_keyword");
         const restartNodes = await loadAllNodes(db, restartFlow.id);
@@ -2008,10 +2110,10 @@ async function answerOrderStatusQuestion(
     const node = activeRun.current_node_key
       ? await loadNode(db, activeRun.flow_id, activeRun.current_node_key)
       : null;
-    const waitingForCustomer =
-      node?.node_type === "collect_input" &&
-      (node.config as unknown as CollectInputNodeConfig).silent === true;
-    if (!status.found || waitingForCustomer) return null;
+    // A run asking for typed input (a complaint, billing data, a web
+    // order waiting for this message…) owns the reply: "el pedido llegó
+    // incompleto" there is a complaint, not a status question.
+    if (!status.found || node?.node_type === "collect_input") return null;
   }
   try {
     await engineSendText({
@@ -2341,6 +2443,21 @@ async function replyAfterHandoff(
     : 0;
   if (now - lastAck < AFTER_HANDOFF_MIN_GAP_MS) return null;
   if (await humanHasTakenOver(db, run)) return null;
+  // Staff moving the order's card means someone is on it — "your order
+  // is with our advisor, send them your list" would be stale by then.
+  if (typeof run.vars.__deal_id === "string") {
+    const { data: deal } = await db
+      .from("deals")
+      .select("stage_id")
+      .eq("id", run.vars.__deal_id)
+      .maybeSingle();
+    const stageId = (deal as { stage_id?: string } | null)?.stage_id;
+    if (stageId) {
+      const { data: stage } = await db.from("pipeline_stages").select("name").eq("id", stageId).maybeSingle();
+      const kind = orderStageKind((stage as { name?: string } | null)?.name ?? "");
+      if (kind && kind !== "new") return null;
+    }
+  }
 
   await saveVars(db, run, { ...run.vars, __after_handoff_ack_at: new Date(now).toISOString() });
   await sendEngineText(db, run, null, interpolateVars(template, run.vars), "after_handoff_reply");
@@ -2464,6 +2581,14 @@ async function claimWaitingRun(
     }
     run.contact_id = input.contactId;
     run.conversation_id = input.conversationId;
+    // The order's card follows: column messages, "¿dónde está mi
+    // pedido?" and the survey must reach the phone that actually wrote.
+    if (typeof run.vars.__deal_id === "string") {
+      await db
+        .from("deals")
+        .update({ contact_id: input.contactId, conversation_id: input.conversationId })
+        .eq("id", run.vars.__deal_id);
+    }
     await logEvent(db, run.id, "node_entered", node.node_key, {
       claimed_by_contact: input.contactId,
       claimed_ref: match[1],
@@ -2971,15 +3096,19 @@ async function handleReplyForActiveRun(
   // (handled in the pending-disambiguation branch below).
   // Likewise when a list edit is in progress or this node takes list
   // corrections — there "3" means line 3 of the customer's list.
+  // The option's title or an alias typed out ("ya terminé", "listo",
+  // "consumidor final") counts too — even where numbers mean list lines.
   if (
     message.kind === "text" &&
     !run.vars.__pending_disambiguation &&
     !run.vars.__pending_clarification &&
     !run.vars.__pending_line_edit &&
-    !run.vars.__pending_list_answer &&
-    !currentTextFallback?.edit_list_var
+    !run.vars.__pending_list_answer
   ) {
-    const picked = optionByNumber(currentNode, message.text);
+    const byNumber = currentTextFallback?.edit_list_var
+      ? null
+      : optionByNumber(currentNode, message.text);
+    const picked = byNumber ?? optionByText(currentNode, message.text);
     if (picked) {
       message = {
         kind: "interactive_reply",
@@ -2987,6 +3116,15 @@ async function handleReplyForActiveRun(
         reply_title: picked.title,
         meta_message_id: message.meta_message_id,
       };
+    } else if (!currentTextFallback?.edit_list_var) {
+      // "9" on a 7-option menu: say which numbers exist instead of
+      // treating "9" as the start of an order.
+      const max = outOfRangeOption(currentNode, message.text);
+      if (max) {
+        const biz = await bizOf(db, run.account_id);
+        await sendEngineText(db, run, currentNode.node_key, renderText(biz.texts.invalidOption, { max: String(max) }), "invalid_option");
+        return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+      }
     }
   }
 
@@ -3029,6 +3167,19 @@ async function handleReplyForActiveRun(
   if (message.kind === "text" && capturesOrderList && isBlockedProduct(bizForRules, message.text)) {
     await sendEngineText(db, run, currentNode.node_key, bizForRules.blockedProducts.reply, "alcohol_declined");
     return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+  }
+  // "sí" / "ok" / "gracias" and "quiero hablar con un asesor" are not
+  // products — answer them instead of adding them to the list.
+  if (message.kind === "text" && capturesOrderList && !run.vars.__pending_clarification) {
+    const reply = isHumanRequest(message.text)
+      ? bizForRules.texts.humanRequest
+      : isAckOnly(message.text)
+        ? bizForRules.texts.orderAck
+        : null;
+    if (reply) {
+      await sendEngineText(db, run, currentNode.node_key, reply, "not_an_order_line");
+      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
   }
 
   // A price/total question ("cuánto es", "cuánto le debo"...) is
