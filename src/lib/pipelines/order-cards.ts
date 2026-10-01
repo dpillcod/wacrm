@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { ORDER_PIPELINE_NAME } from './order-stages'
+import { loadBusinessSettings } from '../business/settings'
 
 // ============================================================
 // Server-side helpers for the order board (see order-stages.ts):
@@ -13,11 +13,12 @@ export async function findOrderPipeline(
   db: SupabaseClient,
   accountId: string,
 ): Promise<{ pipelineId: string; firstStageId: string } | null> {
+  const { orderBoard } = await loadBusinessSettings(db, accountId)
   const { data: pipeline } = await db
     .from('pipelines')
     .select('id')
     .eq('account_id', accountId)
-    .eq('name', ORDER_PIPELINE_NAME)
+    .eq('name', orderBoard.pipelineName)
     .limit(1)
     .maybeSingle()
   if (!pipeline) return null

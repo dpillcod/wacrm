@@ -8,6 +8,7 @@ import { generateReply } from './generate'
 import { buildSystemPrompt } from './defaults'
 import { buildHandoffSummary } from './handoff'
 import { pickCrossSellSuggestion } from './cross-sell'
+import { loadBusinessSettings } from '../business/settings'
 import { logAiUsage } from './usage'
 import { latestUserMessage } from './query'
 import { engineSendText, engineSendProduct, engineSendProductList } from '@/lib/flows/meta-send'
@@ -265,7 +266,11 @@ export async function dispatchInboundToAiReply(
     // never competing with a "your order is complete" or handoff
     // message. Deterministic keyword match, not the model's call — see
     // cross-sell.ts for why.
-    const crossSell = pickCrossSellSuggestion(question ?? '', messages)
+    const crossSell = pickCrossSellSuggestion(
+      question ?? '',
+      messages,
+      (await loadBusinessSettings(db, accountId)).crossSell,
+    )
     if (crossSell) {
       text = `${text}\n\n${crossSell}`
     }

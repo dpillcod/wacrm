@@ -1602,6 +1602,7 @@
       "profile": "Your profile",
       "security": "Login & security",
       "appearance": "Appearance",
+      "business": "My business",
       "whatsapp": "WhatsApp",
       "templates": "Templates",
       "catalog": "Catalog products",
@@ -1718,6 +1719,118 @@
       "newKeyDesc": "Name it after the integration that will use it, and grant only the scopes it needs.",
       "done": "Done",
       "networkError": "Could not reach the server"
+    },
+    "business": {
+      "title": "My business",
+      "description": "Everything the bot needs to know about your business: hours, contacts, rules and the texts it sends. Changes reach the bot within a minute.",
+      "loading": "Loading…",
+      "loadFailed": "Could not load the business settings.",
+      "adminOnlyHint": "Only account admins can change these settings.",
+      "save": "Save changes",
+      "saving": "Saving...",
+      "saveFailed": "Failed to save the business settings",
+      "saveSuccess": "Business settings saved",
+      "identity": {
+        "title": "Business",
+        "desc": "Who the bot works for.",
+        "name": "Business name",
+        "city": "City",
+        "country": "Country",
+        "utcOffset": "UTC offset (hours)",
+        "utcOffsetHint": "Your local time zone, e.g. -5 for Ecuador, Colombia or Peru.",
+        "countryCode": "Country calling code",
+        "countryCodeHint": "Turns local numbers (0991234567) into international ones, e.g. 593.",
+        "aiDescription": "What you sell (for the AI)",
+        "aiDescriptionHint": "One line the AI uses to understand orders, e.g. \"supermarket, hardware, stationery\"."
+      },
+      "links": {
+        "title": "Links & contacts",
+        "desc": "Sent to customers by the bot where relevant.",
+        "website": "Website",
+        "shop": "Online shop",
+        "review": "Google review link",
+        "reviewHint": "Sent to customers who rate their order \"Excellent\". Leave empty to skip.",
+        "callCenter": "Call center phone",
+        "woocommerce": "WooCommerce store URL",
+        "woocommerceHint": "The API keys stay in the server environment (WOOCOMMERCE_KEY / _SECRET).",
+        "birthdayField": "Birthday custom field",
+        "birthdayFieldHint": "Contact field (MM-DD) the daily birthday flow looks at."
+      },
+      "hours": {
+        "title": "Opening hours",
+        "desc": "Outside these hours the bot tells customers when you'll reply.",
+        "alwaysOpen": "Always open (no out-of-hours notice)",
+        "open": "Open",
+        "to": "to",
+        "hint": "Whole hours in 24h format, e.g. 7 to 22 = 7am to 10pm.",
+        "days": {
+          "sun": "Sunday",
+          "mon": "Monday",
+          "tue": "Tuesday",
+          "wed": "Wednesday",
+          "thu": "Thursday",
+          "fri": "Friday",
+          "sat": "Saturday"
+        }
+      },
+      "staff": {
+        "title": "Staff alerts",
+        "desc": "Numbers that get a WhatsApp alert for each new order. Free only if that person wrote to the bot in the last 24h, so staff write the check-in word each day.",
+        "phones": "Staff numbers (one per line)",
+        "phonesHint": "Local or international format.",
+        "checkInWords": "Check-in words",
+        "checkInWordsHint": "Comma-separated, e.g. turno, avisos."
+      },
+      "rules": {
+        "title": "Order rules",
+        "desc": "What the bot must not take, and friendly suggestions.",
+        "blockedTerms": "Products not sold over WhatsApp",
+        "blockedTermsHint": "Comma-separated words. Alcohol is included by default (Meta's Commerce Policy).",
+        "blockedReply": "Reply when a blocked product is ordered",
+        "crossSell": "Suggestions (one per line: word = suggestion)",
+        "crossSellHint": "E.g. \"bread = By the way, would you like some cheese? 🙂\". At most one per conversation."
+      },
+      "texts": {
+        "title": "Bot texts",
+        "desc": "Fixed messages the bot sends. Words in curly braces (like pedido or horario) are filled in automatically — keep them as they are.",
+        "outOfHours": "Out of hours",
+        "idleNudge": "Customer went quiet",
+        "captureFailed": "Could not save the last answer",
+        "fallbackHandoff": "Did not understand → passes to an agent",
+        "nonTextReply": "Audio or unsupported message",
+        "disambiguationPrompt": "Which of these products",
+        "editFailed": "Could not apply a list correction",
+        "followUpYes": "Follow-up: customer was answered",
+        "followUpNo": "Follow-up: customer still waiting",
+        "checkIn": "Staff check-in reply"
+      },
+      "board": {
+        "title": "Order board",
+        "desc": "Messages sent when a card moves to a column, the satisfaction survey, and the answers to \"where is my order?\". The word pedido in curly braces becomes the order number.",
+        "pipelineName": "Order pipeline name",
+        "pipelineNameHint": "The pipeline whose cards are orders.",
+        "messages": {
+          "paid": "Moved to Paid",
+          "ready": "Moved to Ready / On the way",
+          "delivered": "Moved to Delivered",
+          "cancelled": "Moved to Cancelled"
+        },
+        "csatQuestion": "Survey question",
+        "csatExcellent": "Reply to \"Excellent\"",
+        "csatExcellentHint": "The word resena in curly braces becomes the Google review link.",
+        "csatGood": "Reply to \"Good\"",
+        "csatBad": "Reply to \"Bad\"",
+        "statusTitle": "\"Where is my order?\" answers",
+        "status": {
+          "new": "Order is new",
+          "quoted": "Order was quoted",
+          "paid": "Order is paid",
+          "ready": "Order is ready / on the way",
+          "delivered": "Order was delivered",
+          "cancelled": "Order was cancelled",
+          "none": "No recent order"
+        }
+      }
     },
     "deals": {
       "title": "Deals & currency",

@@ -1,4 +1,5 @@
 import { timingSafeEqual } from 'node:crypto'
+import { loadBusinessSettings } from '@/lib/business/settings'
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { startFlowRunForExternalEvent } from '@/lib/flows/engine'
@@ -28,17 +29,12 @@ import { startFlowRunForExternalEvent } from '@/lib/flows/engine'
 // A future multi-account rollout would want that name configurable
 // per account instead of hardcoded here.
 //
-// Timezone note: "today" is computed from the server's UTC clock, not
-// each contact's local time — for a once-a-day birthday message (not
-// a time-sensitive transactional one) a few hours of slop across a
-// date boundary is an acceptable trade-off against the complexity of
-// per-account timezones.
+// Timezone note: "today" is the business's local date (UTC offset from
+// its settings), not each contact's — fine for a once-a-day message.
 // ============================================================
 
-const BIRTHDAY_FIELD_NAME = 'Fecha de nacimiento'
-
-function todayMonthDay(): string {
-  const now = new Date()
+function todayMonthDay(utcOffsetHours: number): string {
+  const now = new Date(Date.now() + utcOffsetHours * 3_600_000)
   const mm = String(now.getUTCMonth() + 1).padStart(2, '0')
   const dd = String(now.getUTCDate()).padStart(2, '0')
   return `${mm}-${dd}`
@@ -60,7 +56,6 @@ export async function GET(request: Request) {
   }
 
   const db = supabaseAdmin()
-  const monthDay = todayMonthDay()
 
   const { data: configs, error: configErr } = await db
     .from('whatsapp_config')
@@ -76,11 +71,13 @@ export async function GET(request: Request) {
   let skipped = 0
 
   for (const config of configs as { account_id: string; birthday_flow_id: string }[]) {
+    const biz = await loadBusinessSettings(db, config.account_id)
+    const monthDay = todayMonthDay(biz.utcOffsetHours)
     const { data: fieldRow, error: fieldErr } = await db
       .from('custom_fields')
       .select('id')
       .eq('account_id', config.account_id)
-      .eq('field_name', BIRTHDAY_FIELD_NAME)
+      .eq('field_name', biz.birthdayFieldName)
       .maybeSingle()
     if (fieldErr || !fieldRow) {
       // No birthday field configured for this account yet — nothing

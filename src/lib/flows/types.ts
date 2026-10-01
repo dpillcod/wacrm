@@ -246,6 +246,21 @@ export interface NodeSideEffectsConfig {
   order_card_stage?: string;
   /** In-app notification to the whole team; `{{vars.*}}` interpolated. */
   notify_team?: string;
+  /**
+   * "Repeat my last order": copy the list var of this name (e.g.
+   * "order_text", plus its `_numbered` twin) from the contact's latest
+   * handed-off run of this same flow. Nothing is set when there is no
+   * earlier order — follow with a `condition` on the var (present /
+   * absent) to branch.
+   */
+  prefill_last_order?: string;
+  /**
+   * Answer "where is my order?": send the status reply for the
+   * contact's latest card on the order board (texts in Settings → My
+   * business). The same answer is given automatically when a customer
+   * asks in their own words.
+   */
+  order_status_reply?: boolean;
 }
 
 /** Keeping a handed-off customer company — see HandoffNodeConfig.follow_up. */

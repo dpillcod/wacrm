@@ -2,18 +2,17 @@
 // Pure aggregation for the dashboard's orders panel (Ferrobot).
 // The API route (/api/metrics/orders) does the queries; everything
 // that turns rows into numbers lives here so it's unit-testable.
-// Days are bucketed in Ecuador time (UTC-5, no DST).
+// Days are bucketed in the business's local time (UTC offset from
+// its settings, no DST).
 // ============================================================
 
-const ECUADOR_OFFSET_MS = -5 * 3_600_000
-
-export function ecuadorDayKey(iso: string | Date): string {
+export function localDayKey(iso: string | Date, utcOffsetHours: number): string {
   const t = (typeof iso === 'string' ? new Date(iso) : iso).getTime()
-  return new Date(t + ECUADOR_OFFSET_MS).toISOString().slice(0, 10)
+  return new Date(t + utcOffsetHours * 3_600_000).toISOString().slice(0, 10)
 }
 
 export interface DailyOrdersPoint {
-  /** YYYY-MM-DD (Ecuador). */
+  /** YYYY-MM-DD (local). */
   day: string
   whatsapp: number
   web: number
@@ -25,21 +24,22 @@ export function dailyOrderSeries(
   whatsappDates: string[],
   webDates: string[],
   now: Date = new Date(),
+  utcOffsetHours = -5,
 ): DailyOrdersPoint[] {
   const points: DailyOrdersPoint[] = []
   const index = new Map<string, DailyOrdersPoint>()
   for (let i = days - 1; i >= 0; i -= 1) {
-    const day = ecuadorDayKey(new Date(now.getTime() - i * 86_400_000))
+    const day = localDayKey(new Date(now.getTime() - i * 86_400_000), utcOffsetHours)
     const p = { day, whatsapp: 0, web: 0 }
     points.push(p)
     index.set(day, p)
   }
   for (const d of whatsappDates) {
-    const p = index.get(ecuadorDayKey(d))
+    const p = index.get(localDayKey(d, utcOffsetHours))
     if (p) p.whatsapp += 1
   }
   for (const d of webDates) {
-    const p = index.get(ecuadorDayKey(d))
+    const p = index.get(localDayKey(d, utcOffsetHours))
     if (p) p.web += 1
   }
   return points

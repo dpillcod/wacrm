@@ -25,6 +25,7 @@ import { generateAnthropic } from "../ai/providers/anthropic";
 import { generateOpenAi } from "../ai/providers/openai";
 import { logAiUsage } from "../ai/usage";
 import type { AiConfig } from "../ai/types";
+import { loadBusinessSettings, type BusinessSettings } from "../business/settings";
 
 const CLARIFY_TIMEOUT_MS = 12_000;
 
@@ -33,8 +34,15 @@ export interface ReviewResult {
   question: string | null;
 }
 
-const SHARED_RULES = `Eres el asistente de pedidos de Ferrotienda, una tienda en Cuenca, Ecuador (supermercado, ferretería, bazar, papelería, panadería, cosméticos, accesorios de tecnología, mascotas).
-Un cliente está armando por WhatsApp una lista de productos que luego un asesor va a cotizar y despachar.
+/** Who the assistant works for, from the business settings. */
+export function businessIntro(biz: BusinessSettings): string {
+  const name = biz.name.trim() || "la tienda";
+  const place = [biz.city, biz.country].map((x) => x.trim()).filter(Boolean).join(", ");
+  const what = biz.aiBusinessDescription.trim();
+  return `Eres el asistente de pedidos de ${name}${place ? `, en ${place}` : ""}${what ? ` (${what})` : ""}.`;
+}
+
+const RULES = `Un cliente está armando por WhatsApp una lista de productos que luego un asesor va a cotizar y despachar.
 
 Reglas:
 - NUNCA hables de precios, costos, descuentos ni disponibilidad.
@@ -44,34 +52,31 @@ Reglas:
 - Trata al cliente de "usted". Sé breve y cordial.
 - Responde SOLO con JSON válido, sin texto antes ni después.`;
 
-const REVIEW_INSTRUCTIONS = `${SHARED_RULES}
-
-Tarea: revisa las líneas del pedido. Si una línea es vaga y a un empleado le faltaría un dato para tomar el producto correcto de la percha (tamaño, presentación, medida, watts, color, sabor, tipo), escribe UNA pregunta corta para el cliente. Usa las referencias del catálogo solo para sugerir opciones reales (ej. "¿de 2 litros o de 3 litros?"); no menciones códigos. NO preguntes si la línea ya es razonablemente clara (ej. "1 libra de arroz", "10 panes de agua", "1 cuaderno de 100 hojas cuadros"). Las referencias pueden estar incompletas: si no ves todas las presentaciones, pregunta de forma abierta con ejemplos comunes (ej. "¿De qué tamaño: 1, 2 o 3 litros?") en vez de limitarte a las referencias.
+const REVIEW_TASK = `Tarea: revisa las líneas del pedido. Si una línea es vaga y a un empleado le faltaría un dato para tomar el producto correcto de la percha (tamaño, presentación, medida, watts, color, sabor, tipo), escribe UNA pregunta corta para el cliente. Usa las referencias del catálogo solo para sugerir opciones reales (ej. "¿de 2 litros o de 3 litros?"); no menciones códigos. NO preguntes si la línea ya es razonablemente clara (ej. "1 libra de arroz", "10 panes de agua", "1 cuaderno de 100 hojas cuadros"). Las referencias pueden estar incompletas: si no ves todas las presentaciones, pregunta de forma abierta con ejemplos comunes (ej. "¿De qué tamaño: 1, 2 o 3 litros?") en vez de limitarte a las referencias.
 Nombra siempre el producto en la pregunta (ej. "¿La Coca-Cola la desea de 1, 2 o 3 litros?").
 Si hay una sola línea vaga, haz una sola pregunta corta. Si hay varias, empieza con "Para anotar bien su pedido:" y pon una línea por producto con viñeta "•" (ej. "• Foco: ¿LED o ahorrador? ¿De cuántos watts?"), máximo 3 productos.
 
 Formato: {"lines": ["línea 1", "línea 2"], "question": "pregunta" o null}
 "lines" debe tener una entrada por cada línea recibida, en el mismo orden.`;
 
-const APPLY_INSTRUCTIONS = `${SHARED_RULES}
-
-Tarea: al cliente se le hizo una pregunta sobre su pedido y respondió. Reescribe las líneas incorporando lo que respondió. Si la respuesta no aclara algo, deja esa línea como estaba. Si en la respuesta pide productos nuevos, agrégalos como líneas nuevas al final. No hagas más preguntas.
+const APPLY_TASK = `Tarea: al cliente se le hizo una pregunta sobre su pedido y respondió. Reescribe las líneas incorporando lo que respondió. Si la respuesta no aclara algo, deja esa línea como estaba. Si en la respuesta pide productos nuevos, agrégalos como líneas nuevas al final. No hagas más preguntas.
 
 Formato: {"lines": ["línea 1", "línea 2"]}`;
 
-const EDIT_INSTRUCTIONS = `${SHARED_RULES}
-
-Tarea: el cliente revisó su lista y pide un cambio. Aplica EXACTAMENTE lo que pide: quitar, cambiar cantidad, reemplazar o agregar productos. Los números que menciona se refieren a la numeración de la lista ("quitar el 3" = quitar la línea 3). No toques las demás líneas.
+const EDIT_TASK = `Tarea: el cliente revisó su lista y pide un cambio. Aplica EXACTAMENTE lo que pide: quitar, cambiar cantidad, reemplazar o agregar productos. Los números que menciona se refieren a la numeración de la lista ("quitar el 3" = quitar la línea 3). No toques las demás líneas.
 Si no se entiende qué quiere cambiar, devuelve la lista sin cambios con "understood": false.
 
 Formato: {"lines": ["línea 1", "línea 2"], "understood": true}`;
 
-const DUPLICATES_INSTRUCTIONS = `${SHARED_RULES}
-
-Tarea: revisa si en la lista hay productos repetidos o que parecen el mismo producto escrito dos veces (ej. "1 libra de queso fresco" y "2 libras de queso fresco"). Productos distintos de la misma familia NO son repetidos (ej. "Coca-Cola de 2 litros" y "Coca-Cola de 3 litros" son distintos).
+const DUPLICATES_TASK = `Tarea: revisa si en la lista hay productos repetidos o que parecen el mismo producto escrito dos veces (ej. "1 libra de queso fresco" y "2 libras de queso fresco"). Productos distintos de la misma familia NO son repetidos (ej. "Coca-Cola de 2 litros" y "Coca-Cola de 3 litros" son distintos).
 Si hay repetidos, escribe UNA pregunta corta para saber si el cliente quiere sumar las cantidades o si una de las líneas era una corrección, nombrando el producto y las cantidades. Si no hay, "question": null.
 
 Formato: {"question": "pregunta" o null}`;
+
+async function instructions(db: SupabaseClient, accountId: string, task: string): Promise<string> {
+  const biz = await loadBusinessSettings(db, accountId);
+  return `${businessIntro(biz)}\n${RULES}\n\n${task}`;
+}
 
 /**
  * The catalog search query for a line: without the quantity and vague
@@ -229,7 +234,7 @@ export async function reviewOrderLines(
       lines
         .map((_, i) => `${i + 1}. ${hints[i].map((h) => h.name).join(" | ") || "(sin referencias)"}`)
         .join("\n");
-    const raw = await callModel(db, config, accountId, conversationId, REVIEW_INSTRUCTIONS, content);
+    const raw = await callModel(db, config, accountId, conversationId, await instructions(db, accountId, REVIEW_TASK), content);
     return parseReviewResponse(raw, lines.length);
   } catch (err) {
     console.error("[order-clarify] review failed:", err);
@@ -251,7 +256,7 @@ export async function applyClarificationAnswer(
       numbered(args.lines) +
       `\n\nPregunta que se le hizo al cliente: ${args.question}` +
       `\nRespuesta del cliente: ${args.answer}`;
-    const raw = await callModel(db, config, accountId, conversationId, APPLY_INSTRUCTIONS, content);
+    const raw = await callModel(db, config, accountId, conversationId, await instructions(db, accountId, APPLY_TASK), content);
     return parseApplyResponse(raw, args.lines.length);
   } catch (err) {
     console.error("[order-clarify] apply failed:", err);
@@ -279,7 +284,7 @@ export async function editOrderList(
   try {
     const content =
       `Lista actual:\n${numbered(args.lines)}\n\nCambio que pide el cliente: ${args.instruction}`;
-    const raw = await callModel(db, config, accountId, conversationId, EDIT_INSTRUCTIONS, content);
+    const raw = await callModel(db, config, accountId, conversationId, await instructions(db, accountId, EDIT_TASK), content);
     return parseEditResponse(raw);
   } catch (err) {
     console.error("[order-clarify] edit failed:", err);
@@ -307,7 +312,7 @@ export async function findDuplicateQuestion(
       config,
       accountId,
       conversationId,
-      DUPLICATES_INSTRUCTIONS,
+      await instructions(db, accountId, DUPLICATES_TASK),
       `Lista:\n${numbered(lines)}`,
     );
     return parseDuplicatesResponse(raw);

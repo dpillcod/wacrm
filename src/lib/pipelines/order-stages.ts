@@ -1,14 +1,16 @@
+import { renderText, type BusinessSettings } from '../business/settings'
+
 // ============================================================
 // The store's order board: a pipeline named "Pedidos" whose cards are
 // orders (from WhatsApp or the web shop). Moving a card to some stages
 // messages the customer — free only while their 24h WhatsApp window is
 // open (they wrote in the last 24h); otherwise staff are told to call.
 // Stage names are matched loosely (accents/case ignored), so renaming a
-// column in the UI keeps working as long as the words stay.
+// column in the UI keeps working as long as the words stay. The board's
+// name and every customer message come from the business settings.
 // ============================================================
 
-export const ORDER_PIPELINE_NAME = 'Pedidos'
-
+/** Columns for a new order board. */
 export const ORDER_STAGES: { name: string; color: string }[] = [
   { name: 'Nuevo', color: '#3b82f6' },
   { name: 'Cotizado', color: '#8b5cf6' },
@@ -47,27 +49,51 @@ export function orderRefFromTitle(title: string): string {
 }
 
 /** What the customer is told when their card reaches this stage, if anything. */
-export function stageMessage(kind: OrderStageKind | null, orderRef: string): string | null {
-  const pedido = orderRef ? `su pedido ${orderRef}` : 'su pedido'
-  const Pedido = orderRef ? `Su pedido ${orderRef}` : 'Su pedido'
-  switch (kind) {
-    case 'paid':
-      return `🙌 Recibimos el pago de ${pedido}, ¡gracias! Enseguida lo preparamos.`
-    case 'ready':
-      return `✅ ${Pedido} ya está listo. Si lo retira, ya puede pasar por la tienda; si pidió entrega a domicilio, ya va en camino 🛵`
-    case 'delivered':
-      return '¡Gracias por su compra en Ferrotienda! 🙂'
-    case 'cancelled':
-      return `${Pedido} fue cancelado. Si fue un error o necesita algo, escríbanos por aquí 🙂`
-    default:
-      // New and quoted: staff talk to the customer themselves (/total).
-      return null
-  }
+export function stageMessage(
+  kind: OrderStageKind | null,
+  orderRef: string,
+  biz: BusinessSettings,
+): string | null {
+  const m = biz.orderBoard.messages
+  const template =
+    kind === 'paid' ? m.paid
+      : kind === 'ready' ? m.ready
+        : kind === 'delivered' ? m.delivered
+          : kind === 'cancelled' ? m.cancelled
+            // New and quoted: staff talk to the customer themselves (/total).
+            : ''
+  return template.trim() ? renderText(template, { pedido: orderRef }) : null
+}
+
+/** Reply to "¿dónde está mi pedido?" for an order in this column. */
+export function statusReply(kind: OrderStageKind | null, orderRef: string, biz: BusinessSettings): string {
+  const r = biz.orderBoard.statusReplies
+  const template = kind ? r[kind] : r.new
+  return renderText(template, { pedido: orderRef })
+}
+
+/**
+ * Whether a customer's message asks where their order is ("¿dónde está
+ * mi pedido?", "¿cuándo llega mi compra?", "estado de mi orden"). Needs
+ * an order word AND a status word, and stays short — "quiero hacer un
+ * pedido" or a whole shopping list is not a status question.
+ */
+export function isOrderStatusQuestion(text: string): boolean {
+  const t = text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!t || t.length > 90) return false
+  if (!/\b(pedido|pedidos|orden|compra|encargo)\b/.test(t)) return false
+  return /\b(donde|estado|cuando llega|a que hora llega|ya llega|llego|ya viene|ya sale|salio|como va|en que va|que paso con|ya esta|esta listo|demora|tarda|seguimiento|rastrear|no llega|no ha llegado)\b/.test(
+    t,
+  )
 }
 
 // ---- Satisfaction survey, sent with the "delivered" message ----------
-
-export const CSAT_QUESTION = '¿Cómo le atendimos? Su opinión nos ayuda a mejorar 🙏'
 
 export const CSAT_OPTIONS = [
   { key: 'excelente', title: '⭐ Excelente' },
@@ -88,16 +114,13 @@ export function parseCsatReplyId(replyId: string): { key: CsatKey; dealId: strin
   return m ? { key: m[1] as CsatKey, dealId: m[2] } : null
 }
 
-/** The store's Google Business Profile review form. */
-export const GOOGLE_REVIEW_URL = 'https://g.page/r/CRa1Vf7odqVJEBM/review'
-
-export function csatThanks(key: CsatKey): string {
-  if (key === 'mal') {
-    return 'Lamentamos que no haya sido una buena experiencia 🙏 Una persona de nuestro equipo le escribirá para saber qué pasó.'
+export function csatThanks(key: CsatKey, biz: BusinessSettings): string {
+  const b = biz.orderBoard
+  if (key === 'mal') return b.csatBad
+  // Happy customers are the ones worth asking for a public review — only
+  // when the business has set its review link.
+  if (key === 'excelente' && biz.googleReviewUrl) {
+    return renderText(b.csatExcellent, { resena: biz.googleReviewUrl })
   }
-  if (key === 'excelente') {
-    // Happy customers are the ones worth asking for a public review.
-    return `¡Muchas gracias! 🙂 Si tiene un minuto, nos ayudaría mucho su reseña en Google ⭐\n${GOOGLE_REVIEW_URL}`
-  }
-  return '¡Muchas gracias por su calificación! 🙂'
+  return b.csatGood
 }

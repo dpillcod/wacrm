@@ -1,7 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { decrypt } from './encryption'
 import { sendTemplateMessage } from './meta-api'
-import { toEcuadorInternational } from './phone-utils'
+import { toInternational } from './phone-utils'
+import { loadBusinessSettings, type BusinessSettings } from '../business/settings'
 
 /**
  * Internal ops notification sent to the business's own staff numbers
@@ -44,13 +45,17 @@ export function sanitizeForTemplateParam(text: string): string {
     .trim()
 }
 
-/** ORDER_NOTIFICATION_PHONES as international digits ("0981…" accepted). */
-export function getStaffPhones(): string[] {
-  return (process.env.ORDER_NOTIFICATION_PHONES ?? '')
-    .split(',')
-    // Local "09..." numbers are accepted too — staff lists get typed
-    // the way people say them.
-    .map((p) => toEcuadorInternational(p.trim()))
+/**
+ * Staff numbers as international digits: the business settings' list,
+ * or (older deployments) ORDER_NOTIFICATION_PHONES. Local numbers
+ * ("0981…") are accepted — staff lists get typed the way people say them.
+ */
+export function getStaffPhones(biz: BusinessSettings): string[] {
+  const configured = biz.staffPhones.length
+    ? biz.staffPhones
+    : (process.env.ORDER_NOTIFICATION_PHONES ?? '').split(',')
+  return configured
+    .map((p) => toInternational(p.trim(), biz.phoneCountryCode))
     .filter(Boolean)
 }
 
@@ -108,7 +113,7 @@ export async function notifyStaffOfHandoff(
     summary: string
   },
 ): Promise<NotifyStaffResult> {
-  const phones = getStaffPhones()
+  const phones = getStaffPhones(await loadBusinessSettings(db, args.accountId))
   if (phones.length === 0) return { sent: [], failed: [], skipped: [] }
 
   const templateName = process.env.ORDER_NOTIFICATION_TEMPLATE ?? 'aviso_pedido_nuevo'

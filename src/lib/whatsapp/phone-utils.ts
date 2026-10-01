@@ -33,31 +33,41 @@ export function phonesMatch(phone1: string, phone2: string): boolean {
 }
 
 /**
- * Turn an Ecuadorian number written the local way into international
- * digits: "099 367 9794" / "0993679794" → "593993679794", and a bare
- * 9-digit mobile "993679794" → "593993679794". Anything else (already
- * international, other countries) is just digit-sanitized. Customers
- * type the local form in the web checkout and staff lists, and Meta
- * only accepts international numbers — a local one fails E.164
- * validation outright.
+ * Turn a number written the local way into international digits using
+ * the business's country calling code: "0981414182" + "593" →
+ * "593981414182", and a bare 9-digit mobile "987143251" → "593987143251".
+ * Numbers already carrying the code, longer numbers, or an empty code
+ * are just digit-sanitized. Customers and staff type the local form;
+ * Meta only accepts international numbers.
  */
-export function toEcuadorInternational(phone: string): string {
+export function toInternational(phone: string, countryCode: string): string {
   const digits = sanitizePhoneForMeta(phone)
-  if (/^0\d{9}$/.test(digits)) return `593${digits.slice(1)}`
-  if (/^9\d{8}$/.test(digits)) return `593${digits}`
+  const cc = sanitizePhoneForMeta(countryCode)
+  if (!cc || !digits) return digits
+  if (/^0\d{6,}$/.test(digits)) return `${cc}${digits.slice(1)}`
+  if (!digits.startsWith(cc) && digits.length <= 9) return `${cc}${digits}`
   return digits
 }
 
 /**
- * The reverse of toEcuadorInternational, for showing a number to
- * people: "593981414182" → "0981414182". Non-Ecuadorian numbers come
- * back as "+<digits>".
+ * The reverse, for showing a number to people: "593981414182" + "593" →
+ * "0981414182". Other numbers come back as "+<digits>".
  */
-export function localEcuadorPhone(phone: string): string {
+export function localPhone(phone: string, countryCode: string): string {
   const digits = sanitizePhoneForMeta(phone)
+  const cc = sanitizePhoneForMeta(countryCode)
   if (!digits) return ''
-  if (/^593\d{9}$/.test(digits)) return `0${digits.slice(3)}`
+  if (cc && digits.startsWith(cc) && digits.length > cc.length + 6) return `0${digits.slice(cc.length)}`
   return `+${digits}`
+}
+
+/** Ecuador shorthands (country code 593). */
+export function toEcuadorInternational(phone: string): string {
+  return toInternational(phone, '593')
+}
+
+export function localEcuadorPhone(phone: string): string {
+  return localPhone(phone, '593')
 }
 
 /**

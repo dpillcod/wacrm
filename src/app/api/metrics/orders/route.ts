@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { loadBusinessSettings } from '@/lib/business/settings'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/automations/admin-client'
 import {
@@ -131,7 +132,13 @@ export async function GET(request: Request) {
 
   const metrics: OrdersMetrics = {
     days,
-    daily: dailyOrderSeries(days, whatsappDates, webRuns.map((r) => r.started_at)),
+    daily: dailyOrderSeries(
+      days,
+      whatsappDates,
+      webRuns.map((r) => r.started_at),
+      new Date(),
+      (await loadBusinessSettings(db, accountId)).utcOffsetHours,
+    ),
     totals: { whatsapp: whatsappDates.length, web: webRuns.length },
     funnel: [
       { key: 'wrote', count: menuRuns.length },

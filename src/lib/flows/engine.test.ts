@@ -1,3 +1,4 @@
+import { DEMO_STORE } from "../business/__fixtures__/demo-store";
 import { describe, it, expect } from "vitest";
 import {
   matchReplyId,
@@ -309,16 +310,16 @@ describe("extractValidInput", () => {
 
 describe("staff check-in", () => {
   it("recognizes the clock-in words, accent- and case-insensitive", () => {
-    expect(isStaffCheckInText("turno")).toBe(true);
-    expect(isStaffCheckInText("  Turno! ")).toBe(true);
-    expect(isStaffCheckInText("activar avisos")).toBe(true);
-    expect(isStaffCheckInText("hola")).toBe(false);
-    expect(isStaffCheckInText("mañana tengo turno")).toBe(false);
+    expect(isStaffCheckInText(DEMO_STORE, "turno")).toBe(true);
+    expect(isStaffCheckInText(DEMO_STORE, "  Turno! ")).toBe(true);
+    expect(isStaffCheckInText(DEMO_STORE, "activar avisos")).toBe(true);
+    expect(isStaffCheckInText(DEMO_STORE, "hola")).toBe(false);
+    expect(isStaffCheckInText(DEMO_STORE, "mañana tengo turno")).toBe(false);
   });
 
   it("says until when (Ecuador time) the alerts are on", () => {
     // 13:15Z = 08:15 in Cuenca → active until 08:15 the next day.
-    expect(checkInReply(new Date("2026-09-29T13:15:00Z"))).toContain("hasta mañana a las 08:15");
+    expect(checkInReply(DEMO_STORE, new Date("2026-09-29T13:15:00Z"))).toContain("hasta mañana a las 08:15");
   });
 });
 

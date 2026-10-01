@@ -25,54 +25,6 @@ export interface CrossSellRule {
   suggestion: string
 }
 
-/**
- * Curated pairings, grouped as the business owner described them:
- *   - pan / leche / queso / café (desayuno)
- *   - hielo / snacks (reunión)
- *   - carnes / arroz / aceite / hierbas aromáticas (comida)
- *   - detergente / suavizante / cloro / trapeador (limpieza)
- *
- * Each keyword suggests OTHER items from its own group, never itself —
- * "pide pan → sugiere queso/café", "pide queso → sugiere pan/café".
- * Order matters when a message could match more than one rule: the
- * first match in this list wins, so more specific/earlier entries take
- * priority over a later incidental match.
- */
-export const CROSS_SELL_RULES: CrossSellRule[] = [
-  // --- Pan / lácteos / café ---
-  { keyword: 'pan', suggestion: 'Por cierto, si desea le agrego queso fresco o café, recién nos llegó 🙂' },
-  { keyword: 'panes', suggestion: 'Por cierto, si desea le agrego queso fresco o café, recién nos llegó 🙂' },
-  { keyword: 'leche', suggestion: 'Por cierto, ¿le provoca pan fresco o café para acompañar? 🙂' },
-  { keyword: 'queso', suggestion: 'Por cierto, tenemos pan recién horneado que combina bien, ¿le agrego? 🙂' },
-  { keyword: 'quesos', suggestion: 'Por cierto, tenemos pan recién horneado que combina bien, ¿le agrego? 🙂' },
-  { keyword: 'café', suggestion: 'Por cierto, tenemos pan recién horneado, ideal para acompañar el café 🙂' },
-  { keyword: 'cafe', suggestion: 'Por cierto, tenemos pan recién horneado, ideal para acompañar el café 🙂' },
-
-  // --- Hielo / snacks de reunión ---
-  // No licor/cerveza rules: Meta's Commerce Policy forbids selling
-  // alcohol over WhatsApp, so the bot must never upsell around it
-  // (see src/lib/flows/store-policy.ts).
-  { keyword: 'hielo', suggestion: 'Por cierto, si es para una reunión, tenemos snacks y salsa de queso que combinan bien 🙂' },
-  { keyword: 'hielos', suggestion: 'Por cierto, si es para una reunión, tenemos snacks y salsa de queso que combinan bien 🙂' },
-
-  // --- Carnes / arroz / aceite / hierbas aromáticas ---
-  { keyword: 'pollo', suggestion: 'Por cierto, ¿le agrego arroz, aceite o culantro/perejil para la sazón? 🙂' },
-  { keyword: 'res', suggestion: 'Por cierto, ¿le agrego arroz, aceite o culantro/perejil para la sazón? 🙂' },
-  { keyword: 'carne', suggestion: 'Por cierto, ¿le agrego arroz, aceite o culantro/perejil para la sazón? 🙂' },
-  { keyword: 'chancho', suggestion: 'Por cierto, ¿le agrego arroz, aceite o culantro/perejil para la sazón? 🙂' },
-  { keyword: 'cerdo', suggestion: 'Por cierto, ¿le agrego arroz, aceite o culantro/perejil para la sazón? 🙂' },
-  { keyword: 'arroz', suggestion: 'Por cierto, ¿busca también algo de carne o aceite para acompañar? 🙂' },
-  { keyword: 'aceite', suggestion: 'Por cierto, ¿le hace falta arroz o algo de carne para la comida? 🙂' },
-
-  // --- Limpieza ---
-  { keyword: 'detergente', suggestion: 'Por cierto, ¿le hace falta suavizante o cloro para completar la limpieza? 🙂' },
-  { keyword: 'detergentes', suggestion: 'Por cierto, ¿le hace falta suavizante o cloro para completar la limpieza? 🙂' },
-  { keyword: 'suavizante', suggestion: 'Por cierto, ¿le hace falta detergente para completar la limpieza? 🙂' },
-  { keyword: 'cloro', suggestion: 'Por cierto, ¿le hace falta detergente o suavizante también? 🙂' },
-  { keyword: 'trapeador', suggestion: 'Por cierto, ¿le hace falta detergente para la limpieza general? 🙂' },
-  { keyword: 'trapeadores', suggestion: 'Por cierto, ¿le hace falta detergente para la limpieza general? 🙂' },
-]
-
 function normalize(text: string): string {
   return ` ${text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ')} `
 }
@@ -81,7 +33,7 @@ function normalize(text: string): string {
  * Picks the cross-sell aside for THIS turn, or `null` if none applies.
  *
  * At most one per conversation: if any earlier assistant message
- * already contains one of `CROSS_SELL_RULES`' suggestion strings
+ * already contains one of the rules' suggestion strings
  * verbatim, every rule is treated as already shown — a customer who
  * orders pan, then leche, then queso across three messages gets ONE
  * aside on the first, not three separate nudges.
@@ -89,16 +41,17 @@ function normalize(text: string): string {
 export function pickCrossSellSuggestion(
   customerMessage: string,
   priorMessages: { role: string; content: string }[],
+  rules: CrossSellRule[],
 ): string | null {
   const alreadyShown = priorMessages.some(
     (m) =>
       m.role === 'assistant' &&
-      CROSS_SELL_RULES.some((rule) => m.content.includes(rule.suggestion)),
+      rules.some((rule) => m.content.includes(rule.suggestion)),
   )
   if (alreadyShown) return null
 
   const normalized = normalize(customerMessage)
-  for (const rule of CROSS_SELL_RULES) {
+  for (const rule of rules) {
     if (normalized.includes(` ${rule.keyword} `)) {
       return rule.suggestion
     }

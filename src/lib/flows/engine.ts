@@ -54,9 +54,16 @@ import {
   sanitizeForTemplateParam,
   type NotifyStaffResult,
 } from "../whatsapp/staff-notify";
-import { localEcuadorPhone, toEcuadorInternational } from "../whatsapp/phone-utils";
-import { notifyAccountInApp, upsertOrderCard } from "../pipelines/order-cards";
-import { csatThanks, orderStageKind, parseCsatReplyId } from "../pipelines/order-stages";
+import { localPhone, toInternational } from "../whatsapp/phone-utils";
+import { findOrderPipeline, notifyAccountInApp, upsertOrderCard } from "../pipelines/order-cards";
+import {
+  csatThanks,
+  isOrderStatusQuestion,
+  orderRefFromTitle,
+  orderStageKind,
+  parseCsatReplyId,
+  statusReply,
+} from "../pipelines/order-stages";
 import { updateWooOrder } from "../woocommerce/client";
 import { formatFormReply } from "../whatsapp/flow-form";
 import { INTERACTIVE_LIMITS } from "../whatsapp/meta-api";
@@ -70,12 +77,12 @@ import {
   reviewOrderLines,
 } from "./order-clarify";
 import {
-  ALCOHOL_REPLY,
-  isAlcoholRequest,
+  isBlockedProduct,
   isWithinBusinessHours,
   normalizeForMatch,
   outOfHoursNotice,
 } from "./store-policy";
+import { loadBusinessSettings, renderText, type BusinessSettings } from "../business/settings";
 import {
   type CollectInputNodeConfig,
   type ConditionNodeConfig,
@@ -103,29 +110,20 @@ import {
 
 // ============================================================
 // Engine-authored customer texts (everything else a customer sees
-// comes from the flow's own node config). The store addresses
-// customers as "usted".
+// comes from the flow's own node config) live in the account's
+// business settings (settings.texts) — see lib/business/settings.ts.
+// Only these two structural prompts stay here.
 // ============================================================
 
-const IDLE_NUDGE_TEXT =
-  "¿Sigue ahí? Si tiene alguna duda, dígame y seguimos con su pedido 🙂";
-const DISAMBIGUATION_PROMPT = "¿Cuál de estas opciones es la que busca?";
-const CAPTURE_FAILED_TEXT =
-  "Disculpe, no logré registrar eso último 🙁 ¿Me lo puede escribir de nuevo?";
-const FALLBACK_HANDOFF_TEXT =
-  "Disculpe, no logré entenderle bien 🙏 Le comunico con uno de nuestros asesores para que le ayude.";
-const EDIT_FAILED_TEXT =
-  "Disculpe, no logré aplicar ese cambio 🙏 Escríbame el *número* del producto que desea cambiar.";
+/** The account's business settings (cached per account for a minute). */
+function bizOf(db: AdminClient, accountId: string): Promise<BusinessSettings> {
+  return loadBusinessSettings(db, accountId);
+}
+
 const editLinePrompt = (n: number, line: string) =>
   `Escriba cómo debe quedar el *${n}* (_${line}_), o escriba *borrar* para quitarlo.`;
 const editOutOfRangeText = (max: number) =>
   `Ese número no está en su lista 🙂 Escriba un número del 1 al ${max}.`;
-const FOLLOW_UP_YES_TEXT =
-  "¡Qué bueno! Gracias por confirmarnos 🙂 Si necesita algo más, escriba *menú*.";
-const FOLLOW_UP_NO_TEXT =
-  "Ya le recordamos a nuestro equipo, en breve le escriben 🙏";
-const NON_TEXT_REPLY_TEXT =
-  "Por ahora no puedo escuchar audios ni ver ese tipo de mensajes 🙏 ¿Me lo puede escribir, por favor?";
 
 // ============================================================
 // Pure helpers — extracted so engine.test.ts can exercise them
@@ -699,7 +697,7 @@ async function executeHandoff(
       ...(cfg.after_handoff_reply ? { __after_handoff_reply: cfg.after_handoff_reply } : {}),
     };
     await saveVars(db, run, vars);
-    if (followUp && isWithinBusinessHours()) {
+    if (followUp && isWithinBusinessHours(await bizOf(db, run.account_id))) {
       scheduleFollowUp(db, run.id, followUp.every_minutes);
     }
   }
@@ -723,8 +721,9 @@ async function notifyHandoff(
     notifyUserIds?: string[];
   },
 ): Promise<void> {
-  if (!isWithinBusinessHours()) {
-    await sendEngineText(db, run, nodeKey, outOfHoursNotice(), "out_of_hours_notice");
+  const biz = await bizOf(db, run.account_id);
+  if (!isWithinBusinessHours(biz)) {
+    await sendEngineText(db, run, nodeKey, outOfHoursNotice(biz), "out_of_hours_notice");
   }
 
   // Best-effort — nobody watching the inbox otherwise finds out a
@@ -748,7 +747,7 @@ async function notifyHandoff(
   // Includes the shared shop-floor account and any notify_user_ids.
   const noOneOnShift =
     staffResult !== null &&
-    getStaffPhones().length > 0 &&
+    getStaffPhones(biz).length > 0 &&
     staffResult.sent.length === 0;
   await notifyTeamInApp(db, run, nodeKey, {
     title: orderTitle(run, "🧾 Pedido para atender"),
@@ -1378,6 +1377,12 @@ export async function dispatchInboundToFlows(
       if (claimed) return claimed;
     }
 
+    // "¿Dónde está mi pedido?" — answered from the order board.
+    if (input.message.kind === "text" && isOrderStatusQuestion(input.message.text)) {
+      const answered = await answerOrderStatusQuestion(db, input);
+      if (answered) return answered;
+    }
+
     const activeRun = await loadActiveRunForContact(
       db,
       input.accountId,
@@ -1463,7 +1468,7 @@ export async function dispatchInboundToFlows(
               userId: input.userId,
               conversationId: input.conversationId,
               contactId: input.contactId,
-              text: NON_TEXT_REPLY_TEXT,
+              text: (await bizOf(db, input.accountId)).texts.nonTextReply,
             });
             return { consumed: true, outcome: "no_match" };
           } catch (err) {
@@ -1799,7 +1804,7 @@ async function handleListEditing(
     instruction: text,
   });
   if (!edited) {
-    await sendEngineText(db, run, node.node_key, EDIT_FAILED_TEXT, "list_edit_failed");
+    await sendEngineText(db, run, node.node_key, (await bizOf(db, run.account_id)).texts.editFailed, "list_edit_failed");
     return stay;
   }
   return saveListAndAdvance(db, run, nodes, run.vars, cfg.edit_list_var, edited, cfg.next_node_key);
@@ -1855,7 +1860,7 @@ async function runNodeSideEffects(
     const result = await updateWooOrder(String(run.vars.order_id), {
       status: cfg.woo.status,
       note: cfg.woo.note ? interpolateVars(cfg.woo.note, run.vars) : undefined,
-    });
+    }, (await bizOf(db, run.account_id)).woocommerceUrl);
     await logEvent(db, run.id, result.ok ? "node_entered" : "error", node.node_key, {
       reason: result.ok ? "woo_updated" : "woo_update_failed",
       woo: cfg.woo,
@@ -1893,6 +1898,134 @@ async function runNodeSideEffects(
       body: interpolateVars(cfg.notify_team, run.vars),
     });
   }
+
+  if (cfg.prefill_last_order) {
+    await prefillLastOrder(db, run, node.node_key, cfg.prefill_last_order);
+  }
+
+  if (cfg.order_status_reply && run.contact_id) {
+    const status = await orderStatusText(db, run.account_id, run.contact_id);
+    await sendEngineText(db, run, node.node_key, status.text, "order_status_reply");
+  }
+}
+
+/** See NodeSideEffectsConfig.prefill_last_order. */
+async function prefillLastOrder(
+  db: AdminClient,
+  run: FlowRunRow,
+  nodeKey: string,
+  listVar: string,
+): Promise<void> {
+  // The var name goes into a PostgREST JSON filter — keep it a plain key.
+  if (!run.contact_id || !/^\w+$/.test(listVar)) return;
+  const { data } = await db
+    .from("flow_runs")
+    .select("id, vars")
+    .eq("account_id", run.account_id)
+    .eq("contact_id", run.contact_id)
+    .eq("flow_id", run.flow_id)
+    .eq("status", "handed_off")
+    .neq("id", run.id)
+    .not(`vars->>${listVar}`, "is", null)
+    .order("started_at", { ascending: false })
+    .limit(1);
+  const previous = ((data ?? []) as { id: string; vars: Record<string, unknown> }[])[0];
+  const list = typeof previous?.vars[listVar] === "string"
+    ? (previous.vars[listVar] as string).trim()
+    : "";
+  if (!list) {
+    await logEvent(db, run.id, "node_entered", nodeKey, { reason: "no_previous_order" });
+    return;
+  }
+  await saveVars(db, run, {
+    ...run.vars,
+    [listVar]: list,
+    [`${listVar}_numbered`]: numberLines(list),
+    __repeated_from_run: previous.id,
+  });
+  await logEvent(db, run.id, "node_entered", nodeKey, {
+    reason: "prefilled_last_order",
+    from_run: previous.id,
+  });
+}
+
+const ORDER_STATUS_LOOKBACK_MS = 30 * 86_400_000;
+
+/**
+ * What to tell a customer asking where their order is: the status reply
+ * for their latest card on the order board (last 30 days), or the "no
+ * recent order" text. `found` says whether there was a card.
+ */
+async function orderStatusText(
+  db: AdminClient,
+  accountId: string,
+  contactId: string,
+): Promise<{ found: boolean; text: string }> {
+  const biz = await bizOf(db, accountId);
+  const board = await findOrderPipeline(db, accountId);
+  if (board) {
+    const { data } = await db
+      .from("deals")
+      .select("title, stage_id")
+      .eq("account_id", accountId)
+      .eq("pipeline_id", board.pipelineId)
+      .eq("contact_id", contactId)
+      .gte("created_at", new Date(Date.now() - ORDER_STATUS_LOOKBACK_MS).toISOString())
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const deal = data as { title: string; stage_id: string } | null;
+    if (deal) {
+      const { data: stage } = await db
+        .from("pipeline_stages")
+        .select("name")
+        .eq("id", deal.stage_id)
+        .maybeSingle();
+      const kind = orderStageKind((stage as { name?: string } | null)?.name ?? "");
+      return { found: true, text: statusReply(kind, orderRefFromTitle(deal.title), biz) };
+    }
+  }
+  return { found: false, text: renderText(biz.orderBoard.statusReplies.none, {}) };
+}
+
+/**
+ * A customer asking in their own words where their order is. Answered
+ * from the board when they have a recent order. With no order: answered
+ * with the "no recent order" text only when no bot conversation is in
+ * progress — a run mid-way (e.g. a web order waiting for this very
+ * message) handles the message itself.
+ */
+async function answerOrderStatusQuestion(
+  db: AdminClient,
+  input: DispatchInboundInput,
+): Promise<DispatchInboundResult | null> {
+  if (await isDuplicateInbound(db, input.accountId, input.contactId, input.message.meta_message_id)) {
+    return null;
+  }
+  const status = await orderStatusText(db, input.accountId, input.contactId);
+  const activeRun = await loadActiveRunForContact(db, input.accountId, input.contactId);
+  if (activeRun) {
+    const node = activeRun.current_node_key
+      ? await loadNode(db, activeRun.flow_id, activeRun.current_node_key)
+      : null;
+    const waitingForCustomer =
+      node?.node_type === "collect_input" &&
+      (node.config as unknown as CollectInputNodeConfig).silent === true;
+    if (!status.found || waitingForCustomer) return null;
+  }
+  try {
+    await engineSendText({
+      accountId: input.accountId,
+      userId: input.userId,
+      conversationId: input.conversationId,
+      contactId: input.contactId,
+      text: status.text,
+    });
+  } catch (err) {
+    console.error("[flows] order status reply failed:", err);
+    return null;
+  }
+  return { consumed: true, flow_run_id: activeRun?.id, outcome: "no_match" };
 }
 
 async function assignOrderNumber(db: AdminClient, run: FlowRunRow): Promise<void> {
@@ -1928,7 +2061,8 @@ async function alertStaff(
     .select("phone")
     .eq("id", run.contact_id!)
     .maybeSingle();
-  const phone = localEcuadorPhone((contactRow as { phone?: string } | null)?.phone ?? "");
+  const cc = (await bizOf(db, run.account_id)).phoneCountryCode;
+  const phone = localPhone((contactRow as { phone?: string } | null)?.phone ?? "", cc);
   const result = await notifyStaffOfHandoff(db, {
     accountId: run.account_id,
     contactName: typeof contactNameVar === "string" ? contactNameVar.trim() : "",
@@ -1937,7 +2071,7 @@ async function alertStaff(
   for (const s of result.sent) {
     await logEvent(db, run.id, "message_sent", nodeKey, {
       reason: "staff_alert",
-      to: localEcuadorPhone(s.phone),
+      to: localPhone(s.phone, cc),
       whatsapp_message_id: s.messageId,
     });
   }
@@ -1945,7 +2079,7 @@ async function alertStaff(
     await logEvent(db, run.id, "error", nodeKey, {
       reason: result.failed.length > 0 ? "staff_notify_failed" : "staff_not_on_shift",
       failed: result.failed,
-      not_on_shift: result.skipped.map(localEcuadorPhone),
+      not_on_shift: result.skipped.map((p) => localPhone(p, cc)),
     });
   }
   return result;
@@ -2070,7 +2204,7 @@ async function runFollowUp(db: AdminClient, runId: string): Promise<void> {
   if (!run || !state || state.done) return;
   // Opening hours only; out of hours the customer already has the
   // "we'll attend you when we open" note.
-  if (!isWithinBusinessHours() || (await humanHasTakenOver(db, run))) return;
+  if (!isWithinBusinessHours(await bizOf(db, run.account_id)) || (await humanHasTakenOver(db, run))) return;
 
   if (state.asked < state.max) {
     state.asked += 1;
@@ -2117,11 +2251,11 @@ async function handleFollowUpReply(
     if (timer) clearTimeout(timer);
     pendingFollowUps.delete(run.id);
     await saveVars(db, run, { ...run.vars, __follow_up: state });
-    await sendEngineText(db, run, null, FOLLOW_UP_YES_TEXT, "follow_up_yes");
+    await sendEngineText(db, run, null, (await bizOf(db, run.account_id)).texts.followUpYes, "follow_up_yes");
   } else {
     if (state.reminded < state.max) await remindStaff(db, run, state);
     await saveVars(db, run, { ...run.vars, __follow_up: state });
-    await sendEngineText(db, run, null, FOLLOW_UP_NO_TEXT, "follow_up_no");
+    await sendEngineText(db, run, null, (await bizOf(db, run.account_id)).texts.followUpNo, "follow_up_no");
   }
   return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
 }
@@ -2158,7 +2292,7 @@ async function handleCsatReply(
       userId: input.userId,
       conversationId: input.conversationId,
       contactId: input.contactId,
-      text: csatThanks(parsed.key),
+      text: csatThanks(parsed.key, await bizOf(db, input.accountId)),
     });
   } catch (err) {
     console.error("[flows] csat thanks failed:", err);
@@ -2221,33 +2355,33 @@ async function replyAfterHandoff(
 // when their alerts are on, instead of showing them the customer menu.
 // ============================================================
 
-const CHECK_IN_WORDS = new Set(["turno", "avisos", "activar avisos", "activar turno"]);
-
-export function isStaffCheckInText(text: string): boolean {
-  return CHECK_IN_WORDS.has(normalizeForMatch(text));
+export function isStaffCheckInText(biz: BusinessSettings, text: string): boolean {
+  const said = normalizeForMatch(text);
+  return biz.checkInWords.some((w) => normalizeForMatch(w) === said);
 }
 
-export function checkInReply(now: Date = new Date()): string {
-  // Ecuador is UTC-5 year-round.
-  const until = new Date(now.getTime() + 24 * 3_600_000 - 5 * 3_600_000);
+export function checkInReply(biz: BusinessSettings, now: Date = new Date()): string {
+  const until = new Date(now.getTime() + 24 * 3_600_000 + biz.utcOffsetHours * 3_600_000);
   const hh = String(until.getUTCHours()).padStart(2, "0");
   const mm = String(until.getUTCMinutes()).padStart(2, "0");
-  return `✅ Listo, sus avisos de pedidos por WhatsApp están activos hasta mañana a las ${hh}:${mm}. Escriba *turno* cada día al empezar 🙂`;
+  return renderText(biz.texts.checkIn, { hasta: `${hh}:${mm}` });
 }
 
 async function handleStaffCheckIn(
   db: AdminClient,
   input: DispatchInboundInput,
 ): Promise<DispatchInboundResult | null> {
-  if (input.message.kind !== "text" || !isStaffCheckInText(input.message.text)) return null;
-  const staff = getStaffPhones();
+  if (input.message.kind !== "text") return null;
+  const biz = await bizOf(db, input.accountId);
+  if (!isStaffCheckInText(biz, input.message.text)) return null;
+  const staff = getStaffPhones(biz);
   if (staff.length === 0) return null;
   const { data: contact } = await db
     .from("contacts")
     .select("phone")
     .eq("id", input.contactId)
     .maybeSingle();
-  const phone = toEcuadorInternational((contact as { phone?: string } | null)?.phone ?? "");
+  const phone = toInternational((contact as { phone?: string } | null)?.phone ?? "", biz.phoneCountryCode);
   if (!phone || !staff.includes(phone)) return null;
   try {
     await engineSendText({
@@ -2255,7 +2389,7 @@ async function handleStaffCheckIn(
       userId: input.userId,
       conversationId: input.conversationId,
       contactId: input.contactId,
-      text: checkInReply(),
+      text: checkInReply(biz),
     });
   } catch (err) {
     console.error("[flows] staff check-in reply failed:", err);
@@ -2479,7 +2613,7 @@ async function sendIdleNudge(
       userId: freshRun.user_id,
       conversationId: freshRun.conversation_id!,
       contactId: freshRun.contact_id!,
-      text: IDLE_NUDGE_TEXT,
+      text: (await bizOf(db, freshRun.account_id)).texts.idleNudge,
     });
     await logEvent(db, runId, "message_sent", expectedNodeKey, {
       reason: "idle_nudge",
@@ -2600,7 +2734,7 @@ async function tryStartProductDisambiguation(
     userId: run.user_id,
     conversationId: run.conversation_id!,
     contactId: run.contact_id!,
-    bodyText: DISAMBIGUATION_PROMPT,
+    bodyText: (await bizOf(db, run.account_id)).texts.disambiguationPrompt,
     buttonLabel: "Ver opciones",
     sections: [
       {
@@ -2716,7 +2850,7 @@ async function captureTextIntoVar(
 
   let crossSellAside = "";
   if (args.cross_sell && !run.vars.__cross_sell_shown) {
-    const suggestion = pickCrossSellSuggestion(trimmed, []);
+    const suggestion = pickCrossSellSuggestion(trimmed, [], (await bizOf(db, run.account_id)).crossSell);
     if (suggestion) crossSellAside = `\n\n${suggestion}`;
   }
   if (!crossSellAside && batchOpen && typeof prevAside === "string") {
@@ -2882,7 +3016,7 @@ async function handleReplyForActiveRun(
       }
     }
     if (message.message_type !== "sticker") {
-      await sendEngineText(db, run, currentNode.node_key, NON_TEXT_REPLY_TEXT, "non_text_reply");
+      await sendEngineText(db, run, currentNode.node_key, (await bizOf(db, run.account_id)).texts.nonTextReply, "non_text_reply");
     }
     return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
   }
@@ -2891,8 +3025,9 @@ async function handleReplyForActiveRun(
   // it on any node that accumulates an order list, before it's captured.
   const capturesOrderList =
     currentCollectCfg?.append === true || currentTextFallback?.append === true;
-  if (message.kind === "text" && capturesOrderList && isAlcoholRequest(message.text)) {
-    await sendEngineText(db, run, currentNode.node_key, ALCOHOL_REPLY, "alcohol_declined");
+  const bizForRules = await bizOf(db, run.account_id);
+  if (message.kind === "text" && capturesOrderList && isBlockedProduct(bizForRules, message.text)) {
+    await sendEngineText(db, run, currentNode.node_key, bizForRules.blockedProducts.reply, "alcohol_declined");
     return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
   }
 
@@ -3299,7 +3434,7 @@ async function handleReplyForActiveRun(
           userId: run.user_id,
           conversationId: run.conversation_id!,
           contactId: run.contact_id!,
-          text: CAPTURE_FAILED_TEXT,
+          text: (await bizOf(db, run.account_id)).texts.captureFailed,
         });
       } catch (err) {
         await logEvent(db, run.id, "error", currentNode.node_key, {
@@ -3350,7 +3485,7 @@ async function handleReplyForActiveRun(
       db,
       run,
       run.current_node_key,
-      FALLBACK_HANDOFF_TEXT,
+      (await bizOf(db, run.account_id)).texts.fallbackHandoff,
       "fallback_handoff_ack",
     );
     const orderSoFar =

@@ -3,10 +3,9 @@ import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/automations/admin-client'
 import { engineSendInteractiveButtons, engineSendText } from '@/lib/flows/meta-send'
 import { customerWindowOpen } from '@/lib/pipelines/order-cards'
+import { loadBusinessSettings } from '@/lib/business/settings'
 import {
   CSAT_OPTIONS,
-  CSAT_QUESTION,
-  ORDER_PIPELINE_NAME,
   csatReplyId,
   orderRefFromTitle,
   orderStageKind,
@@ -52,14 +51,15 @@ export async function POST(
     db.from('pipelines').select('name').eq('id', deal.pipeline_id).maybeSingle(),
     db.from('pipeline_stages').select('name').eq('id', deal.stage_id).maybeSingle(),
   ])
-  if (pipeline?.name !== ORDER_PIPELINE_NAME) {
+  const biz = await loadBusinessSettings(db, ctx.accountId)
+  if (pipeline?.name !== biz.orderBoard.pipelineName) {
     return NextResponse.json({ sent: false, reason: 'not_orders' })
   }
 
   await stopFollowUpsForCard(db, deal.id)
 
   const kind = orderStageKind(stage?.name ?? '')
-  const text = stageMessage(kind, orderRefFromTitle(deal.title))
+  const text = stageMessage(kind, orderRefFromTitle(deal.title), biz)
   if (!text) return NextResponse.json({ sent: false, reason: 'no_message' })
   if (!deal.conversation_id || !deal.contact_id) {
     return NextResponse.json({ sent: false, reason: 'no_conversation' })
@@ -84,7 +84,7 @@ export async function POST(
     if (kind === 'delivered') {
       await engineSendInteractiveButtons({
         ...sendArgs,
-        bodyText: CSAT_QUESTION,
+        bodyText: biz.orderBoard.csatQuestion,
         buttons: CSAT_OPTIONS.map((o) => ({ id: csatReplyId(o.key, deal.id), title: o.title })),
       })
     }

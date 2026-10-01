@@ -11,6 +11,7 @@ import { SettingsOverview } from '@/components/settings/settings-overview';
 import { ProfileForm } from '@/components/settings/profile-form';
 import { SecurityPanel } from '@/components/settings/security-panel';
 import { AppearancePanel } from '@/components/settings/appearance-panel';
+import { BusinessSettingsPanel } from '@/components/settings/business-settings';
 import { WhatsAppConfig } from '@/components/settings/whatsapp-config';
 import { TemplateManager } from '@/components/settings/template-manager';
 import { CatalogProducts } from '@/components/settings/catalog-products';
@@ -59,6 +60,7 @@ export default function SettingsPage() {
     profile: <ProfileForm />,
     security: <SecurityPanel />,
     appearance: <AppearancePanel />,
+    business: <BusinessSettingsPanel />,
     whatsapp: <WhatsAppConfig />,
     templates: <TemplateManager />,
     catalog: <CatalogProducts />,

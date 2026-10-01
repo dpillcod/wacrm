@@ -33,7 +33,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import crypto from "crypto";
 
 import { resolveConversationByPhone } from "@/lib/whatsapp/resolve-conversation";
-import { localEcuadorPhone, toEcuadorInternational } from "@/lib/whatsapp/phone-utils";
+import { localPhone, toInternational } from "@/lib/whatsapp/phone-utils";
+import { loadBusinessSettings } from "@/lib/business/settings";
 import { SendMessageError } from "@/lib/whatsapp/send-message";
 import { catchUpWaitingRun, startFlowRunForExternalEvent } from "@/lib/flows/engine";
 import { tagContact, WEB_ORIGIN_TAG } from "@/lib/contacts/origin";
@@ -163,7 +164,8 @@ export async function POST(
   // Checkout phones are typed the local way ("0991234567"), which fails
   // E.164 validation — every such order used to be skipped silently.
   const rawPhone = order.billing?.phone;
-  const phone = rawPhone ? toEcuadorInternational(rawPhone) : "";
+  const cc = (await loadBusinessSettings(db, accountId)).phoneCountryCode;
+  const phone = rawPhone ? toInternational(rawPhone, cc) : "";
   if (!phone) {
     console.error("[woocommerce webhook] order has no billing phone", {
       accountId,
@@ -199,7 +201,7 @@ export async function POST(
       contactId,
       conversationId,
       title: `Pedido web N° ${order.id ?? "?"} — ${customerName || "Cliente"}`,
-      notes: `Productos: ${itemsSummary}\nTotal: $${order.total ?? "?"}\nPago: ${paymentTitle}\nTeléfono: ${localEcuadorPhone(phone)}`,
+      notes: `Productos: ${itemsSummary}\nTotal: $${order.total ?? "?"}\nPago: ${paymentTitle}\nTeléfono: ${localPhone(phone, cc)}`,
       value: Number(order.total),
     });
 
@@ -249,7 +251,7 @@ export async function POST(
       conversationId,
       contactId,
       title: "🛒 Nuevo pedido web",
-      body: `Pedido N° ${order.id ?? "?"} · ${customerName || "Cliente"} (${localEcuadorPhone(phone)}) · $${order.total ?? "?"} · ${paymentTitle}. Esperando que el cliente escriba por WhatsApp.`,
+      body: `Pedido N° ${order.id ?? "?"} · ${customerName || "Cliente"} (${localPhone(phone, cc)}) · $${order.total ?? "?"} · ${paymentTitle}. Esperando que el cliente escriba por WhatsApp.`,
     }).catch((err) => console.error("[woocommerce webhook] notify team failed:", err));
 
     return NextResponse.json({ ok: true, outcome: result.outcome });

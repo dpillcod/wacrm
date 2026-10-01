@@ -4,7 +4,8 @@
 // order and leave an order note staff see in WooCommerce).
 //
 // Config (server env, e.g. EasyPanel):
-//   WOOCOMMERCE_URL     https://ferrotiendaec.com
+//   WOOCOMMERCE_URL     https://mitienda.com  (or the store URL set in
+//                       Settings → My business)
 //   WOOCOMMERCE_KEY     ck_…   (REST API key, read/write)
 //   WOOCOMMERCE_SECRET  cs_…
 // Without them every call is a no-op that reports `not_configured`,
@@ -16,8 +17,12 @@ export interface WooResult {
   error?: string
 }
 
-export function wooConfigured(): boolean {
-  return Boolean(process.env.WOOCOMMERCE_URL && process.env.WOOCOMMERCE_KEY && process.env.WOOCOMMERCE_SECRET)
+function wooBaseUrl(storeUrl?: string): string {
+  return process.env.WOOCOMMERCE_URL || storeUrl || ''
+}
+
+export function wooConfigured(storeUrl?: string): boolean {
+  return Boolean(wooBaseUrl(storeUrl) && process.env.WOOCOMMERCE_KEY && process.env.WOOCOMMERCE_SECRET)
 }
 
 export function wooOrderUrl(baseUrl: string, orderId: string, suffix = ''): string {
@@ -47,9 +52,10 @@ async function wooRequest(url: string, method: 'PUT' | 'POST', body: unknown): P
 export async function updateWooOrder(
   orderId: string,
   change: { status?: string; note?: string },
+  storeUrl?: string,
 ): Promise<WooResult> {
-  if (!wooConfigured()) return { ok: false, error: 'not_configured' }
-  const base = process.env.WOOCOMMERCE_URL!
+  if (!wooConfigured(storeUrl)) return { ok: false, error: 'not_configured' }
+  const base = wooBaseUrl(storeUrl)
   if (change.status) {
     const r = await wooRequest(wooOrderUrl(base, orderId), 'PUT', { status: change.status })
     if (!r.ok) return r

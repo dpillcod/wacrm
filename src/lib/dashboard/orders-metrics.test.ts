@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   csatCounts,
   dailyOrderSeries,
-  ecuadorDayKey,
+  localDayKey,
   productKey,
   satisfactionPct,
   topProducts,
@@ -10,11 +10,11 @@ import {
   whatsappOrderLines,
 } from './orders-metrics'
 
-describe('ecuadorDayKey', () => {
+describe('localDayKey', () => {
   it('buckets by Cuenca local date (UTC-5)', () => {
     // 03:00Z on the 29th is still the evening of the 28th in Ecuador.
-    expect(ecuadorDayKey('2026-09-29T03:00:00Z')).toBe('2026-09-28')
-    expect(ecuadorDayKey('2026-09-29T06:00:00Z')).toBe('2026-09-29')
+    expect(localDayKey('2026-09-29T03:00:00Z', -5)).toBe('2026-09-28')
+    expect(localDayKey('2026-09-29T06:00:00Z', -5)).toBe('2026-09-29')
   })
 })
 
