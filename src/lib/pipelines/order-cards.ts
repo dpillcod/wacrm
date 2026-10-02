@@ -12,13 +12,15 @@ import { loadBusinessSettings } from '../business/settings'
 export async function findOrderPipeline(
   db: SupabaseClient,
   accountId: string,
+  /** Another board by name (e.g. the service board); default = the order board. */
+  pipelineName?: string,
 ): Promise<{ pipelineId: string; firstStageId: string } | null> {
-  const { orderBoard } = await loadBusinessSettings(db, accountId)
+  const name = pipelineName ?? (await loadBusinessSettings(db, accountId)).orderBoard.pipelineName
   const { data: pipeline } = await db
     .from('pipelines')
     .select('id')
     .eq('account_id', accountId)
-    .eq('name', orderBoard.pipelineName)
+    .eq('name', name)
     .limit(1)
     .maybeSingle()
   if (!pipeline) return null
@@ -50,6 +52,8 @@ export async function upsertOrderCard(
     title: string
     notes: string
     value?: number
+    /** Board to create the card on (default: the order board). */
+    pipelineName?: string
   },
 ): Promise<string | null> {
   try {
@@ -63,7 +67,7 @@ export async function upsertOrderCard(
       console.error('[order-cards] update failed:', error.message)
       return null
     }
-    const board = await findOrderPipeline(db, args.accountId)
+    const board = await findOrderPipeline(db, args.accountId, args.pipelineName)
     if (!board) return null
     const { data, error } = await db
       .from('deals')

@@ -48,13 +48,16 @@ export async function GET(request: Request) {
     .map((f) => f.id)
 
   // Nodes that put an order on the board: a handoff there = one order.
+  // (A card on the service board is a home-service request, not an order.)
   const { data: orderNodes } = await db
     .from('flow_nodes')
-    .select('flow_id, node_key')
+    .select('flow_id, node_key, config')
     .in('flow_id', flowRows.map((f) => f.id))
     .eq('config->>create_order_card', 'true')
   const orderNodeKeys = new Set(
-    ((orderNodes ?? []) as { flow_id: string; node_key: string }[]).map((n) => `${n.flow_id}|${n.node_key}`),
+    ((orderNodes ?? []) as { flow_id: string; node_key: string; config: { card_board?: string } }[])
+      .filter((n) => n.config?.card_board !== 'services')
+      .map((n) => `${n.flow_id}|${n.node_key}`),
   )
 
   // WhatsApp orders: handoffs at order-card nodes outside the web flow.

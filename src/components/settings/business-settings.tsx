@@ -68,6 +68,8 @@ const AI_FEATURE_KEYS: (keyof BusinessSettings["aiFeatures"])[] = [
   "entryRouter",
 ];
 const MESSAGE_KEYS: (keyof Board["messages"])[] = ["paid", "ready", "delivered", "cancelled"];
+type ServiceBoard = BusinessSettings["serviceBoard"];
+const SERVICE_MESSAGE_KEYS: (keyof ServiceBoard["messages"])[] = ["scheduled", "working", "done", "cancelled"];
 const STATUS_KEYS: (keyof Board["statusReplies"])[] = [
   "new",
   "quoted",
@@ -184,6 +186,8 @@ export function BusinessSettingsPanel() {
   const set = (patch: Partial<BusinessSettings>) => edit({ settings: { ...s, ...patch } });
   const setText = (key: keyof Texts, value: string) => set({ texts: { ...s.texts, [key]: value } });
   const setBoard = (patch: Partial<Board>) => set({ orderBoard: { ...s.orderBoard, ...patch } });
+  const setServiceBoard = (patch: Partial<ServiceBoard>) =>
+    set({ serviceBoard: { ...s.serviceBoard, ...patch } });
 
   const text = (key: keyof BusinessSettings, extra?: { type?: string; placeholder?: string }) => (
     <Input
@@ -378,6 +382,32 @@ export function BusinessSettingsPanel() {
         {TEXT_KEYS.map((key) => (
           <Field key={key} label={t(`texts.${key}`)}>
             {area(s.texts[key], (v) => setText(key, v), 2)}
+          </Field>
+        ))}
+      </Section>
+
+      <Section title={t("services.title")} description={t("services.desc")}>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label={t("services.pipelineName")}>
+            <Input
+              value={s.serviceBoard.pipelineName}
+              disabled={readOnly}
+              onChange={(e) => setServiceBoard({ pipelineName: e.target.value })}
+            />
+          </Field>
+          <Field label={t("services.entryNode")} hint={t("services.entryNodeHint")}>
+            <Input
+              value={s.serviceBoard.entryNode}
+              disabled={readOnly}
+              onChange={(e) => setServiceBoard({ entryNode: e.target.value })}
+            />
+          </Field>
+        </div>
+        {SERVICE_MESSAGE_KEYS.map((key) => (
+          <Field key={key} label={t(`services.messages.${key}`)}>
+            {area(s.serviceBoard.messages[key], (v) =>
+              setServiceBoard({ messages: { ...s.serviceBoard.messages, [key]: v } }),
+            2)}
           </Field>
         ))}
       </Section>

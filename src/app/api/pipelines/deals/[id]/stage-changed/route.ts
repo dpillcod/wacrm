@@ -9,6 +9,8 @@ import {
   csatReplyId,
   orderRefFromTitle,
   orderStageKind,
+  serviceStageKind,
+  serviceStageMessage,
   stageMessage,
 } from '@/lib/pipelines/order-stages'
 
@@ -52,14 +54,21 @@ export async function POST(
     db.from('pipeline_stages').select('name').eq('id', deal.stage_id).maybeSingle(),
   ])
   const biz = await loadBusinessSettings(db, ctx.accountId)
-  if (pipeline?.name !== biz.orderBoard.pipelineName) {
+  const isOrders = pipeline?.name === biz.orderBoard.pipelineName
+  const isServices = pipeline?.name === biz.serviceBoard.pipelineName
+  if (!isOrders && !isServices) {
     return NextResponse.json({ sent: false, reason: 'not_orders' })
   }
 
   await stopFollowUpsForCard(db, deal.id)
 
-  const kind = orderStageKind(stage?.name ?? '')
-  const text = stageMessage(kind, orderRefFromTitle(deal.title), biz)
+  const ref = orderRefFromTitle(deal.title)
+  const kind = isOrders ? orderStageKind(stage?.name ?? '') : serviceStageKind(stage?.name ?? '')
+  const text = isOrders
+    ? stageMessage(kind as ReturnType<typeof orderStageKind>, ref, biz)
+    : serviceStageMessage(kind as ReturnType<typeof serviceStageKind>, ref, biz)
+  // Delivered order / finished service: thanks + satisfaction survey.
+  const sendSurvey = isOrders ? kind === 'delivered' : kind === 'done'
   if (!text) return NextResponse.json({ sent: false, reason: 'no_message' })
   if (!deal.conversation_id || !deal.contact_id) {
     return NextResponse.json({ sent: false, reason: 'no_conversation' })
@@ -81,7 +90,7 @@ export async function POST(
   }
   try {
     await engineSendText({ ...sendArgs, text })
-    if (kind === 'delivered') {
+    if (sendSurvey) {
       await engineSendInteractiveButtons({
         ...sendArgs,
         bodyText: biz.orderBoard.csatQuestion,

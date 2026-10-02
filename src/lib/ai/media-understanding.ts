@@ -160,7 +160,7 @@ export type ImageReading =
   | { kind: "other"; summary: string };
 
 export interface FirstMessageRoute {
-  intent: "order" | "question" | "human" | "other";
+  intent: "order" | "service" | "question" | "human" | "other";
   lines: string[];
 }
 
@@ -202,7 +202,9 @@ export function parseFirstMessageRoute(raw: string): FirstMessageRoute | null {
   const j = firstJson(raw);
   if (!j) return null;
   const intent = j.intent;
-  if (intent !== "order" && intent !== "question" && intent !== "human" && intent !== "other") return null;
+  if (intent !== "order" && intent !== "service" && intent !== "question" && intent !== "human" && intent !== "other") {
+    return null;
+  }
   const lines = cleanLines(j.lines);
   if (intent === "order" && lines.length === 0) return { intent: "other", lines: [] };
   return { intent, lines: intent === "order" ? lines : [] };
@@ -219,10 +221,11 @@ Responde SOLO con JSON: {"kind":"list"|"product"|"receipt"|"other","lines":["...
 
 const ROUTE_TASK = `Este es un mensaje de un cliente por WhatsApp, sin una conversación de pedido abierta. Clasifícalo:
 - "order": está pidiendo productos para comprar (ej. "quiero 2 panes y una leche", "me manda 1 foco y un cemento"). Extrae los productos en "lines". ${LINE_RULES}
+- "service": necesita un TRABAJO en su casa o local (plomería, electricidad, pintura, cerrajería, arreglos: "se me dañó la llave del baño", "necesito un electricista", "quiero pintar la sala", "cambiar la chapa de la puerta").
 - "question": pregunta algo (horario, ubicación, si tienen un producto, precio, cómo comprar) sin hacer todavía un pedido concreto.
 - "human": pide hablar con una persona o asesor, o tiene un reclamo.
 - "other": saludo, agradecimiento o cualquier otra cosa.
-Responde SOLO con JSON: {"intent":"order"|"question"|"human"|"other","lines":["..."]}`;
+Responde SOLO con JSON: {"intent":"order"|"service"|"question"|"human"|"other","lines":["..."]}`;
 
 async function callVisionOrText(
   db: SupabaseClient,

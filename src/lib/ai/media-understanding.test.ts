@@ -52,6 +52,9 @@ describe('parseFirstMessageRoute', () => {
     })
     expect(parseFirstMessageRoute('{"intent":"question","lines":["x"]}')).toEqual({ intent: 'question', lines: [] })
   })
+  it('recognises a home-service request', () => {
+    expect(parseFirstMessageRoute('{"intent":"service","lines":[]}')).toEqual({ intent: 'service', lines: [] })
+  })
   it('an order with no products is not an order', () => {
     expect(parseFirstMessageRoute('{"intent":"order","lines":[]}')).toEqual({ intent: 'other', lines: [] })
   })

@@ -8,6 +8,8 @@ import {
   stageMessage,
   statusReply,
   isOrderStatusQuestion,
+  serviceStageKind,
+  serviceStageMessage,
 } from './order-stages'
 import { DEFAULT_BUSINESS_SETTINGS } from '../business/settings'
 import { DEMO_STORE } from '../business/__fixtures__/demo-store'
@@ -83,5 +85,21 @@ describe('isOrderStatusQuestion', () => {
     'Quiero hacer un pedido: 2 cuadernos, 1 esfero, 3 lápices, 1 borrador, 1 regla, 1 compás y 1 mochila grande azul',
   ])('ignores "%s"', (text) => {
     expect(isOrderStatusQuestion(text)).toBe(false)
+  })
+})
+
+describe('service board', () => {
+  it('maps column names to service stages, loosely', () => {
+    expect(serviceStageKind('Solicitud')).toBe('new')
+    expect(serviceStageKind('Visita agendada')).toBe('scheduled')
+    expect(serviceStageKind('En camino / En trabajo')).toBe('working')
+    expect(serviceStageKind('TERMINADO')).toBe('done')
+    expect(serviceStageKind('Cancelado')).toBe('cancelled')
+    expect(serviceStageKind('Otra cosa')).toBeNull()
+  })
+  it('messages the customer only on the columns that have a text', () => {
+    expect(serviceStageMessage('scheduled', 'N° S-0003', DEMO_STORE)).toContain('N° S-0003')
+    expect(serviceStageMessage('quoted', 'N° S-0003', DEMO_STORE)).toBeNull()
+    expect(serviceStageMessage('done', '', DEMO_STORE)).toContain('Terminamos su servicio.')
   })
 })

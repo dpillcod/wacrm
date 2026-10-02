@@ -1820,6 +1820,19 @@
         "entryRouter": "Start orders from the first message",
         "entryRouterHint": "\"I want 2 breads and a milk\" as the first message goes straight to the order, without the menu."
       },
+      "services": {
+        "title": "Home services board",
+        "desc": "Plumbing, electrical, painting, locks… Messages sent when a service card moves to a column (the finished one also sends the survey). The word servicio in curly braces becomes the service number.",
+        "pipelineName": "Service pipeline name",
+        "entryNode": "Flow step where a service request starts",
+        "entryNodeHint": "Used when a first message asks for a technician (e.g. svc_tipo). Leave empty to turn that off.",
+        "messages": {
+          "scheduled": "Moved to Visit scheduled",
+          "working": "Moved to On the way / Working",
+          "done": "Moved to Finished",
+          "cancelled": "Moved to Cancelled"
+        }
+      },
       "board": {
         "title": "Order board",
         "desc": "Messages sent when a card moves to a column, the satisfaction survey, and the answers to \"where is my order?\". The word pedido in curly braces becomes the order number.",

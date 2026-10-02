@@ -93,6 +93,57 @@ export function isOrderStatusQuestion(text: string): boolean {
   )
 }
 
+// ---- Home services board ("Servicios") ---------------------------------
+
+/** Columns for a new service board. */
+export const SERVICE_STAGES: { name: string; color: string }[] = [
+  { name: 'Solicitud', color: '#3b82f6' },
+  { name: 'Visita agendada', color: '#06b6d4' },
+  { name: 'Cotizado', color: '#8b5cf6' },
+  { name: 'Aprobado', color: '#10b981' },
+  { name: 'En camino / En trabajo', color: '#f59e0b' },
+  { name: 'Terminado', color: '#16a34a' },
+  { name: 'Cancelado', color: '#ef4444' },
+]
+
+export type ServiceStageKind =
+  | 'new'
+  | 'scheduled'
+  | 'quoted'
+  | 'approved'
+  | 'working'
+  | 'done'
+  | 'cancelled'
+
+export function serviceStageKind(stageName: string): ServiceStageKind | null {
+  const n = normalize(stageName)
+  if (n.startsWith('solicitud') || n.startsWith('nuevo')) return 'new'
+  if (n.includes('agend') || n.startsWith('visita')) return 'scheduled'
+  if (n.startsWith('cotiz')) return 'quoted'
+  if (n.startsWith('aprob')) return 'approved'
+  if (n.includes('camino') || n.includes('trabajo')) return 'working'
+  if (n.startsWith('termin') || n.startsWith('finaliz') || n.startsWith('entregad')) return 'done'
+  if (n.startsWith('cancel')) return 'cancelled'
+  return null
+}
+
+/** What the customer is told when their service card reaches this column, if anything. */
+export function serviceStageMessage(
+  kind: ServiceStageKind | null,
+  serviceRef: string,
+  biz: BusinessSettings,
+): string | null {
+  const m = biz.serviceBoard.messages
+  const template =
+    kind === 'scheduled' ? m.scheduled
+      : kind === 'working' ? m.working
+        : kind === 'done' ? m.done
+          : kind === 'cancelled' ? m.cancelled
+            // New, quoted, approved: the technician talks to the customer.
+            : ''
+  return template.trim() ? renderText(template, { servicio: serviceRef }) : null
+}
+
 // ---- Satisfaction survey, sent with the "delivered" message ----------
 
 export const CSAT_OPTIONS = [

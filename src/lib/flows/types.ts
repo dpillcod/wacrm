@@ -235,6 +235,8 @@ export interface SendCtaUrlNodeConfig {
  */
 export interface OrderNumberConfig {
   assign_order_number?: boolean;
+  /** Same for a home-service request: `{{vars.service_number}}` ("S-0003"). */
+  assign_service_number?: boolean;
 }
 
 /**
@@ -317,6 +319,8 @@ export interface HandoffNodeConfig {
    * order's, made when the order arrived) its notes are refreshed.
    */
   create_order_card?: boolean;
+  /** Which board that card goes on: the order board (default) or the service board. */
+  card_board?: "orders" | "services";
   /**
    * Sent (at most every 30 min, for 12h) when the customer writes again
    * after the handoff and no one from staff has replied in the inbox —

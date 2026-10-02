@@ -85,6 +85,19 @@ export interface BusinessSettings {
     /** A payment receipt photo (the team is notified). */
     receiptReceived: string
   }
+  /** Home services (plumbing, electricity, painting, locks…): their own board. */
+  serviceBoard: {
+    /** The pipeline whose cards are service requests. */
+    pipelineName: string
+    /**
+     * Node of the main flow where a service request starts, used when a
+     * customer's first message asks for one ("necesito un plomero");
+     * '' = that shortcut is off.
+     */
+    entryNode: string
+    /** Sent when a card reaches that column; {servicio} = "N° S-0003" (may be empty). */
+    messages: { scheduled: string; working: string; done: string; cancelled: string }
+  }
   orderBoard: {
     /** The pipeline whose cards are orders. */
     pipelineName: string
@@ -161,6 +174,16 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
     photoNotUnderstood:
       'Recibí su foto 🙂 pero no logré leer productos en ella. ¿Me escribe qué necesita, o me envía una foto más clara de su lista?',
     receiptReceived: '🧾 Recibimos su comprobante, ¡gracias! Nuestro equipo lo revisará y le confirmará por aquí 🙂',
+  },
+  serviceBoard: {
+    pipelineName: 'Servicios',
+    entryNode: '',
+    messages: {
+      scheduled: '📅 Su visita técnica {servicio} quedó agendada. El técnico le escribirá por aquí antes de llegar 🙂',
+      working: '🔧 Nuestro técnico ya va en camino o trabajando en su servicio {servicio}.',
+      done: '✅ Terminamos su servicio {servicio}. ¡Gracias por confiar en nosotros! 🙂',
+      cancelled: 'Su servicio {servicio} fue cancelado. Si necesita algo, escríbanos por aquí 🙂',
+    },
   },
   orderBoard: {
     pipelineName: 'Pedidos',

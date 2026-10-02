@@ -764,6 +764,8 @@ async function executeHandoff(
       title: orderCardTitle(run),
       notes: resolvedNote ?? "",
       value: Number.isFinite(total) ? total : undefined,
+      pipelineName:
+        cfg.card_board === "services" ? (await bizOf(db, run.account_id)).serviceBoard.pipelineName : undefined,
     });
     if (cardId && cardId !== run.vars.__deal_id) {
       await saveVars(db, run, { ...run.vars, __deal_id: cardId });
@@ -835,7 +837,10 @@ async function notifyHandoff(
     getStaffPhones(biz).length > 0 &&
     staffResult.sent.length === 0;
   await notifyTeamInApp(db, run, nodeKey, {
-    title: orderTitle(run, run.vars.order_text ? "🧾 Pedido para atender" : "💬 Cliente para atender"),
+    title: orderTitle(
+      run,
+      run.vars.svc_problema ? "🔧 Servicio para atender" : run.vars.order_text ? "🧾 Pedido para atender" : "💬 Cliente para atender",
+    ),
     body:
       args.summary +
       (noOneOnShift
@@ -1085,6 +1090,9 @@ async function advanceFromNodeKey(
     });
     if ((node.config as OrderNumberConfig).assign_order_number) {
       await assignOrderNumber(db, run);
+    }
+    if ((node.config as OrderNumberConfig).assign_service_number) {
+      await assignServiceNumber(db, run);
     }
     await runNodeSideEffects(db, run, node);
 
@@ -1492,6 +1500,19 @@ async function startOrderFromFirstMessage(
   const route = await classifyFirstMessage(db, input.accountId, input.conversationId, input.message.text);
   if (questionsToAi && (route?.intent === "question" || route?.intent === "human")) {
     return { consumed: false, outcome: "no_match" };
+  }
+  // "Se me dañó la llave del baño, necesito un plomero": straight to the
+  // home-service request, with what they said as its description.
+  if (route?.intent === "service") {
+    const entryNode = (await bizOf(db, input.accountId)).serviceBoard.entryNode;
+    const nodes = await loadAllNodes(db, defaultFlow.id);
+    if (!entryNode || !nodes.has(entryNode)) {
+      return questionsToAi ? { consumed: false, outcome: "no_match" } : null;
+    }
+    return startNewRun(db, defaultFlow, input, nodes, {
+      startAt: entryNode,
+      vars: { svc_problema: input.message.text },
+    });
   }
   if (route?.intent !== "order") return null;
   const nodes = await loadAllNodes(db, defaultFlow.id);
@@ -2300,6 +2321,19 @@ async function answerOrderStatusQuestion(
   return { consumed: true, flow_run_id: activeRun?.id, outcome: "no_match" };
 }
 
+async function assignServiceNumber(db: AdminClient, run: FlowRunRow): Promise<void> {
+  if (run.vars.service_number) return;
+  const { count } = await db
+    .from("flow_runs")
+    .select("id", { count: "exact", head: true })
+    .eq("account_id", run.account_id)
+    .not("vars->>service_number", "is", null);
+  await saveVars(db, run, {
+    ...run.vars,
+    service_number: `S-${String((count ?? 0) + 1).padStart(4, "0")}`,
+  });
+}
+
 async function assignOrderNumber(db: AdminClient, run: FlowRunRow): Promise<void> {
   if (run.vars.order_number) return;
   // Count-based, not a DB sequence: two orders confirmed in the same
@@ -2363,6 +2397,7 @@ function orderCardTitle(run: FlowRunRow): string {
     typeof run.vars.contact_name === "string" && run.vars.contact_name.trim()
       ? ` — ${run.vars.contact_name.trim()}`
       : "";
+  if (run.vars.service_number) return `Servicio N° ${run.vars.service_number}${name}`;
   if (run.vars.order_number) return `Pedido N° ${run.vars.order_number}${name}`;
   if (run.vars.order_id) return `Pedido web N° ${run.vars.order_id}${name}`;
   return `Pedido${name}`;
@@ -2373,6 +2408,7 @@ function orderTitle(run: FlowRunRow, fallback: string): string {
     typeof run.vars.contact_name === "string" && run.vars.contact_name.trim()
       ? ` — ${run.vars.contact_name.trim()}`
       : "";
+  if (run.vars.service_number) return `🔧 Servicio N° ${run.vars.service_number}${name}`;
   if (run.vars.order_number) return `🧾 Pedido N° ${run.vars.order_number}${name}`;
   if (run.vars.order_id) return `🛒 Pedido web N° ${run.vars.order_id}${name}`;
   return `${fallback}${name}`;
@@ -3878,7 +3914,10 @@ async function startNewRun(
   flow: FlowRow,
   input: DispatchInboundInput,
   nodes: Map<string, FlowNodeRow>,
+  /** Start somewhere other than the entry node, with some vars already known. */
+  opts: { startAt?: string; vars?: Record<string, unknown> } = {},
 ): Promise<DispatchInboundResult> {
+  const startAt = opts.startAt && nodes.has(opts.startAt) ? opts.startAt : flow.entry_node_id!;
   // Seed `vars.contact_name` up front so any node's `{{vars.contact_name}}`
   // (send_message/send_buttons text, prompt_text, etc.) can greet the
   // customer by name without every flow author needing a collect_input
@@ -3921,8 +3960,8 @@ async function startNewRun(
       contact_id: input.contactId,
       conversation_id: input.conversationId,
       status: "active",
-      current_node_key: flow.entry_node_id,
-      vars: { contact_name: contactName },
+      current_node_key: startAt,
+      vars: { ...(opts.vars ?? {}), contact_name: contactName },
     })
     .select("*")
     .maybeSingle();
@@ -3986,7 +4025,7 @@ async function startNewRun(
   // order" text_fallback) rather than something to greet over. If the
   // entry node can't take an order list, fall back to a normal start —
   // the cart itself is still in the inbox for staff.
-  if (input.message.kind === "order") {
+  if (input.message.kind === "order" && startAt === flow.entry_node_id) {
     const entry = nodes.get(flow.entry_node_id!);
     const entryTakesOrder =
       (entry && textFallbackOf(entry)?.append === true) ||
@@ -4001,8 +4040,8 @@ async function startNewRun(
     }
   }
 
-  // Run the advance loop starting from the entry node.
-  const outcome = await advanceFromNodeKey(db, run, flow.entry_node_id!, nodes);
+  // Run the advance loop starting from the entry (or requested) node.
+  const outcome = await advanceFromNodeKey(db, run, startAt, nodes);
   return {
     consumed: true,
     flow_run_id: run.id,
