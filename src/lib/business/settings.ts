@@ -58,6 +58,13 @@ export interface BusinessSettings {
     transcribeAudio: boolean
     /** A whole order typed as the first message starts the order flow. */
     entryRouter: boolean
+    /** Most voice notes transcribed per day (protects the transcription credits). */
+    audioDailyLimit: number
+  }
+  /** Bakery orders (cakes, party snacks, bread). */
+  bakery: {
+    /** Node of the main flow where a bakery order starts ("quiero una torta"); '' = off. */
+    entryNode: string
   }
   texts: {
     idleNudge: string
@@ -84,6 +91,10 @@ export interface BusinessSettings {
     photoNotUnderstood: string
     /** A payment receipt photo (the team is notified). */
     receiptReceived: string
+    /** Customer went quiet in the middle of something that isn't an order list. */
+    idleNudgeGeneral: string
+    /** A voice note over 3 minutes. */
+    audioTooLong: string
   }
   /** Home services (plumbing, electricity, painting, locks…): their own board. */
   serviceBoard: {
@@ -150,7 +161,8 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
   crossSell: [],
   birthdayFieldName: 'Fecha de nacimiento',
   woocommerceUrl: '',
-  aiFeatures: { readImages: true, transcribeAudio: true, entryRouter: true },
+  aiFeatures: { readImages: true, transcribeAudio: true, entryRouter: true, audioDailyLimit: 200 },
+  bakery: { entryNode: '' },
   texts: {
     idleNudge: '¿Sigue ahí? Si tiene alguna duda, dígame y seguimos con su pedido 🙂',
     captureFailed: 'Disculpe, no logré registrar eso último 🙁 ¿Me lo puede escribir de nuevo?',
@@ -174,6 +186,8 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
     photoNotUnderstood:
       'Recibí su foto 🙂 pero no logré leer productos en ella. ¿Me escribe qué necesita, o me envía una foto más clara de su lista?',
     receiptReceived: '🧾 Recibimos su comprobante, ¡gracias! Nuestro equipo lo revisará y le confirmará por aquí 🙂',
+    idleNudgeGeneral: '¿Sigue ahí? 🙂 Cuando pueda, respóndame y continuamos.',
+    audioTooLong: 'Su audio es un poco largo 🙏 ¿Me lo puede escribir, o enviar uno más corto (menos de 3 minutos)?',
   },
   serviceBoard: {
     pipelineName: 'Servicios',
@@ -266,6 +280,7 @@ export function sanitizeSettings(stored: unknown): BusinessSettings {
   return {
     ...s,
     utcOffsetHours: Math.max(-12, Math.min(14, s.utcOffsetHours)),
+    aiFeatures: { ...s.aiFeatures, audioDailyLimit: Math.max(0, Math.min(5000, Math.round(s.aiFeatures.audioDailyLimit))) },
     phoneCountryCode: s.phoneCountryCode.replace(/\D/g, ''),
     // Seven days or none (= always open); a partial week is padded closed.
     openingHours: hours.length ? [...hours, ...Array(7 - hours.length).fill(null)] : [],

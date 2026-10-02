@@ -66,6 +66,7 @@ import {
 } from "../pipelines/order-stages";
 import { updateWooOrder } from "../woocommerce/client";
 import { classifyFirstMessage, readImage, transcribeAudio, type ImageReading } from "../ai/media-understanding";
+import { nextGuideStep, type GuideAnswer } from "./service-guide";
 import { formatFormReply } from "../whatsapp/flow-form";
 import { INTERACTIVE_LIMITS } from "../whatsapp/meta-api";
 import { isPriceQuestion } from "./price-question";
@@ -1223,6 +1224,15 @@ async function advanceFromNodeKey(
       // Send the prompt and suspend. Customer's next TEXT reply will
       // wake us up via handleReplyForActiveRun's collect_input branch.
       const cfg = node.config as unknown as CollectInputNodeConfig;
+      const known = run.vars[cfg.var_key];
+      if (cfg.ai_guide && typeof known === "string" && known.trim()) {
+        // The job is already described: go straight to the advisor's
+        // questions instead of asking for it again.
+        if (await advanceCurrentNodeKey(db, run.id, run.current_node_key, node.node_key)) {
+          run.current_node_key = node.node_key;
+        }
+        return runServiceGuide(db, run, node, nodes, []);
+      }
       if (cfg.silent) {
         // The question already went out (e.g. in a template) — just
         // wait. No idle nudge: outside the 24h window it couldn't be
@@ -1456,8 +1466,20 @@ export async function dispatchInboundToFlows(
   if (m.kind === "other" && m.message_type === "audio" && m.media_url) {
     try {
       const db = supabaseAdmin();
-      if ((await bizOf(db, input.accountId)).aiFeatures.transcribeAudio) {
-        const text = await transcribeAudio(db, input.accountId, m.media_url);
+      const biz = await bizOf(db, input.accountId);
+      if (biz.aiFeatures.transcribeAudio && (await audiosTranscribedToday(db, input.accountId, biz)) < biz.aiFeatures.audioDailyLimit) {
+        const result = await transcribeAudio(db, input.accountId, m.media_url);
+        if (result && "tooLong" in result) {
+          await engineSendText({
+            accountId: input.accountId,
+            userId: input.userId,
+            conversationId: input.conversationId,
+            contactId: input.contactId,
+            text: biz.texts.audioTooLong,
+          });
+          return { consumed: true, outcome: "no_match" };
+        }
+        const text = result?.text;
         if (text) {
           transcript = text;
           await db
@@ -1474,6 +1496,20 @@ export async function dispatchInboundToFlows(
   }
   const result = await dispatchInboundToFlowsInner(input);
   return transcript ? { ...result, transcript } : result;
+}
+
+/** Voice notes transcribed today (local time) for this account — for the daily cap. */
+async function audiosTranscribedToday(db: AdminClient, accountId: string, biz: BusinessSettings): Promise<number> {
+  const offsetMs = biz.utcOffsetHours * 3_600_000;
+  const localMidnight = new Date(Math.floor((Date.now() + offsetMs) / 86_400_000) * 86_400_000 - offsetMs);
+  const { count } = await db
+    .from("messages")
+    .select("id, conversations!inner(account_id)", { count: "exact", head: true })
+    .eq("conversations.account_id", accountId)
+    .eq("content_type", "audio")
+    .like("content_text", "🎤%")
+    .gte("created_at", localMidnight.toISOString());
+  return count ?? 0;
 }
 
 /** A bot-made "cart": order lines read from a photo or a typed first message. */
@@ -1503,15 +1539,21 @@ async function startOrderFromFirstMessage(
   }
   // "Se me dañó la llave del baño, necesito un plomero": straight to the
   // home-service request, with what they said as its description.
-  if (route?.intent === "service") {
-    const entryNode = (await bizOf(db, input.accountId)).serviceBoard.entryNode;
+  if (route?.intent === "service" || route?.intent === "bakery") {
+    const biz = await bizOf(db, input.accountId);
+    const entryNode = route.intent === "service" ? biz.serviceBoard.entryNode : biz.bakery.entryNode;
     const nodes = await loadAllNodes(db, defaultFlow.id);
     if (!entryNode || !nodes.has(entryNode)) {
       return questionsToAi ? { consumed: false, outcome: "no_match" } : null;
     }
+    // What they said becomes the description the advisor starts from.
+    const startNode = nodes.get(entryNode)!;
+    const describedVar =
+      (startNode.config as { text_fallback?: { var_key?: string } }).text_fallback?.var_key ??
+      (route.intent === "service" ? "svc_problema" : "pst_detalle");
     return startNewRun(db, defaultFlow, input, nodes, {
       startAt: entryNode,
-      vars: { svc_problema: input.message.text },
+      vars: { [describedVar]: input.message.text },
     });
   }
   if (route?.intent !== "order") return null;
@@ -1567,6 +1609,54 @@ async function acknowledgeReceipt(
       body,
     });
   }
+}
+
+/** The service advisor's open question (see CollectInputNodeConfig.ai_guide). */
+interface PendingGuide {
+  node_key: string;
+  question: string;
+  answers: GuideAnswer[];
+}
+
+/**
+ * One turn of the service advisor: ask the next question (and stay on
+ * this node), or — when there's enough, the AI is unavailable, or the
+ * question budget is spent — save the summary and move on.
+ */
+async function runServiceGuide(
+  db: AdminClient,
+  run: FlowRunRow,
+  node: FlowNodeRow,
+  nodes: Map<string, FlowNodeRow>,
+  answers: GuideAnswer[],
+): Promise<{ outcome: "advanced" | "completed" | "handed_off" }> {
+  const cfg = node.config as unknown as CollectInputNodeConfig;
+  const max = Math.max(0, Math.min(cfg.ai_guide?.max_questions ?? 3, 5));
+  const initial = String(run.vars[cfg.var_key] ?? "").trim();
+  const step = await nextGuideStep(db, run.account_id, run.conversation_id, {
+    context: interpolateVars(cfg.ai_guide?.context ?? "", run.vars),
+    initial,
+    answers,
+    remaining: max - answers.length,
+    kind: cfg.ai_guide?.kind,
+  });
+  const vars: Record<string, unknown> = { ...run.vars };
+  delete vars.__pending_guide;
+  vars[`${cfg.var_key}_qa`] = answers.map((x) => `• ${x.q} → ${x.a}`).join("\n");
+  const tip = step?.tip && !run.vars.__guide_tip_sent ? step.tip : null;
+  if (tip) vars.__guide_tip_sent = true;
+
+  if (step?.question && answers.length < max) {
+    vars.__pending_guide = { node_key: node.node_key, question: step.question, answers } satisfies PendingGuide;
+    await saveVars(db, run, vars);
+    await sendEngineText(db, run, node.node_key, tip ? `${tip}\n\n${step.question}` : step.question, "service_guide_question");
+    return { outcome: "advanced" };
+  }
+
+  vars[`${cfg.var_key}_resumen`] = step?.summary || [initial, ...answers.map((x) => x.a)].filter(Boolean).join(". ");
+  await saveVars(db, run, vars);
+  if (tip) await sendEngineText(db, run, node.node_key, tip, "service_guide_tip");
+  return advanceFromNodeKey(db, run, cfg.next_node_key, nodes);
 }
 
 /** Open and unassigned: nobody on the team has taken this conversation. */
@@ -2938,13 +3028,19 @@ async function sendIdleNudge(
   if (freshRun.status !== "active" || freshRun.current_node_key !== expectedNodeKey) {
     return;
   }
+  // Someone looking at the menu isn't "in the middle" of anything: no
+  // "¿sigue ahí?" there. Elsewhere, only mention the order when there is one.
+  const holdsList = runHoldsList(freshRun);
+  const flow = await loadFlow(db, freshRun.flow_id);
+  if (!holdsList && flow?.entry_node_id === expectedNodeKey) return;
+  const texts = (await bizOf(db, freshRun.account_id)).texts;
   try {
     const { whatsapp_message_id } = await engineSendText({
       accountId: freshRun.account_id,
       userId: freshRun.user_id,
       conversationId: freshRun.conversation_id!,
       contactId: freshRun.contact_id!,
-      text: (await bizOf(db, freshRun.account_id)).texts.idleNudge,
+      text: holdsList ? texts.idleNudge : texts.idleNudgeGeneral,
     });
     await logEvent(db, runId, "message_sent", expectedNodeKey, {
       reason: "idle_nudge",
@@ -3513,6 +3609,24 @@ async function handleReplyForActiveRun(
   // where a text reply re-enters the disambiguation check fresh.
   // List corrections — see CollectInputNodeConfig.edit_list_var and
   // SendButtonsNodeConfig buttons' check_duplicates_var.
+  // The customer is answering the service advisor's question.
+  const pendingGuide = run.vars.__pending_guide as PendingGuide | undefined;
+  if (pendingGuide && pendingGuide.node_key === currentNode.node_key) {
+    if (message.kind === "text" && message.text.trim()) {
+      const answers = [...pendingGuide.answers, { q: pendingGuide.question, a: message.text.trim() }];
+      const guided = await runServiceGuide(db, run, currentNode, nodes, answers);
+      return { consumed: true, flow_run_id: run.id, outcome: guided.outcome };
+    }
+    if (message.kind === "image") {
+      // A photo of the problem in the middle of the questions: keep it.
+      const photoVar = `${(currentNode.config as unknown as CollectInputNodeConfig).var_key}_fotos`;
+      const prev = typeof run.vars[photoVar] === "string" ? `${run.vars[photoVar]}\n` : "";
+      await saveVars(db, run, { ...run.vars, [photoVar]: `${prev}${message.media_url}` });
+      await sendEngineText(db, run, currentNode.node_key, `📸 ¡Gracias por la foto! ${pendingGuide.question}`, "service_guide_photo");
+      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
+  }
+
   const listResult = await handleListEditing(db, run, currentNode, message, nodes);
   if (listResult) return listResult;
 
@@ -3665,7 +3779,14 @@ async function handleReplyForActiveRun(
     // A reply that doesn't pass the node's validation (e.g. a pasted
     // order summary where a cédula was asked) leaves `matched` null, so
     // the fallback policy re-asks with prompt_text.
-    const validated = extractValidInput(cfg, message.text);
+    let validated = extractValidInput(cfg, message.text);
+    // "listo" / "no tengo" where an optional photo was asked: no photo.
+    if (
+      validated !== null && cfg.accept === "image" && cfg.optional &&
+      (isAckOnly(validated) || /^(no|no tengo|sin foto|ninguna|nada)/.test(normalizeForMatch(validated)))
+    ) {
+      validated = "(sin foto)";
+    }
     if (validated !== null) {
       const disambiguation = await tryStartProductDisambiguation(
         db,
@@ -3684,6 +3805,10 @@ async function handleReplyForActiveRun(
         text: validated,
       });
       debounceMs = cfg.debounce_ms;
+      if (matched && cfg.ai_guide) {
+        const guided = await runServiceGuide(db, run, currentNode, nodes, []);
+        return { consumed: true, flow_run_id: run.id, outcome: guided.outcome };
+      }
     }
   } else if (message.kind === "form_reply" && currentCollectCfg) {
     // A submitted in-chat form: all its answers as one capture, plus one

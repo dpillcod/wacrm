@@ -37,6 +37,19 @@ const PRICE_QUESTION_PHRASES = [
   'ayudeme con la cuenta',
   'ayudame con la cuenta',
   'me pasa la cuenta',
+  // Services and bakery orders: "¿cuánto me cobran?"
+  'cuanto cobran',
+  'cuanto me cobran',
+  'cuanto cobra',
+  'cuanto me cobra',
+  'cuanto me sale',
+  'cuanto costaria',
+  'que precio tiene',
+  'que precio tienen',
+  'cual es el precio',
+  'cual es el costo',
+  'cual seria el costo',
+  'cuanto valdria',
 ];
 
 function normalize(text: string): string {

@@ -339,6 +339,21 @@ export interface HandoffNodeConfig {
  * v2 will start enforcing.
  */
 export interface CollectInputNodeConfig {
+  /**
+   * A service advisor (see flows/service-guide.ts): once the customer has
+   * described the job, the AI asks up to `max_questions` short questions
+   * — one at a time — and writes `{{vars.<var_key>_resumen}}` (the job,
+   * for staff) and `{{vars.<var_key>_qa}}` (the questions and answers).
+   * If the var is already filled when the run reaches this node (e.g. the
+   * first message described the job), the questions start right away.
+   * `context` is interpolated, e.g. "Servicio: {{vars.svc_tipo_choice}}".
+   */
+  ai_guide?: {
+    max_questions?: number;
+    context?: string;
+    /** What the advisor asks about: a job at home (default) or a bakery order. */
+    kind?: "home_service" | "bakery";
+  };
   /** Prompt text sent to the customer before they reply. */
   prompt_text: string;
   /**

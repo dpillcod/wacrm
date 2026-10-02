@@ -61,8 +61,10 @@ const TEXT_KEYS: (keyof Texts)[] = [
   "resumeOrder",
   "photoNotUnderstood",
   "receiptReceived",
+  "idleNudgeGeneral",
+  "audioTooLong",
 ];
-const AI_FEATURE_KEYS: (keyof BusinessSettings["aiFeatures"])[] = [
+const AI_FEATURE_KEYS: ("readImages" | "transcribeAudio" | "entryRouter")[] = [
   "readImages",
   "transcribeAudio",
   "entryRouter",
@@ -376,6 +378,16 @@ export function BusinessSettingsPanel() {
             </span>
           </label>
         ))}
+        <Field label={t("ai.audioDailyLimit")} hint={t("ai.audioDailyLimitHint")}>
+          <Input
+            type="number"
+            min={0}
+            className="w-32"
+            value={s.aiFeatures.audioDailyLimit}
+            disabled={readOnly}
+            onChange={(e) => set({ aiFeatures: { ...s.aiFeatures, audioDailyLimit: Number(e.target.value) || 0 } })}
+          />
+        </Field>
       </Section>
 
       <Section title={t("texts.title")} description={t("texts.desc")}>
@@ -400,6 +412,13 @@ export function BusinessSettingsPanel() {
               value={s.serviceBoard.entryNode}
               disabled={readOnly}
               onChange={(e) => setServiceBoard({ entryNode: e.target.value })}
+            />
+          </Field>
+          <Field label={t("services.bakeryEntryNode")} hint={t("services.bakeryEntryNodeHint")}>
+            <Input
+              value={s.bakery.entryNode}
+              disabled={readOnly}
+              onChange={(e) => set({ bakery: { entryNode: e.target.value } })}
             />
           </Field>
         </div>

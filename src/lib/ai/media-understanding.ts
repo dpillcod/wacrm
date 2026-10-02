@@ -28,8 +28,12 @@ import { businessIntro } from "../flows/order-clarify";
 const MEDIA_TIMEOUT_MS = 25_000;
 /** Images above this are not sent to the model (WhatsApp photos are ~100–400 KB). */
 const MAX_IMAGE_BYTES = 4_500_000;
-/** Voice notes above this (~10+ minutes) are not transcribed. */
-const MAX_AUDIO_BYTES = 20_000_000;
+/**
+ * Voice notes above this are not transcribed: WhatsApp voice notes are
+ * Opus at ~16–24 kbps, so ~700 KB is about 3–5 minutes. Protects the
+ * transcription credits from very long recordings.
+ */
+export const MAX_AUDIO_BYTES = 700_000;
 
 export interface InboundMedia {
   buffer: Buffer;
@@ -106,12 +110,14 @@ function audioFileName(mimeType: string): string {
   return `audio.${ext}`;
 }
 
-/** A voice note as text, or null (not configured, too long, failed, silent). */
+export type TranscriptionResult = { text: string } | { tooLong: true } | null;
+
+/** A voice note as text; { tooLong } over the size cap; null when not configured or it failed. */
 export async function transcribeAudio(
   db: SupabaseClient,
   accountId: string,
   mediaUrl: string | null | undefined,
-): Promise<string | null> {
+): Promise<TranscriptionResult> {
   let config: AiConfig | null = null;
   try {
     config = await loadAiConfig(db, accountId);
@@ -121,7 +127,8 @@ export async function transcribeAudio(
   const target = transcriptionTarget(config);
   if (!target) return null;
   const media = await loadInboundMedia(db, accountId, mediaUrl);
-  if (!media || media.buffer.length > MAX_AUDIO_BYTES) return null;
+  if (!media) return null;
+  if (media.buffer.length > MAX_AUDIO_BYTES) return { tooLong: true };
   try {
     const form = new FormData();
     form.append(
@@ -144,7 +151,7 @@ export async function transcribeAudio(
     }
     const data = (await res.json()) as { text?: string };
     const text = data.text?.trim() ?? "";
-    return text.length > 0 ? text : null;
+    return text.length > 0 ? { text } : null;
   } catch (err) {
     console.error("[media-understanding] transcription failed:", err);
     return null;
@@ -160,7 +167,7 @@ export type ImageReading =
   | { kind: "other"; summary: string };
 
 export interface FirstMessageRoute {
-  intent: "order" | "service" | "question" | "human" | "other";
+  intent: "order" | "service" | "bakery" | "question" | "human" | "other";
   lines: string[];
 }
 
@@ -202,7 +209,10 @@ export function parseFirstMessageRoute(raw: string): FirstMessageRoute | null {
   const j = firstJson(raw);
   if (!j) return null;
   const intent = j.intent;
-  if (intent !== "order" && intent !== "service" && intent !== "question" && intent !== "human" && intent !== "other") {
+  if (
+    intent !== "order" && intent !== "service" && intent !== "bakery" &&
+    intent !== "question" && intent !== "human" && intent !== "other"
+  ) {
     return null;
   }
   const lines = cleanLines(j.lines);
@@ -221,11 +231,12 @@ Responde SOLO con JSON: {"kind":"list"|"product"|"receipt"|"other","lines":["...
 
 const ROUTE_TASK = `Este es un mensaje de un cliente por WhatsApp, sin una conversación de pedido abierta. Clasifícalo:
 - "order": está pidiendo productos para comprar (ej. "quiero 2 panes y una leche", "me manda 1 foco y un cemento"). Extrae los productos en "lines". ${LINE_RULES}
-- "service": necesita un TRABAJO en su casa o local (plomería, electricidad, pintura, cerrajería, arreglos: "se me dañó la llave del baño", "necesito un electricista", "quiero pintar la sala", "cambiar la chapa de la puerta").
+- "service": necesita un TRABAJO en su casa o local (gasfitería, eléctricos, pintura, reparaciones: "se me dañó la llave del baño", "necesito un electricista", "quiero pintar la sala", "cambiar la chapa de la puerta").
+- "bakery": quiere ENCARGAR pastelería o panadería para una fecha (torta, pastel, bocaditos, pan para un evento o negocio: "quiero una torta para el sábado", "bocaditos para 50 personas"). Comprar 2 panes para hoy es "order".
 - "question": pregunta algo (horario, ubicación, si tienen un producto, precio, cómo comprar) sin hacer todavía un pedido concreto.
 - "human": pide hablar con una persona o asesor, o tiene un reclamo.
 - "other": saludo, agradecimiento o cualquier otra cosa.
-Responde SOLO con JSON: {"intent":"order"|"service"|"question"|"human"|"other","lines":["..."]}`;
+Responde SOLO con JSON: {"intent":"order"|"service"|"bakery"|"question"|"human"|"other","lines":["..."]}`;
 
 async function callVisionOrText(
   db: SupabaseClient,

@@ -1808,7 +1808,9 @@
         "humanRequest": "Asks for a person while writing the order",
         "resumeOrder": "Says hello again in the middle of an order",
         "photoNotUnderstood": "Photo with no products in it",
-        "receiptReceived": "Payment receipt received (the team is notified)"
+        "receiptReceived": "Payment receipt received (the team is notified)",
+        "idleNudgeGeneral": "Customer went quiet (outside an order list)",
+        "audioTooLong": "Voice note longer than ~3 minutes"
       },
       "ai": {
         "title": "AI with photos, voice notes and first messages",
@@ -1818,7 +1820,9 @@
         "transcribeAudio": "Understand voice notes",
         "transcribeAudioHint": "Voice notes are turned into text. Needs TRANSCRIBE_API_KEY on the server (Groq's free tier works) or an OpenAI key.",
         "entryRouter": "Start orders from the first message",
-        "entryRouterHint": "\"I want 2 breads and a milk\" as the first message goes straight to the order, without the menu."
+        "entryRouterHint": "\"I want 2 breads and a milk\" as the first message goes straight to the order, without the menu.",
+        "audioDailyLimit": "Most voice notes transcribed per day",
+        "audioDailyLimitHint": "Protects the transcription credits. Over it, the bot asks the customer to write."
       },
       "services": {
         "title": "Home services board",
@@ -1826,6 +1830,8 @@
         "pipelineName": "Service pipeline name",
         "entryNode": "Flow step where a service request starts",
         "entryNodeHint": "Used when a first message asks for a technician (e.g. svc_tipo). Leave empty to turn that off.",
+        "bakeryEntryNode": "Flow step where a bakery order starts",
+        "bakeryEntryNodeHint": "Used when a first message orders a cake or party snacks (e.g. pst_tipo). Leave empty to turn that off.",
         "messages": {
           "scheduled": "Moved to Visit scheduled",
           "working": "Moved to On the way / Working",
