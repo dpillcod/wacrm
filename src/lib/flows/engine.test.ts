@@ -3,6 +3,7 @@ import {
   isAckOnly,
   isHumanRequest,
   isPlainGreeting,
+  looksLikeSeveralItems,
   optionByText,
   outOfRangeOption,
 } from "./engine";
@@ -541,5 +542,18 @@ describe("messages that are not order lines", () => {
   );
   it.each(["2 panes", "jabón para persona sensible", "una persona me dijo que hay arroz flor"])("not a request: %s", (t) => {
     expect(isHumanRequest(t)).toBe(false);
+  });
+});
+
+describe("looksLikeSeveralItems", () => {
+  it("splits voice notes and long sentences that list things", () => {
+    expect(looksLikeSeveralItems("dos leches y un arroz", true)).toBe(true);
+    expect(looksLikeSeveralItems("deme dos litros de leche y un paquete de arroz", false)).toBe(true);
+    expect(looksLikeSeveralItems("2 panes, 1 leche, 3 huevos y un queso fresco", false)).toBe(true);
+  });
+  it("leaves single typed items alone", () => {
+    expect(looksLikeSeveralItems("1 cuaderno universitario 100 hojas cuadros", false)).toBe(false);
+    expect(looksLikeSeveralItems("2 panes", false)).toBe(false);
+    expect(looksLikeSeveralItems("ok", true)).toBe(false);
   });
 });

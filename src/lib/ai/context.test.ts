@@ -3,12 +3,13 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { buildConversationContext } from './context'
 
 /** Minimal fake matching the query chain in buildConversationContext:
- *  from().select().eq().eq().order().limit() → { data, error }. */
+ *  from().select().eq().in().order().limit() → { data, error }. */
 function fakeDb(rows: unknown[]): SupabaseClient {
   const chain = {
     from: () => chain,
     select: () => chain,
     eq: () => chain,
+    in: () => chain,
     order: () => chain,
     limit: () => Promise.resolve({ data: rows, error: null }),
   }
@@ -29,6 +30,14 @@ describe('buildConversationContext', () => {
       { role: 'assistant', content: 'second' },
       { role: 'user', content: 'third' },
     ])
+  })
+
+  it('includes a transcribed voice note without its mic marker', async () => {
+    const out = await buildConversationContext(
+      fakeDb([{ sender_type: 'customer', content_text: '🎤 ¿A qué hora cierran?' }]),
+      'conv-1',
+    )
+    expect(out).toEqual([{ role: 'user', content: '¿A qué hora cierran?' }])
   })
 
   it('treats bot messages as assistant', async () => {

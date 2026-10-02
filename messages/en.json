@@ -1806,7 +1806,19 @@
         "invalidOption": "Option number that doesn't exist",
         "orderAck": "\"Yes\" / \"ok\" while writing the order",
         "humanRequest": "Asks for a person while writing the order",
-        "resumeOrder": "Says hello again in the middle of an order"
+        "resumeOrder": "Says hello again in the middle of an order",
+        "photoNotUnderstood": "Photo with no products in it",
+        "receiptReceived": "Payment receipt received (the team is notified)"
+      },
+      "ai": {
+        "title": "AI with photos, voice notes and first messages",
+        "desc": "Uses the account's AI key. Prices are never given.",
+        "readImages": "Read photos",
+        "readImagesHint": "A photo of a written list, or of a product, becomes lines of the order.",
+        "transcribeAudio": "Understand voice notes",
+        "transcribeAudioHint": "Voice notes are turned into text. Needs TRANSCRIBE_API_KEY on the server (Groq's free tier works) or an OpenAI key.",
+        "entryRouter": "Start orders from the first message",
+        "entryRouterHint": "\"I want 2 breads and a milk\" as the first message goes straight to the order, without the menu."
       },
       "board": {
         "title": "Order board",

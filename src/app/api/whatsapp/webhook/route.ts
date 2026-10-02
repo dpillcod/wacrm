@@ -805,6 +805,8 @@ async function processMessage(
     isFirstInboundMessage,
   })
   const flowConsumed = flowResult.consumed
+  // A transcribed voice note counts as text for the AI reply below.
+  const aiInboundText = flowResult.transcript ?? contentText ?? message.text?.body ?? ''
 
   // Fire any automations that react to this webhook event. All dispatches
   // run here (not earlier) so the contact, conversation, and inbound
@@ -864,7 +866,7 @@ async function processMessage(
     interactiveReplyId,
     inboundTextLength: inboundText.trim().length,
   })
-  if (!flowConsumed && !interactiveReplyId && inboundText.trim()) {
+  if (!flowConsumed && !interactiveReplyId && aiInboundText.trim()) {
     await dispatchInboundToAiReply({
       accountId,
       conversationId: conversation.id,

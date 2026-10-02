@@ -50,6 +50,15 @@ export interface BusinessSettings {
   birthdayFieldName: string
   /** WooCommerce store URL (keys stay in the server environment). */
   woocommerceUrl: string
+  /** AI help with what customers send (uses the account's AI key). */
+  aiFeatures: {
+    /** Photo of a written list or of a product → order lines. */
+    readImages: boolean
+    /** Voice notes → text (needs TRANSCRIBE_API_KEY or an OpenAI key). */
+    transcribeAudio: boolean
+    /** A whole order typed as the first message starts the order flow. */
+    entryRouter: boolean
+  }
   texts: {
     idleNudge: string
     captureFailed: string
@@ -71,6 +80,10 @@ export interface BusinessSettings {
     humanRequest: string
     /** A plain "hola" in the middle of an order (the list is kept). */
     resumeOrder: string
+    /** A photo sent while ordering that has no products in it. */
+    photoNotUnderstood: string
+    /** A payment receipt photo (the team is notified). */
+    receiptReceived: string
   }
   orderBoard: {
     /** The pipeline whose cards are orders. */
@@ -124,6 +137,7 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
   crossSell: [],
   birthdayFieldName: 'Fecha de nacimiento',
   woocommerceUrl: '',
+  aiFeatures: { readImages: true, transcribeAudio: true, entryRouter: true },
   texts: {
     idleNudge: '¿Sigue ahí? Si tiene alguna duda, dígame y seguimos con su pedido 🙂',
     captureFailed: 'Disculpe, no logré registrar eso último 🙁 ¿Me lo puede escribir de nuevo?',
@@ -144,6 +158,9 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
       'Con gusto le atiende una persona de nuestro equipo 🙂 Escriba *menú* y elija *Hablar con un asesor*. Si prefiere, primero terminamos su lista: escríbame *listo*.',
     resumeOrder:
       '¡Hola de nuevo! 👋 Seguimos con su pedido 🙂 Escríbame lo que le falta, o *listo* si ya terminó. Si prefiere empezar de cero, escriba *menú*.',
+    photoNotUnderstood:
+      'Recibí su foto 🙂 pero no logré leer productos en ella. ¿Me escribe qué necesita, o me envía una foto más clara de su lista?',
+    receiptReceived: '🧾 Recibimos su comprobante, ¡gracias! Nuestro equipo lo revisará y le confirmará por aquí 🙂',
   },
   orderBoard: {
     pipelineName: 'Pedidos',

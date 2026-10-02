@@ -59,6 +59,13 @@ const TEXT_KEYS: (keyof Texts)[] = [
   "orderAck",
   "humanRequest",
   "resumeOrder",
+  "photoNotUnderstood",
+  "receiptReceived",
+];
+const AI_FEATURE_KEYS: (keyof BusinessSettings["aiFeatures"])[] = [
+  "readImages",
+  "transcribeAudio",
+  "entryRouter",
 ];
 const MESSAGE_KEYS: (keyof Board["messages"])[] = ["paid", "ready", "delivered", "cancelled"];
 const STATUS_KEYS: (keyof Board["statusReplies"])[] = [
@@ -347,6 +354,24 @@ export function BusinessSettingsPanel() {
         <Field label={t("rules.crossSell")} hint={t("rules.crossSellHint")}>
           {area(draft.crossSell, (v) => edit({ crossSell: v }), 6)}
         </Field>
+      </Section>
+
+      <Section title={t("ai.title")} description={t("ai.desc")}>
+        {AI_FEATURE_KEYS.map((key) => (
+          <label key={key} className="flex items-start gap-2 text-sm text-foreground">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={s.aiFeatures[key]}
+              disabled={readOnly}
+              onChange={(e) => set({ aiFeatures: { ...s.aiFeatures, [key]: e.target.checked } })}
+            />
+            <span>
+              {t(`ai.${key}`)}
+              <span className="block text-xs text-muted-foreground">{t(`ai.${key}Hint`)}</span>
+            </span>
+          </label>
+        ))}
       </Section>
 
       <Section title={t("texts.title")} description={t("texts.desc")}>

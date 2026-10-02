@@ -25,7 +25,9 @@ export async function buildConversationContext(
     .from('messages')
     .select('sender_type, content_text')
     .eq('conversation_id', conversationId)
-    .eq('content_type', 'text')
+    // Voice notes count once transcribed (their text is set by the
+    // flows engine, "🎤 …"); untranscribed ones have no text and drop out.
+    .in('content_type', ['text', 'audio'])
     .order('created_at', { ascending: false })
     .limit(limit)
 
@@ -36,6 +38,6 @@ export async function buildConversationContext(
     .filter((m) => m.content_text && m.content_text.trim())
     .map((m) => ({
       role: m.sender_type === 'customer' ? 'user' : 'assistant',
-      content: m.content_text!.trim(),
+      content: m.content_text!.trim().replace(/^🎤\s*/u, ''),
     }))
 }

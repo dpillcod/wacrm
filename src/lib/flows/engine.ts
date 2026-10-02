@@ -65,6 +65,7 @@ import {
   statusReply,
 } from "../pipelines/order-stages";
 import { updateWooOrder } from "../woocommerce/client";
+import { classifyFirstMessage, readImage, transcribeAudio, type ImageReading } from "../ai/media-understanding";
 import { formatFormReply } from "../whatsapp/flow-form";
 import { INTERACTIVE_LIMITS } from "../whatsapp/meta-api";
 import { isPriceQuestion } from "./price-question";
@@ -1439,6 +1440,128 @@ async function advanceCurrentNodeKey(
 export async function dispatchInboundToFlows(
   input: DispatchInboundInput & { isFirstInboundMessage: boolean },
 ): Promise<DispatchInboundResult> {
+  // A voice note is transcribed first and then handled exactly as if
+  // the customer had typed it (keywords, the order list, questions…).
+  // The inbox shows the text next to the audio.
+  let transcript: string | undefined;
+  const m = input.message;
+  if (m.kind === "other" && m.message_type === "audio" && m.media_url) {
+    try {
+      const db = supabaseAdmin();
+      if ((await bizOf(db, input.accountId)).aiFeatures.transcribeAudio) {
+        const text = await transcribeAudio(db, input.accountId, m.media_url);
+        if (text) {
+          transcript = text;
+          await db
+            .from("messages")
+            .update({ content_text: `🎤 ${text}` })
+            .eq("conversation_id", input.conversationId)
+            .eq("message_id", m.meta_message_id);
+          input = { ...input, message: { kind: "text", text, meta_message_id: m.meta_message_id, voice: true } };
+        }
+      }
+    } catch (err) {
+      console.error("[flows] voice note transcription threw:", err);
+    }
+  }
+  const result = await dispatchInboundToFlowsInner(input);
+  return transcript ? { ...result, transcript } : result;
+}
+
+/** A bot-made "cart": order lines read from a photo or a typed first message. */
+function linesAsOrder(lines: string[], metaMessageId: string): ParsedInbound {
+  return { kind: "order", items: [], text: lines.join("\n"), meta_message_id: metaMessageId };
+}
+
+/**
+ * Free text with no bot conversation running that the AI reads as an
+ * order: start the main flow with those lines (as a catalog cart would).
+ * Null when it isn't an order, the feature is off, or a person has the chat.
+ */
+async function startOrderFromFirstMessage(
+  db: AdminClient,
+  input: DispatchInboundInput & { isFirstInboundMessage: boolean },
+  /** "Buenas, ¿tienen cemento?" matched the greeting: leave a question to the chat AI. */
+  questionsToAi = false,
+): Promise<DispatchInboundResult | null> {
+  if (input.message.kind !== "text") return null;
+  if (!(await bizOf(db, input.accountId)).aiFeatures.entryRouter) return null;
+  if (!(await botOwnsConversation(db, input.conversationId))) return null;
+  const defaultFlow = await findDefaultEntryFlow(db, input.accountId);
+  if (!defaultFlow?.entry_node_id) return null;
+  const route = await classifyFirstMessage(db, input.accountId, input.conversationId, input.message.text);
+  if (questionsToAi && (route?.intent === "question" || route?.intent === "human")) {
+    return { consumed: false, outcome: "no_match" };
+  }
+  if (route?.intent !== "order") return null;
+  const nodes = await loadAllNodes(db, defaultFlow.id);
+  return startNewRun(
+    db,
+    defaultFlow,
+    { ...input, message: linesAsOrder(route.lines, input.message.meta_message_id) },
+    nodes,
+  );
+}
+
+/**
+ * Worth asking the AI to split into products: a voice note, or a long
+ * sentence that lists things ("…leche y un paquete de arroz", commas).
+ */
+export function looksLikeSeveralItems(text: string, voice: boolean): boolean {
+  const words = normalizeForMatch(text).split(" ").filter(Boolean);
+  if (voice) return words.length >= 3;
+  return words.length >= 7 && /,|;| y | e | tambien | ademas /.test(` ${normalizeForMatch(text)} `.replace(/,/g, " , "));
+}
+
+/** A payment receipt photo: thank the customer, tell the team. */
+async function acknowledgeReceipt(
+  db: AdminClient,
+  input: DispatchInboundInput,
+  reading: Extract<ImageReading, { kind: "receipt" }>,
+  run: FlowRunRow | null,
+): Promise<void> {
+  const biz = await bizOf(db, input.accountId);
+  try {
+    await engineSendText({
+      accountId: input.accountId,
+      userId: input.userId,
+      conversationId: input.conversationId,
+      contactId: input.contactId,
+      text: biz.texts.receiptReceived,
+    });
+  } catch (err) {
+    console.error("[flows] receipt acknowledgement failed:", err);
+  }
+  const imageUrl = input.message.kind === "image" ? input.message.media_url : "";
+  const body = `El cliente envió un comprobante de pago${reading.summary ? `: ${reading.summary}` : ""}.\n${imageUrl}`;
+  if (run) {
+    await saveVars(db, run, { ...run.vars, payment_receipt_url: imageUrl });
+    await notifyTeamInApp(db, run, run.current_node_key, { title: orderTitle(run, "🧾 Comprobante de pago"), body });
+  } else {
+    await notifyAccountInApp(db, {
+      accountId: input.accountId,
+      conversationId: input.conversationId,
+      contactId: input.contactId,
+      title: "🧾 Comprobante de pago",
+      body,
+    });
+  }
+}
+
+/** Open and unassigned: nobody on the team has taken this conversation. */
+async function botOwnsConversation(db: AdminClient, conversationId: string): Promise<boolean> {
+  const { data: conv } = await db
+    .from("conversations")
+    .select("status, assigned_agent_id")
+    .eq("id", conversationId)
+    .maybeSingle();
+  const c = conv as { status: string; assigned_agent_id: string | null } | null;
+  return !!c && c.status === "open" && !c.assigned_agent_id;
+}
+
+async function dispatchInboundToFlowsInner(
+  input: DispatchInboundInput & { isFirstInboundMessage: boolean },
+): Promise<DispatchInboundResult> {
   const db = supabaseAdmin();
   try {
     // A staff member clocking in ("turno") — not a customer.
@@ -1542,6 +1665,38 @@ export async function dispatchInboundToFlows(
       return handleReplyForActiveRun(db, activeRun, input.message, nodes);
     }
 
+    // No active run and a photo: a written list or a product starts an
+    // order, as a catalog cart would — only while the bot owns the chat.
+    if (input.message.kind === "image") {
+      const biz = await bizOf(db, input.accountId);
+      if (biz.aiFeatures.readImages && (await botOwnsConversation(db, input.conversationId))) {
+        const defaultFlow = await findDefaultEntryFlow(db, input.accountId);
+        if (defaultFlow?.entry_node_id) {
+          const reading = await readImage(
+            db,
+            input.accountId,
+            input.conversationId,
+            input.message.media_url,
+            input.message.caption,
+          );
+          if (reading?.kind === "receipt") {
+            await acknowledgeReceipt(db, input, reading, null);
+            return { consumed: true, outcome: "no_match" };
+          }
+          if (reading && reading.kind !== "other") {
+            const nodes = await loadAllNodes(db, defaultFlow.id);
+            return startNewRun(
+              db,
+              defaultFlow,
+              { ...input, message: linesAsOrder(reading.lines, input.message.meta_message_id) },
+              nodes,
+            );
+          }
+        }
+      }
+      return { consumed: false, outcome: "no_match" };
+    }
+
     // No active run. Non-text messages never match a keyword trigger,
     // but two of them still deserve the bot's attention — only while
     // the bot owns the conversation (open and unassigned): once a human
@@ -1589,7 +1744,22 @@ export async function dispatchInboundToFlows(
       input.isFirstInboundMessage,
     );
     if (!flow || !flow.entry_node_id) {
-      return (await replyAfterHandoff(db, input)) ?? { consumed: false, outcome: "no_match" };
+      const afterHandoff = await replyAfterHandoff(db, input);
+      if (afterHandoff) return afterHandoff;
+      // "Quiero 2 panes y una leche" with no conversation open: start the
+      // order with those lines instead of leaving it to the chat AI.
+      const routed = await startOrderFromFirstMessage(db, input);
+      if (routed) return routed;
+      return { consumed: false, outcome: "no_match" };
+    }
+    // "Buenas, quisiera 2 panes y una leche" also matches the greeting
+    // keyword — but it's an order, not a request for the menu.
+    if (
+      input.message.kind === "text" &&
+      normalizeForMatch(input.message.text).split(" ").length > RESTART_MAX_WORDS + 1
+    ) {
+      const routed = await startOrderFromFirstMessage(db, input, true);
+      if (routed) return routed;
     }
     const nodes = await loadAllNodes(db, flow.id);
     return startNewRun(db, flow, input, nodes);
@@ -3164,6 +3334,47 @@ async function handleReplyForActiveRun(
   const capturesOrderList =
     currentCollectCfg?.append === true || currentTextFallback?.append === true;
   const bizForRules = await bizOf(db, run.account_id);
+  // A photo while the order is being written: a written list or a
+  // product becomes order lines (liquor left out); anything else gets a
+  // friendly "write it to me". A receipt-capture node keeps its photo.
+  if (message.kind === "image" && capturesOrderList && currentCollectCfg?.accept !== "image") {
+    const reading = bizForRules.aiFeatures.readImages
+      ? await readImage(db, run.account_id, run.conversation_id, message.media_url, message.caption)
+      : null;
+    if (reading?.kind === "receipt") {
+      await acknowledgeReceipt(
+        db,
+        { accountId: run.account_id, userId: run.user_id, contactId: run.contact_id!, conversationId: run.conversation_id!, message },
+        reading,
+        run,
+      );
+      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
+    if (!reading || reading.kind === "other") {
+      await sendEngineText(db, run, currentNode.node_key, bizForRules.texts.photoNotUnderstood, "photo_not_understood");
+      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
+    const lines = reading.lines;
+    const photoVar = `${(currentCollectCfg?.append ? currentCollectCfg : currentTextFallback)!.var_key}_photos`;
+    const photos = typeof run.vars[photoVar] === "string" ? `${run.vars[photoVar]}\n` : "";
+    await saveVars(db, run, { ...run.vars, [photoVar]: `${photos}${message.media_url}` });
+    message = linesAsOrder(lines, message.meta_message_id);
+  }
+  // A voice note, or a long sentence naming several things ("deme dos
+  // litros de leche y un paquete de arroz"), becomes one line per product
+  // — before the liquor check, so a beer in the sentence drops alone.
+  if (
+    message.kind === "text" &&
+    capturesOrderList &&
+    !run.vars.__pending_clarification &&
+    bizForRules.aiFeatures.entryRouter &&
+    looksLikeSeveralItems(message.text, message.voice === true)
+  ) {
+    const route = await classifyFirstMessage(db, run.account_id, run.conversation_id, message.text);
+    if (route?.intent === "order" && route.lines.length > 0) {
+      message = linesAsOrder(route.lines, message.meta_message_id);
+    }
+  }
   if (message.kind === "text" && capturesOrderList && isBlockedProduct(bizForRules, message.text)) {
     await sendEngineText(db, run, currentNode.node_key, bizForRules.blockedProducts.reply, "alcohol_declined");
     return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
@@ -3466,13 +3677,22 @@ async function handleReplyForActiveRun(
     // "¿algo más?"). No disambiguation — the items are exact catalog
     // picks — and no debounce: a cart is one complete message.
     const target = (currentCollectCfg?.append ? currentCollectCfg : currentTextFallback)!;
+    // Lines read from a photo or a sentence can include liquor too.
+    const allLines = message.text.split("\n").map((l) => l.trim()).filter(Boolean);
+    const allowed = allLines.filter((l) => !isBlockedProduct(bizForRules, l));
+    if (allowed.length < allLines.length) {
+      await sendEngineText(db, run, currentNode.node_key, bizForRules.blockedProducts.reply, "alcohol_declined");
+    }
+    if (allowed.length === 0) {
+      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
     matched = await captureTextIntoVar(db, run, currentNode.node_key, {
       var_key: target.var_key,
       append: true,
       lowercase: false,
       cross_sell: false,
       next_node_key: target.next_node_key,
-      text: message.text,
+      text: allowed.join("\n"),
     });
   } else if (
     message.kind === "image" &&

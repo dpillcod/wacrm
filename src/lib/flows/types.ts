@@ -695,6 +695,8 @@ export type ParsedInbound =
       text: string;
       /** Meta's `messages[0].id` — used for idempotency. */
       meta_message_id: string;
+      /** Set when this text is a transcribed voice note. */
+      voice?: boolean;
     }
   | {
       kind: "interactive_reply";
@@ -788,6 +790,8 @@ export interface DispatchInboundResult {
     | "debounced"
     | "awaiting_disambiguation"
     | "awaiting_clarification";
+  /** A voice note's text, when it was transcribed (the AI reply can use it). */
+  transcript?: string;
 }
 
 // ============================================================
