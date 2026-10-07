@@ -44,6 +44,12 @@ export interface BusinessSettings {
   blockedProducts: { terms: string[]; reply: string }
   /** Who the business is, for the AI that tidies order lines. */
   aiBusinessDescription: string
+  /**
+   * What customers ask, answered once by the business: delivery,
+   * payments, invoices, returns, who handles wholesale… The bot and the
+   * chat AI answer from this, never inventing policies.
+   */
+  customerInfo: string
   /** "If they order X, suggest Y" — one aside per conversation. */
   crossSell: CrossSellRule[]
   /** Contact custom field holding the birthday (MM-DD) for the birthday flow. */
@@ -60,6 +66,8 @@ export interface BusinessSettings {
     entryRouter: boolean
     /** Most voice notes transcribed per day (protects the transcription credits). */
     audioDailyLimit: number
+    /** Answer questions asked in the middle of an order instead of writing them down. */
+    answerQuestions: boolean
   }
   /** Bakery orders (cakes, party snacks, bread). */
   bakery: {
@@ -158,10 +166,11 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
     reply: 'Por este medio no podemos tomar pedidos de licores 🙏\n\nSi necesita algo más, con gusto lo anoto.',
   },
   aiBusinessDescription: 'una tienda',
+  customerInfo: '',
   crossSell: [],
   birthdayFieldName: 'Fecha de nacimiento',
   woocommerceUrl: '',
-  aiFeatures: { readImages: true, transcribeAudio: true, entryRouter: true, audioDailyLimit: 200 },
+  aiFeatures: { readImages: true, transcribeAudio: true, entryRouter: true, audioDailyLimit: 200, answerQuestions: true },
   bakery: { entryNode: '' },
   texts: {
     idleNudge: '¿Sigue ahí? Si tiene alguna duda, dígame y seguimos con su pedido 🙂',

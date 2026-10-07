@@ -64,7 +64,8 @@ const TEXT_KEYS: (keyof Texts)[] = [
   "idleNudgeGeneral",
   "audioTooLong",
 ];
-const AI_FEATURE_KEYS: ("readImages" | "transcribeAudio" | "entryRouter")[] = [
+const AI_FEATURE_KEYS: ("readImages" | "transcribeAudio" | "entryRouter" | "answerQuestions")[] = [
+  "answerQuestions",
   "readImages",
   "transcribeAudio",
   "entryRouter",
@@ -262,6 +263,9 @@ export function BusinessSettingsPanel() {
         </div>
         <Field label={t("identity.aiDescription")} hint={t("identity.aiDescriptionHint")}>
           {area(s.aiBusinessDescription, (v) => set({ aiBusinessDescription: v }), 2)}
+        </Field>
+        <Field label={t("identity.customerInfo")} hint={t("identity.customerInfoHint")}>
+          {area(s.customerInfo, (v) => set({ customerInfo: v }), 10)}
         </Field>
       </Section>
 

@@ -4,6 +4,7 @@ import {
   isHumanRequest,
   isPlainGreeting,
   looksLikeSeveralItems,
+  stripOrderLeadIn,
   optionByText,
   outOfRangeOption,
 } from "./engine";
@@ -555,5 +556,17 @@ describe("looksLikeSeveralItems", () => {
     expect(looksLikeSeveralItems("1 cuaderno universitario 100 hojas cuadros", false)).toBe(false);
     expect(looksLikeSeveralItems("2 panes", false)).toBe(false);
     expect(looksLikeSeveralItems("ok", true)).toBe(false);
+  });
+});
+
+describe("stripOrderLeadIn", () => {
+  it("drops the words before the product", () => {
+    expect(stripOrderLeadIn("quiero 2 sacos de cemento holcim")).toBe("2 sacos de cemento holcim");
+    expect(stripOrderLeadIn("Buenos días, me da 1 libra de queso")).toBe("1 libra de queso");
+    expect(stripOrderLeadIn("también deme 3 panes")).toBe("3 panes");
+  });
+  it("leaves a plain line alone", () => {
+    expect(stripOrderLeadIn("2 coca cola de 3 litros")).toBe("2 coca cola de 3 litros");
+    expect(stripOrderLeadIn("quiero")).toBe("quiero");
   });
 });

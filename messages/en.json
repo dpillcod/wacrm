@@ -1741,7 +1741,9 @@
         "countryCode": "Country calling code",
         "countryCodeHint": "Turns local numbers (0991234567) into international ones, e.g. 593.",
         "aiDescription": "What you sell (for the AI)",
-        "aiDescriptionHint": "One line the AI uses to understand orders, e.g. \"supermarket, hardware, stationery\"."
+        "aiDescriptionHint": "One line the AI uses to understand orders, e.g. \"supermarket, hardware, stationery\".",
+        "customerInfo": "What customers ask (delivery, payments, invoices, returns…)",
+        "customerInfoHint": "Write it in plain sentences, one topic per line. The bot and the chat AI answer from this and never invent policies or prices."
       },
       "links": {
         "title": "Links & contacts",
@@ -1815,6 +1817,8 @@
       "ai": {
         "title": "AI with photos, voice notes and first messages",
         "desc": "Uses the account's AI key. Prices are never given.",
+        "answerQuestions": "Answer questions during an order",
+        "answerQuestionsHint": "\"Do you have Grilon?\" or \"Do you deliver?\" is answered (and the product offered), never written down as a product.",
         "readImages": "Read photos",
         "readImagesHint": "A photo of a written list, or of a product, becomes lines of the order.",
         "transcribeAudio": "Understand voice notes",

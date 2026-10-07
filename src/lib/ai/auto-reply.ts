@@ -223,10 +223,17 @@ export async function dispatchInboundToAiReply(
       })),
     })
 
+    // The business's own answers (delivery, payments, returns…) — the
+    // official word, so the AI never makes up a policy.
+    const customerInfo = (await loadBusinessSettings(db, accountId)).customerInfo.trim()
+    const groundedPrompt = customerInfo
+      ? `${systemPrompt}\n\nInformación oficial del negocio para responder a los clientes (si algo no está aquí ni arriba, no lo inventes). Trata SIEMPRE al cliente de "usted" (nunca de "tú"). Formato de WhatsApp: negritas con UN solo asterisco (*así*), sin títulos ni ** dobles:\n${customerInfo}`
+      : systemPrompt
+
     console.log('[ai auto-reply] calling provider', { provider: config.provider, model: config.model })
     const { text: generatedText, handoff, usage, recommendedRetailerIds, cartAdds, wantsCartTotal } = await generateReply({
       config,
-      systemPrompt,
+      systemPrompt: groundedPrompt,
       messages,
     })
     let text = generatedText

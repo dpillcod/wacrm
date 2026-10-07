@@ -67,6 +67,7 @@ import {
 import { updateWooOrder } from "../woocommerce/client";
 import { classifyFirstMessage, readImage, transcribeAudio, type ImageReading } from "../ai/media-understanding";
 import { nextGuideStep, type GuideAnswer } from "./service-guide";
+import { acceptOfferedProduct, answerInFlow, looksLikeQuestion } from "./question-answer";
 import { formatFormReply } from "../whatsapp/flow-form";
 import { INTERACTIVE_LIMITS } from "../whatsapp/meta-api";
 import { isPriceQuestion } from "./price-question";
@@ -274,6 +275,17 @@ export function isHumanRequest(text: string): boolean {
     /\b(hablar|comunicar(me)?|atender?me|contactar|pasar(me)?)\b.*\b(asesor|asesora|persona|alguien|humano|agente|vendedor|vendedora|encargad[oa]|operador[a]?)\b/.test(said) ||
     /\b(un|una) (asesor|asesora|persona|humano|agente)\b/.test(said) && said.split(" ").length <= 6
   );
+}
+
+/** "Quiero 2 sacos de cemento" → "2 sacos de cemento" (the words before the product). */
+export function stripOrderLeadIn(line: string): string {
+  const stripped = line
+    .replace(
+      /^((hola|buenas|buenos d[ií]as|por favor|porfa|disculpe|quiero|quisiera|necesito|d[eé]me|me da|me das|me puede dar|me pueden dar|me regala|me vende|me manda|me env[ií]a|env[ií]eme|m[aá]ndeme|adem[aá]s|tambi[eé]n|y tambi[eé]n)[\s,:]+)+/i,
+      "",
+    )
+    .trim();
+  return stripped || line;
 }
 
 /** Whether the run is holding an order list the customer is still building. */
@@ -3032,7 +3044,13 @@ async function sendIdleNudge(
   // "¿sigue ahí?" there. Elsewhere, only mention the order when there is one.
   const holdsList = runHoldsList(freshRun);
   const flow = await loadFlow(db, freshRun.flow_id);
-  if (!holdsList && flow?.entry_node_id === expectedNodeKey) return;
+  const { data: entryNode } = flow?.entry_node_id
+    ? await db.from("flow_nodes").select("node_key").eq("id", flow.entry_node_id).maybeSingle()
+    : { data: null };
+  if (!holdsList && (entryNode as { node_key?: string } | null)?.node_key === expectedNodeKey) return;
+  // Once per conversation is a reminder; twice is nagging.
+  if (freshRun.vars.__idle_nudged) return;
+  await saveVars(db, freshRun, { ...freshRun.vars, __idle_nudged: true });
   const texts = (await bizOf(db, freshRun.account_id)).texts;
   try {
     const { whatsapp_message_id } = await engineSendText({
@@ -3238,7 +3256,14 @@ async function captureTextIntoVar(
     text: string;
   },
 ): Promise<string | null> {
-  const trimmed = args.text.trim();
+  // An order line reads "2 sacos de cemento", not "quiero 2 sacos de cemento".
+  const trimmed = args.append
+    ? args.text
+        .split("\n")
+        .map((l) => stripOrderLeadIn(l.trim()))
+        .filter(Boolean)
+        .join("\n")
+    : args.text.trim();
   if (trimmed.length === 0 || !args.var_key) return null;
   // Applied before append, so a multi-line accumulated value stays
   // consistently-cased across every turn rather than only new ones.
@@ -3511,6 +3536,40 @@ async function handleReplyForActiveRun(
     await sendEngineText(db, run, currentNode.node_key, bizForRules.blockedProducts.reply, "alcohol_declined");
     return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
   }
+  // The bot just offered a product it was asked about ("¿Tiene grilón?"
+  // → "Sí, lo manejamos, ¿se lo anoto?"): "sí, 10 metros" writes it down.
+  const offered = typeof run.vars.__offered_product === "string" ? run.vars.__offered_product : null;
+  if (offered && message.kind === "text") {
+    const vars = { ...run.vars };
+    delete vars.__offered_product;
+    await saveVars(db, run, vars);
+    const line = capturesOrderList ? acceptOfferedProduct(message.text, offered) : null;
+    if (line) message = { ...message, text: line };
+  }
+
+  // A question is answered, never written down as a product ("¿Dispone
+  // de Grilon?" used to become order line 1).
+  const takesListText = capturesOrderList || !!currentTextFallback?.edit_list_var;
+  if (
+    message.kind === "text" &&
+    takesListText &&
+    bizForRules.aiFeatures.answerQuestions &&
+    !run.vars.__pending_clarification &&
+    !run.vars.__pending_line_edit &&
+    !run.vars.__pending_list_answer &&
+    !run.vars.__pending_disambiguation &&
+    looksLikeQuestion(message.text)
+  ) {
+    const flow = await loadFlow(db, run.flow_id);
+    const situation = flow?.entry_node_id === currentNode.id ? "menu" : "order";
+    const answer = await answerInFlow(db, run.account_id, run.conversation_id, message.text, situation);
+    if (answer) {
+      if (answer.product) await saveVars(db, run, { ...run.vars, __offered_product: answer.product });
+      await sendEngineText(db, run, currentNode.node_key, answer.reply, "question_answered");
+      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
+  }
+
   // "sí" / "ok" / "gracias" and "quiero hablar con un asesor" are not
   // products — answer them instead of adding them to the list.
   if (message.kind === "text" && capturesOrderList && !run.vars.__pending_clarification) {
