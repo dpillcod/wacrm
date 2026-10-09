@@ -63,6 +63,12 @@ const TEXT_KEYS: (keyof Texts)[] = [
   "receiptReceived",
   "idleNudgeGeneral",
   "audioTooLong",
+  "recoveryReminder",
+  "recoveryLater",
+  "totalPending",
+  "thanksReply",
+  "callRequestOpen",
+  "callRequestClosed",
 ];
 const AI_FEATURE_KEYS: ("readImages" | "transcribeAudio" | "entryRouter" | "answerQuestions")[] = [
   "answerQuestions",

@@ -68,6 +68,7 @@ import { updateWooOrder } from "../woocommerce/client";
 import { classifyFirstMessage, readImage, transcribeAudio, type ImageReading } from "../ai/media-understanding";
 import { nextGuideStep, type GuideAnswer } from "./service-guide";
 import { acceptOfferedProduct, answerInFlow, looksLikeQuestion } from "./question-answer";
+import { nextOpeningPhrase } from "./store-policy";
 import { formatFormReply } from "../whatsapp/flow-form";
 import { INTERACTIVE_LIMITS } from "../whatsapp/meta-api";
 import { isPriceQuestion } from "./price-question";
@@ -1546,6 +1547,29 @@ async function startOrderFromFirstMessage(
   const defaultFlow = await findDefaultEntryFlow(db, input.accountId);
   if (!defaultFlow?.entry_node_id) return null;
   const route = await classifyFirstMessage(db, input.accountId, input.conversationId, input.message.text);
+  // "Buenas tardes, ¿tendrá garbanzo?": a direct answer (catalog +
+  // the business's own information), no menu. A product question opens
+  // the order quietly, so "sí, 2 libras" writes it down.
+  if (route?.intent === "question" && (await bizOf(db, input.accountId)).aiFeatures.answerQuestions) {
+    const answer = await answerInFlow(db, input.accountId, input.conversationId, input.message.text, "menu");
+    if (answer) {
+      await engineSendText({
+        accountId: input.accountId,
+        userId: input.userId,
+        conversationId: input.conversationId,
+        contactId: input.contactId,
+        text: answer.reply,
+      });
+      if (answer.product) {
+        const nodes = await loadAllNodes(db, defaultFlow.id);
+        await startNewRun(db, defaultFlow, input, nodes, {
+          silent: true,
+          vars: { __offered_product: answer.product },
+        });
+      }
+      return { consumed: true, outcome: "no_match" };
+    }
+  }
   if (questionsToAi && (route?.intent === "question" || route?.intent === "human")) {
     return { consumed: false, outcome: "no_match" };
   }
@@ -1671,6 +1695,171 @@ async function runServiceGuide(
   return advanceFromNodeKey(db, run, cfg.next_node_key, nodes);
 }
 
+// ============================================================
+// Gentle reminders with buttons (see sendIdleNudge) and the two-hour
+// recovery of a list left half-way. In-memory timers, like follow-ups.
+// ============================================================
+
+const NUDGE_GO_PREFIX = "nudge_go:";
+const NUDGE_MENU_PREFIX = "nudge_menu:";
+const RECOVER_GO_PREFIX = "recover_go:";
+const RECOVER_LATER_PREFIX = "recover_later:";
+// Two hours; FLOW_RECOVERY_DELAY_MS shortens it for tests.
+const RECOVERY_DELAY_MS = Number(process.env.FLOW_RECOVERY_DELAY_MS) || 2 * 3_600_000;
+const pendingRecoveries = new Map<string, ReturnType<typeof setTimeout>>();
+
+function scheduleRecovery(db: AdminClient, runId: string, nodeKey: string): void {
+  const existing = pendingRecoveries.get(runId);
+  if (existing) clearTimeout(existing);
+  pendingRecoveries.set(
+    runId,
+    setTimeout(() => {
+      pendingRecoveries.delete(runId);
+      sendRecovery(db, runId, nodeKey).catch((err) => console.error("[flows] recovery failed:", err));
+    }, RECOVERY_DELAY_MS),
+  );
+}
+
+/** "Su lista quedó guardada… ¿Seguimos?" — once, in opening hours, if they still haven't moved. */
+async function sendRecovery(db: AdminClient, runId: string, nodeKey: string): Promise<void> {
+  const run = await loadRun(db, runId);
+  if (!run || run.status !== "active" || run.current_node_key !== nodeKey || run.vars.__recovered) return;
+  const biz = await bizOf(db, run.account_id);
+  if (!isWithinBusinessHours(biz) || !runHoldsList(run)) return;
+  const list = Object.entries(run.vars).find(([k, v]) => k.endsWith("_numbered") && typeof v === "string" && v.trim());
+  const lines = String(list?.[1] ?? "").split("\n").filter(Boolean);
+  const preview = lines.slice(0, 5).join("\n") + (lines.length > 5 ? `\n… (+${lines.length - 5})` : "");
+  await saveVars(db, run, { ...run.vars, __recovered: true });
+  await engineSendInteractiveButtons({
+    accountId: run.account_id,
+    userId: run.user_id,
+    conversationId: run.conversation_id!,
+    contactId: run.contact_id!,
+    bodyText: renderText(biz.texts.recoveryReminder, { lista: preview }),
+    buttons: [
+      { id: `${RECOVER_GO_PREFIX}${run.id}`, title: "✅ Continuar pedido" },
+      { id: `${RECOVER_LATER_PREFIX}${run.id}`, title: "⏰ Más tarde" },
+    ],
+  });
+  await logEvent(db, run.id, "message_sent", nodeKey, { reason: "list_recovery" });
+}
+
+/** Taps on the reminder buttons. Null when it isn't one. */
+async function handleNudgeReply(
+  db: AdminClient,
+  input: DispatchInboundInput & { isFirstInboundMessage: boolean },
+  replyId: string,
+): Promise<DispatchInboundResult | null> {
+  const prefix = [NUDGE_GO_PREFIX, NUDGE_MENU_PREFIX, RECOVER_GO_PREFIX, RECOVER_LATER_PREFIX].find((p) =>
+    replyId.startsWith(p),
+  );
+  if (!prefix) return null;
+  const run = await loadRun(db, replyId.slice(prefix.length));
+  if (!run || run.account_id !== input.accountId || run.contact_id !== input.contactId) {
+    return { consumed: true, outcome: "no_match" };
+  }
+  const recovery = pendingRecoveries.get(run.id);
+  if (recovery) clearTimeout(recovery);
+  pendingRecoveries.delete(run.id);
+
+  if (prefix === RECOVER_LATER_PREFIX) {
+    await sendEngineText(db, run, null, (await bizOf(db, run.account_id)).texts.recoveryLater, "recovery_later");
+    return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+  }
+  if (prefix === NUDGE_MENU_PREFIX || run.status !== "active" || !run.current_node_key) {
+    if (run.status === "active") await endRun(db, run.id, "timed_out", "menu_from_reminder");
+    const flow = await findDefaultEntryFlow(db, input.accountId);
+    if (!flow?.entry_node_id) return { consumed: true, outcome: "no_match" };
+    return startNewRun(db, flow, input, await loadAllNodes(db, flow.id));
+  }
+  // Continue: show the step they were on again — or, from the two-hour
+  // reminder, go straight to their list to send it.
+  const nodes = await loadAllNodes(db, run.flow_id);
+  let target = run.current_node_key;
+  if (prefix === RECOVER_GO_PREFIX) {
+    const listStep = [...nodes.values()].find((n) => !!textFallbackOf(n)?.edit_list_var);
+    if (listStep) target = listStep.node_key;
+  }
+  const outcome = await advanceFromNodeKey(db, run, target, nodes);
+  return { consumed: true, flow_run_id: run.id, outcome: outcome.outcome };
+}
+
+/** "Llámenme", "¿me pueden llamar?", "necesito que me llamen". */
+export function isCallRequest(text: string): boolean {
+  const t = normalizeForMatch(text);
+  return t.length <= 120 && /\b(llamenme|llameme|llamame|llamarme|me (pueden|puede|podrian|podria) llamar|que me llamen|me llaman|me llama|necesito una llamada|quiero una llamada|hablar por telefono|llamada telefonica|me devuelven la llamada|devuelvan la llamada)\b/.test(t);
+}
+
+const recentCallAlerts = new Map<string, number>();
+
+/** Urgent "call this customer" alert to the whole team, and the customer told when. */
+async function requestCallBack(
+  db: AdminClient,
+  input: DispatchInboundInput,
+  run: FlowRunRow | null,
+): Promise<void> {
+  const biz = await bizOf(db, input.accountId);
+  const open = isWithinBusinessHours(biz);
+  const reply = open
+    ? biz.texts.callRequestOpen
+    : renderText(biz.texts.callRequestClosed, { cuando: nextOpeningPhrase(biz) });
+  try {
+    await engineSendText({
+      accountId: input.accountId,
+      userId: input.userId,
+      conversationId: input.conversationId,
+      contactId: input.contactId,
+      text: reply,
+    });
+  } catch (err) {
+    console.error("[flows] call request reply failed:", err);
+  }
+  const last = recentCallAlerts.get(input.contactId) ?? 0;
+  if (Date.now() - last < 10 * 60_000) return;
+  recentCallAlerts.set(input.contactId, Date.now());
+  const { data: contact } = await db.from("contacts").select("name, phone").eq("id", input.contactId).maybeSingle();
+  const c = contact as { name?: string | null; phone?: string | null } | null;
+  const phone = c?.phone ? localPhone(c.phone.replace(/^\+/, ""), biz.phoneCountryCode) : "";
+  const who = `${c?.name?.trim() || "Cliente"}${phone ? ` (${phone})` : ""}`;
+  const order = run?.vars.order_number ? ` · pedido N° ${run.vars.order_number}` : "";
+  await notifyAccountInApp(db, {
+    accountId: input.accountId,
+    conversationId: input.conversationId,
+    contactId: input.contactId,
+    title: `📞 LLAMAR AHORA: ${who}`,
+    body: `El cliente pidió que lo llamen${order}.${open ? "" : " (Fuera de horario: llamar al abrir.)"}`,
+  });
+  await notifyStaffOfHandoff(db, {
+    accountId: input.accountId,
+    contactName: c?.name?.trim() || "Cliente",
+    summary: `📞 PIDE QUE LO LLAMEN — ${phone}${order}`,
+  }).catch(() => null);
+}
+
+/** "Mis pedidos → Historial": the contact's last 3 orders, newest first. */
+async function orderHistoryText(db: AdminClient, run: FlowRunRow): Promise<string> {
+  const { data } = await db
+    .from("flow_runs")
+    .select("started_at, vars")
+    .eq("account_id", run.account_id)
+    .eq("contact_id", run.contact_id!)
+    .eq("status", "handed_off")
+    .not("vars->>order_number", "is", null)
+    .order("started_at", { ascending: false })
+    .limit(3);
+  const rows = (data ?? []) as { started_at: string; vars: Record<string, unknown> }[];
+  if (rows.length === 0) return renderText((await bizOf(db, run.account_id)).orderBoard.statusReplies.none, {});
+  const biz = await bizOf(db, run.account_id);
+  const day = (iso: string) =>
+    new Date(new Date(iso).getTime() + biz.utcOffsetHours * 3_600_000).toISOString().slice(0, 10).split("-").reverse().join("/");
+  const items = rows.map((r) => {
+    const lines = String(r.vars.order_text ?? r.vars.pst_detalle_resumen ?? "").split("\n").filter(Boolean);
+    const shown = lines.slice(0, 3).join(", ") + (lines.length > 3 ? ` y ${lines.length - 3} más` : "");
+    return `• *N° ${r.vars.order_number}* (${day(r.started_at)}): ${shown || "—"}`;
+  });
+  return `🗂️ *Sus últimos pedidos:*\n\n${items.join("\n")}\n\nPara repetir el último, escriba *repetir* 🙂`;
+}
+
 /** Open and unassigned: nobody on the team has taken this conversation. */
 async function botOwnsConversation(db: AdminClient, conversationId: string): Promise<boolean> {
   const { data: conv } = await db
@@ -1698,6 +1887,19 @@ async function dispatchInboundToFlowsInner(
       if (followUpResult) return followUpResult;
       const csatResult = await handleCsatReply(db, input, input.message.reply_id);
       if (csatResult) return csatResult;
+      const nudgeResult = await handleNudgeReply(db, input, input.message.reply_id);
+      if (nudgeResult) return nudgeResult;
+    }
+
+    // "Llámenme" / "¿me pueden llamar?": urgent alert to the team — unless
+    // the bot is waiting for typed input (a complaint can say "llámenme").
+    if (input.message.kind === "text" && isCallRequest(input.message.text)) {
+      const running = await loadActiveRunForContact(db, input.accountId, input.contactId);
+      const node = running?.current_node_key ? await loadNode(db, running.flow_id, running.current_node_key) : null;
+      if (node?.node_type !== "collect_input") {
+        await requestCallBack(db, input, running);
+        return { consumed: true, flow_run_id: running?.id, outcome: "no_match" };
+      }
     }
 
     // A message naming a run that's waiting for its customer (web order
@@ -2298,6 +2500,18 @@ async function runNodeSideEffects(
     await prefillLastOrder(db, run, node.node_key, cfg.prefill_last_order);
   }
 
+  if (cfg.order_history_reply && run.contact_id) {
+    await sendEngineText(db, run, node.node_key, await orderHistoryText(db, run), "order_history_reply");
+  }
+
+  if (cfg.call_request && run.contact_id && run.conversation_id) {
+    await requestCallBack(
+      db,
+      { accountId: run.account_id, userId: run.user_id, contactId: run.contact_id, conversationId: run.conversation_id, message: { kind: "text", text: "", meta_message_id: "" } },
+      run,
+    );
+  }
+
   if (cfg.order_status_reply && run.contact_id) {
     const status = await orderStatusText(db, run.account_id, run.contact_id);
     await sendEngineText(db, run, node.node_key, status.text, "order_status_reply");
@@ -2746,6 +2960,30 @@ async function replyAfterHandoff(
   if (!run || typeof template !== "string" || !run.ended_at) return null;
   const now = Date.now();
   if (now - new Date(run.ended_at).getTime() > AFTER_HANDOFF_WINDOW_MS) return null;
+  const texts = (await bizOf(db, input.accountId)).texts;
+  const ref = run.vars.order_number ? `N° ${run.vars.order_number}` : run.vars.order_id ? `N° ${run.vars.order_id}` : "";
+  // "¿Cuánto es el total?": keep them engaged and tell staff right away
+  // (a customer asking the total is ready to pay).
+  if (isPriceQuestion(input.message.text) && !(await humanHasTakenOver(db, run))) {
+    await sendEngineText(db, run, null, renderText(texts.totalPending, { pedido: ref }), "total_pending");
+    const lastAlert = typeof run.vars.__total_alert_at === "string" ? new Date(run.vars.__total_alert_at).getTime() : 0;
+    if (now - lastAlert > 10 * 60_000) {
+      await saveVars(db, run, { ...run.vars, __total_alert_at: new Date(now).toISOString() });
+      await notifyTeamInApp(db, run, null, {
+        title: `💰 ${orderTitle(run, "Cliente")} pide el TOTAL`,
+        body: `El cliente pregunta cuánto debe pagar por su pedido ${ref}. Envíele el total por el chat.`,
+      });
+    }
+    return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+  }
+  // A plain "gracias" gets a short "con gusto", not the whole reminder.
+  if (isAckOnly(input.message.text)) {
+    const lastThanks = typeof run.vars.__thanks_at === "string" ? new Date(run.vars.__thanks_at).getTime() : 0;
+    if (now - lastThanks < AFTER_HANDOFF_MIN_GAP_MS) return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    await saveVars(db, run, { ...run.vars, __thanks_at: new Date(now).toISOString() });
+    await sendEngineText(db, run, null, texts.thanksReply, "thanks_reply");
+    return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+  }
   const lastAck = typeof run.vars.__after_handoff_ack_at === "string"
     ? new Date(run.vars.__after_handoff_ack_at).getTime()
     : 0;
@@ -3052,13 +3290,19 @@ async function sendIdleNudge(
   if (freshRun.vars.__idle_nudged) return;
   await saveVars(db, freshRun, { ...freshRun.vars, __idle_nudged: true });
   const texts = (await bizOf(db, freshRun.account_id)).texts;
+  // A list left half-way gets one more chance two hours later.
+  if (holdsList) scheduleRecovery(db, runId, expectedNodeKey);
   try {
-    const { whatsapp_message_id } = await engineSendText({
+    const { whatsapp_message_id } = await engineSendInteractiveButtons({
       accountId: freshRun.account_id,
       userId: freshRun.user_id,
       conversationId: freshRun.conversation_id!,
       contactId: freshRun.contact_id!,
-      text: holdsList ? texts.idleNudge : texts.idleNudgeGeneral,
+      bodyText: holdsList ? texts.idleNudge : texts.idleNudgeGeneral,
+      buttons: [
+        { id: `${NUDGE_GO_PREFIX}${runId}`, title: "▶️ Continuar" },
+        { id: `${NUDGE_MENU_PREFIX}${runId}`, title: "📋 Menú" },
+      ],
     });
     await logEvent(db, runId, "message_sent", expectedNodeKey, {
       reason: "idle_nudge",
@@ -4098,8 +4342,12 @@ async function startNewRun(
   flow: FlowRow,
   input: DispatchInboundInput,
   nodes: Map<string, FlowNodeRow>,
-  /** Start somewhere other than the entry node, with some vars already known. */
-  opts: { startAt?: string; vars?: Record<string, unknown> } = {},
+  /**
+   * Start somewhere other than the entry node, with some vars already
+   * known; `silent` only opens the run at that node (nothing is sent) —
+   * the next message continues there.
+   */
+  opts: { startAt?: string; vars?: Record<string, unknown>; silent?: boolean } = {},
 ): Promise<DispatchInboundResult> {
   const startAt = opts.startAt && nodes.has(opts.startAt) ? opts.startAt : flow.entry_node_id!;
   // Seed `vars.contact_name` up front so any node's `{{vars.contact_name}}`
@@ -4209,6 +4457,11 @@ async function startNewRun(
   // order" text_fallback) rather than something to greet over. If the
   // entry node can't take an order list, fall back to a normal start —
   // the cart itself is still in the inbox for staff.
+  if (opts.silent) {
+    await advanceCurrentNodeKey(db, run.id, startAt, startAt);
+    return { consumed: true, flow_run_id: run.id, outcome: "started" };
+  }
+
   if (input.message.kind === "order" && startAt === flow.entry_node_id) {
     const entry = nodes.get(flow.entry_node_id!);
     const entryTakesOrder =

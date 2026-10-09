@@ -73,6 +73,11 @@ export function hoursInWords(biz: BusinessSettings): string {
  * today's opening, "mañana" / the weekday after closing.
  */
 export function outOfHoursNotice(biz: BusinessSettings, now: Date = new Date()): string {
+  return renderText(biz.texts.outOfHours, { cuando: nextOpeningPhrase(biz, now), horario: hoursInWords(biz) });
+}
+
+/** "hoy a partir de las 7am" / "mañana a partir de las 8am" / "el lunes a partir de…". */
+export function nextOpeningPhrase(biz: BusinessSettings, now: Date = new Date()): string {
   const { day, hour } = localTime(now, biz.utcOffsetHours);
   const today = hoursFor(biz, day);
   let cuando = "en cuanto abramos";
@@ -87,7 +92,7 @@ export function outOfHoursNotice(biz: BusinessSettings, now: Date = new Date()):
       break;
     }
   }
-  return renderText(biz.texts.outOfHours, { cuando, horario: hoursInWords(biz) });
+  return cuando;
 }
 
 export function normalizeForMatch(text: string): string {

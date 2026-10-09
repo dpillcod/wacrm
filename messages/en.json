@@ -1812,7 +1812,13 @@
         "photoNotUnderstood": "Photo with no products in it",
         "receiptReceived": "Payment receipt received (the team is notified)",
         "idleNudgeGeneral": "Customer went quiet (outside an order list)",
-        "audioTooLong": "Voice note longer than ~3 minutes"
+        "audioTooLong": "Voice note longer than ~3 minutes",
+        "recoveryReminder": "Reminder 2 hours after a list was left half-way",
+        "recoveryLater": "\"Later\" on that reminder",
+        "totalPending": "\"What's the total?\" after the order went to staff",
+        "thanksReply": "\"Thanks\" after the order went to staff",
+        "callRequestOpen": "Customer asks to be called (open)",
+        "callRequestClosed": "Customer asks to be called (closed)"
       },
       "ai": {
         "title": "AI with photos, voice notes and first messages",

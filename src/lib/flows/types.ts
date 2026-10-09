@@ -275,6 +275,10 @@ export interface NodeSideEffectsConfig {
    * asks in their own words.
    */
   order_status_reply?: boolean;
+  /** "Mis pedidos → Historial": the contact's last 3 orders. */
+  order_history_reply?: boolean;
+  /** "Que me llamen": urgent alert to the whole team + reply to the customer. */
+  call_request?: boolean;
 }
 
 /** Keeping a handed-off customer company — see HandoffNodeConfig.follow_up. */

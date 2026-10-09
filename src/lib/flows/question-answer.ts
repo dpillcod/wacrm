@@ -57,6 +57,28 @@ export function looksLikeQuestion(text: string): boolean {
   return n.includes("?") || n.includes("¿") || QUESTION_START.test(body);
 }
 
+const SEARCH_STOPWORDS = new Set([
+  "tiene", "tienen", "tendra", "tendran", "tendras", "hay", "habra", "dispone", "disponen", "venden", "vende",
+  "manejan", "maneja", "consiguen", "traen", "existe", "el", "la", "los", "las", "de", "del", "dia", "hoy",
+  "un", "una", "unos", "unas", "algun", "alguna", "algunos", "que", "si", "me", "por", "para", "con", "usted",
+  "ustedes", "favor", "talvez", "tal", "vez", "quisiera", "saber", "quiero", "necesito", "busco", "estoy",
+  "buscando", "venta", "en", "stock", "disponible", "disponibles", "ahora", "todavia", "aun", "y", "o", "a",
+]);
+
+/**
+ * The product words of a question, for the catalog search: "Buenas
+ * tardes, disculpe ¿tendrá garbanzo el día de hoy?" → "garbanzo". The
+ * whole sentence found sanding discs; the product word finds garbanzos.
+ */
+export function productSearchText(text: string): string {
+  const body = normalize(text).replace(/[¿?]/g, " ").replace(LEAD_IN, "").trim();
+  return body
+    .split(" ")
+    .filter((w) => w.length > 1 && !SEARCH_STOPWORDS.has(w))
+    .join(" ")
+    .trim();
+}
+
 const AFFIRMATIVE = /^(si|ok|okey|dale|claro|bueno|ya|por favor|porfa|anotelo|agreguelo|apuntelo|de una|perfecto)(?=$|[\s,.!])[\s,.!]*/i;
 
 /**
@@ -118,15 +140,15 @@ export async function answerInFlow(
   }
   if (!config?.apiKey) return null;
   const biz = await loadBusinessSettings(db, accountId);
-  const hints = await retrieveCatalogProducts(db, accountId, question, 8).catch(() => []);
+  const hints = await retrieveCatalogProducts(db, accountId, productSearchText(question) || question, 8).catch(() => []);
   const system = [
     businessIntro(biz),
     `Respondes por WhatsApp una pregunta de un cliente. Trata al cliente de "usted"; sé cálido, claro y breve (1 a 3 frases).`,
     `Reglas:
 - NUNCA des precios, rangos ni costos de envío: los confirma un asesor.
 - Usa solo la información del negocio y las referencias del catálogo de abajo; no inventes datos. Si no sabes, dilo y ofrece que un asesor lo confirme.
-- Si pregunta si tenemos un producto: si las referencias del catálogo muestran algo parecido, di que sí lo manejamos (sin prometer stock exacto) y ofrece anotarlo, preguntando la cantidad o la medida si hace falta; si no aparece, di que no lo ves en el catálogo pero que puedes anotarlo para que el asesor lo confirme. En ambos casos pon el producto en "product" (nombre corto y claro, ej. "hilo grilón").
-- Si no pregunta por un producto, "product": null.
+- Si pregunta si tenemos un producto: di que sí lo manejamos SOLO si una referencia del catálogo es claramente ese producto (no algo con nombre parecido: "grillete" no es "grilón"); no prometas stock exacto. Si no está claro en las referencias, di con amabilidad que no lo ves en el catálogo pero que lo anotas para que el asesor confirme. En ambos casos ofrece anotarlo preguntando la cantidad o la medida.
+- "product": el producto por el que pregunta, nombre corto y claro (ej. "garbanzo", "timer digital"), SIEMPRE que pregunte por un producto, lo tengamos o no. Si no pregunta por un producto, null.
 - ${SITUATION[situation]}
 Responde SOLO con JSON: {"reply": "...", "product": "..." o null}`,
     `Información del negocio:

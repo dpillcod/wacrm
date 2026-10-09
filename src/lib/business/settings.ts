@@ -103,6 +103,18 @@ export interface BusinessSettings {
     idleNudgeGeneral: string
     /** A voice note over 3 minutes. */
     audioTooLong: string
+    /** Two hours after a customer left a list half-way; {lista} = its first lines. */
+    recoveryReminder: string
+    /** "Más tarde" on that reminder. */
+    recoveryLater: string
+    /** "¿Cuánto es el total?" after the order went to staff; {pedido} = the order number. */
+    totalPending: string
+    /** "Gracias" / "ok" after the order went to staff. */
+    thanksReply: string
+    /** The customer asked to be called, within opening hours. */
+    callRequestOpen: string
+    /** …outside opening hours; {cuando} = "mañana a partir de las 7am". */
+    callRequestClosed: string
   }
   /** Home services (plumbing, electricity, painting, locks…): their own board. */
   serviceBoard: {
@@ -197,6 +209,13 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
     receiptReceived: '🧾 Recibimos su comprobante, ¡gracias! Nuestro equipo lo revisará y le confirmará por aquí 🙂',
     idleNudgeGeneral: '¿Sigue ahí? 🙂 Cuando pueda, respóndame y continuamos.',
     audioTooLong: 'Su audio es un poco largo 🙏 ¿Me lo puede escribir, o enviar uno más corto (menos de 3 minutos)?',
+    recoveryReminder: '🛒 Su lista quedó guardada:\n{lista}\n\n¿Seguimos con su pedido?',
+    recoveryLater: 'Perfecto, aquí la guardamos 🙂 Cuando quiera, escriba *menú* y seguimos.',
+    totalPending:
+      'Su asesor está preparando el total de su pedido {pedido} y se lo envía por aquí en unos minutos 🙂 Mientras tanto, ¿desea agregar algo más?',
+    thanksReply: '¡Con gusto! 🙂 Cualquier cosa, aquí estamos.',
+    callRequestOpen: '📞 ¡Listo! Ya avisamos a nuestro equipo: le llamaremos en los próximos minutos a este número.',
+    callRequestClosed: '📞 Recibido. Ahora estamos fuera de horario; le llamaremos {cuando} a este número 🙂',
   },
   serviceBoard: {
     pipelineName: 'Servicios',

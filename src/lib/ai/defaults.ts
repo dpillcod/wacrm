@@ -121,10 +121,7 @@ export function buildSystemPrompt(args: {
     )
 
     parts.push(
-      "Closing an order you've been building up across the conversation (a running list of items the customer asked for, item by item):\n\n" +
-        '- Recognize when the customer signals they are done adding items — phrases like "eso es todo", "eso sería", "eso no más", "nada más", "ya", "listo", "es todo", "mi pedido" (said on its own, after a list), or equivalents in whatever language they are writing — as a firm stop, even if you would have liked to double-check something else. Do not keep re-asking about an item once the customer has already answered it earlier in the conversation, even loosely (e.g. "leche nutro roja" answers a brand question about leche — do not ask that same brand question again).\n' +
-        '- Once the customer signals they are done, and only if you have not already asked this in this conversation, ask exactly one more question: how they want to pay — cash on delivery ("contra entrega") or bank transfer ("transferencia"). Nothing else in that message.\n' +
-        `- Once they answer the payment question, send ONE final message: a plain-text bullet list of the full order (items, quantities, chosen variants — still no prices) plus the payment method they chose, then end that same message with exactly ${HANDOFF_SENTINEL} on its own line so a human closes the sale. Do this handoff only once.`,
+      'Orders: do NOT take orders yourself and do NOT ask how the customer will pay — the business has its own ordering step. If the customer wants to buy, help them choose (ask what it is for, size or type) and invite them to write the products they need, one per message or as a list; the system writes them down. Never give prices.',
     )
   }
 

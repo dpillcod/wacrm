@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { acceptOfferedProduct, looksLikeQuestion, parseFlowAnswer } from "./question-answer";
+import { acceptOfferedProduct, looksLikeQuestion, parseFlowAnswer, productSearchText } from "./question-answer";
+import { isPriceQuestion } from "./price-question";
 
 describe("looksLikeQuestion", () => {
   it.each([
@@ -40,4 +41,19 @@ describe("parseFlowAnswer", () => {
     expect(parseFlowAnswer('{"reply":"Sí, hacemos envíos con motorizado.","product":null}')?.product).toBeNull();
     expect(parseFlowAnswer("hola")).toBeNull();
   });
+});
+
+describe("productSearchText", () => {
+  it("keeps only the product words of a question", () => {
+    expect(productSearchText("Buenas tardes, disculpe tendrá garbanzo el día de hoy")).toBe("garbanzo");
+    expect(productSearchText("Buenos días talvez tiene timer digitales?")).toBe("timer digitales");
+    expect(productSearchText("¿Hay cemento holcim?")).toBe("cemento holcim");
+  });
+});
+
+describe("asking for the total", () => {
+  it.each(["Puede darme el total a cancelar", "cuál es el valor a pagar", "cuánto es todo", "¿me pasa el total?"])(
+    "is a price question: %s",
+    (t) => expect(isPriceQuestion(t)).toBe(true),
+  );
 });

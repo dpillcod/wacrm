@@ -50,6 +50,23 @@ const PRICE_QUESTION_PHRASES = [
   'cual es el costo',
   'cual seria el costo',
   'cuanto valdria',
+  // "¿Me da el total?" after the order went to staff.
+  'darme el total',
+  'me da el total',
+  'me pasa el total',
+  'me pasan el total',
+  'el total a',
+  'total a cancelar',
+  'total a pagar',
+  'valor a pagar',
+  'valor a cancelar',
+  'valor total',
+  'precio total',
+  'cuanto es todo',
+  'cuanto seria todo',
+  'cuanto sale todo',
+  'cuanto le debo',
+  'cuanto toca pagar',
 ];
 
 function normalize(text: string): string {

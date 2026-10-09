@@ -146,7 +146,10 @@ export async function GET(request: Request) {
     funnel: [
       { key: 'wrote', count: menuRuns.length },
       { key: 'started', count: menuRuns.filter((r) => has(r.vars.order_text)).length },
-      { key: 'confirmed', count: menuRuns.filter((r) => has(r.vars.ask_billing_type_choice)).length },
+      {
+        key: 'confirmed',
+        count: menuRuns.filter((r) => has(r.vars.ask_billing_type_choice) || has(r.vars.confirm_list_choice)).length,
+      },
       { key: 'handedOff', count: whatsappDates.length },
     ],
     needingReminder,
