@@ -286,6 +286,15 @@ export function BusinessSettingsPanel() {
           <Field label={t("links.woocommerce")} hint={t("links.woocommerceHint")}>
             {text("woocommerceUrl", { placeholder: "https://" })}
           </Field>
+          <Field label={t("links.publicAppUrl")} hint={t("links.publicAppUrlHint")}>
+            {text("publicAppUrl", { placeholder: "https://" })}
+          </Field>
+          <Field label={t("links.whatsappNumber")} hint={t("links.whatsappNumberHint")}>
+            {text("whatsappNumber", { placeholder: "593999999999" })}
+          </Field>
+          <Field label={t("links.shopFeedUrl")} hint={t("links.shopFeedUrlHint")}>
+            {text("shopFeedUrl", { placeholder: "https://…/feed-whatsapp.csv" })}
+          </Field>
           <Field label={t("links.birthdayField")} hint={t("links.birthdayFieldHint")}>
             {text("birthdayFieldName")}
           </Field>

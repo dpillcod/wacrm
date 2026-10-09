@@ -1755,6 +1755,12 @@
         "callCenter": "Call center phone",
         "woocommerce": "WooCommerce store URL",
         "woocommerceHint": "The API keys stay in the server environment (WOOCOMMERCE_KEY / _SECRET).",
+        "publicAppUrl": "CRM public address",
+        "publicAppUrlHint": "The https address customers open, e.g. the product picker link the bot sends.",
+        "whatsappNumber": "Business WhatsApp number",
+        "whatsappNumberHint": "Digits with country code, e.g. 593999999999. Used for the \"Back to WhatsApp\" button.",
+        "shopFeedUrl": "Web shop product feed (CSV)",
+        "shopFeedUrlHint": "The file the product picker reads (photos, prices, sections). Leave empty to turn the picker off.",
         "birthdayField": "Birthday custom field",
         "birthdayFieldHint": "Contact field (MM-DD) the daily birthday flow looks at."
       },

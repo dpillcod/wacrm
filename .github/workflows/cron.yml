@@ -37,26 +37,41 @@ name: Scheduled maintenance cron
 #                             sync: a birthday only needs checking once
 #                             a day, not every 15 minutes.
 #
-# All three endpoints require the same X-Cron-Secret header (by design,
+#   /api/catalog/shop-sync - reloads the web shop's product feed into
+#                             the customer product picker (/pedir) for
+#                             accounts that set one. Every 2 hours: the
+#                             feed itself is rebuilt hourly.
+#
+# All these endpoints require the same X-Cron-Secret header (by design,
 # see their route.ts comments) — set as the CRON_SECRET repo secret
 # below, matching AUTOMATION_CRON_SECRET on the actual deployment.
 on:
   schedule:
     - cron: "*/15 * * * *"
     - cron: "0 8 * * *"
+    - cron: "40 */2 * * *"
   workflow_dispatch: {}
 
 jobs:
   ping-cron-endpoints:
     runs-on: ubuntu-latest
     steps:
+      - name: Reload the web shop's products (every 2 hours)
+        if: github.event.schedule == '40 */2 * * *' || github.event_name == 'workflow_dispatch'
+        run: |
+          curl -sf -o /dev/null -w "catalog/shop-sync -> %{http_code}\n" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.WACRM_BASE_URL }}/api/catalog/shop-sync"
+
       - name: Sweep stale flow runs
+        if: github.event.schedule != '40 */2 * * *'
         run: |
           curl -sf -o /dev/null -w "flows/cron -> %{http_code}\n" \
             -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
             "${{ secrets.WACRM_BASE_URL }}/api/flows/cron"
 
       - name: Drain due automation steps
+        if: github.event.schedule != '40 */2 * * *'
         run: |
           curl -sf -o /dev/null -w "automations/cron -> %{http_code}\n" \
             -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \

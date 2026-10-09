@@ -279,6 +279,19 @@ export interface NodeSideEffectsConfig {
   order_history_reply?: boolean;
   /** "Que me llamen": urgent alert to the whole team + reply to the customer. */
   call_request?: boolean;
+  /**
+   * Sets `{{vars.catalog_link}}`: the customer's personal link to the
+   * product picker (/pedir/<token>, valid 24 h), or "" when the CRM's
+   * public address isn't set — a send_cta_url node then sends its text
+   * without the button.
+   */
+  catalog_link?: boolean;
+  /**
+   * Sets `{{vars.order_total_line}}` from the list in this var: the
+   * estimated total of the products picked from the catalog (they carry
+   * their price), or "" when none has a price.
+   */
+  list_total?: string;
 }
 
 /** Keeping a handed-off customer company — see HandoffNodeConfig.follow_up. */

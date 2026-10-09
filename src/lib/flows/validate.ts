@@ -343,7 +343,9 @@ function validateNode(
           field: "url",
           message: "Call-to-action node needs a URL.",
         });
-      } else if (!/^https?:\/\//i.test(cfg.url)) {
+      } else if (!/^(https?:\/\/|\{\{\s*vars\.)/i.test(cfg.url)) {
+        // A whole-URL variable (e.g. {{vars.catalog_link}}) is checked when
+        // sent: without a usable link the text goes alone.
         issues.push({
           severity: "error",
           scope: "node",
@@ -691,14 +693,16 @@ function validateNode(
         prompt_text?: string;
         var_key?: string;
         next_node_key?: string;
+        form?: unknown;
       };
-      if (!cfg.prompt_text?.trim()) {
+      // No prompt = just wait for the answer (the message before asked).
+      if (!cfg.prompt_text?.trim() && !cfg.form) {
         issues.push({
-          severity: "error",
+          severity: "warning",
           scope: "node",
           node_key: node.node_key,
           field: "prompt_text",
-          message: "Collect-input needs a prompt to send the customer.",
+          message: "Collect-input has no prompt: it sends nothing and waits, so the step before it must ask.",
         });
       }
       if (!cfg.var_key?.trim()) {

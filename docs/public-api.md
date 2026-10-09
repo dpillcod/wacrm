@@ -50,6 +50,7 @@ it. Grant the minimum.
 | `conversations:read` | List and read conversations              |
 | `broadcasts:send`    | Launch broadcast campaigns               |
 | `webhooks:manage`    | Register and manage outbound webhooks    |
+| `catalog:write`      | Upload the store system's product list   |
 
 A key with **no scopes** still authenticates and can call
 `GET /api/v1/me` — useful for verifying a key works.
@@ -262,6 +263,29 @@ Invalid phone numbers are dropped and counted as `rejected`. Response
 Broadcast status + counts. Scope: `broadcasts:send`. `status` moves
 `sending` → `sent`; `delivered_count` / `read_count` keep climbing as
 Meta delivery webhooks arrive. `404` for another account's broadcast.
+
+### `POST /api/v1/erp-products`
+
+Upload the store system's (ERP) product list, in batches of up to 2000.
+Scope: `catalog:write`. Used for the customer product picker (`/pedir`):
+best sellers first, products without stock hidden.
+
+```json
+{
+  "started_at": "2026-10-09T12:00:00Z",
+  "products": [
+    { "code": "1001", "barcode": "7861001234567", "name": "LECHE ENTERA 1L",
+      "brand": "NUTRI", "class": "LACTEOS", "stock": 24, "price": 1.05,
+      "sold_90d": 310, "last_sale": "2026-10-08", "by_weight": false }
+  ]
+}
+```
+
+Every batch of one upload carries the same `started_at`. A final call
+`{ "started_at": …, "done": true }` removes the codes that upload didn't
+include (only when it looks complete) and refreshes the picker's sales
+and stock. Only the fields above are stored — anything else in a row
+(costs, suppliers…) is ignored. Returns `{ "data": { "saved", "removed", "done" } }`.
 
 ## Pagination
 

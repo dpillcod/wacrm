@@ -69,6 +69,8 @@ import { classifyFirstMessage, readImage, transcribeAudio, type ImageReading } f
 import { nextGuideStep, type GuideAnswer } from "./service-guide";
 import { acceptOfferedProduct, answerInFlow, looksLikeQuestion } from "./question-answer";
 import { nextOpeningPhrase } from "./store-policy";
+import { createOrderLinkToken, orderLinkUrl } from "../catalog/order-link";
+import { keepCatalogLines, totalLine } from "../catalog/order-lines";
 import { formatFormReply } from "../whatsapp/flow-form";
 import { INTERACTIVE_LIMITS } from "../whatsapp/meta-api";
 import { isPriceQuestion } from "./price-question";
@@ -971,6 +973,13 @@ const URL_VAR_MAX_CHARS = 900;
 
 function interpolateVarsForUrl(template: string, vars: Record<string, unknown>): string {
   if (!template) return "";
+  // The whole URL is one variable (e.g. {{vars.catalog_link}}, a link the
+  // engine built): use it as is — the caller checks it's https.
+  const whole = /^\s*\{\{vars\.([a-zA-Z0-9_]+)\}\}\s*$/.exec(template);
+  if (whole) {
+    const v = vars[whole[1]];
+    return typeof v === "string" ? v.trim() : "";
+  }
   return template.replace(/\{\{vars\.([a-zA-Z0-9_]+)\}\}/g, (_, key) => {
     const v = vars[key];
     if (v === undefined || v === null) return "";
@@ -1172,6 +1181,14 @@ async function advanceFromNodeKey(
     }
     if (node.node_type === "send_cta_url") {
       const cfg = node.config as unknown as SendCtaUrlNodeConfig;
+      const ctaUrl = interpolateVarsForUrl(cfg.url, run.vars);
+      // No usable link (e.g. the CRM's public address isn't set yet):
+      // the text alone, and the conversation carries on.
+      if (!/^https:\/\/[^\s/]+/.test(ctaUrl)) {
+        await sendEngineText(db, run, node.node_key, interpolateVars(cfg.text, run.vars), "cta_without_link");
+        currentKey = cfg.next_node_key;
+        continue;
+      }
       try {
         const { whatsapp_message_id } = await engineSendCtaUrl({
           accountId: run.account_id,
@@ -1187,7 +1204,7 @@ async function advanceFromNodeKey(
             : cfg.footer_text,
           headerImageUrl: cfg.header_image_url,
           buttonText: cfg.button_text,
-          url: interpolateVarsForUrl(cfg.url, run.vars),
+          url: ctaUrl,
         });
         await logEvent(db, run.id, "message_sent", node.node_key, {
           node_type: "send_cta_url",
@@ -1263,7 +1280,10 @@ async function advanceFromNodeKey(
         }
         return { outcome: "advanced" };
       }
-      try {
+      // An empty prompt: the message before (e.g. a link button) already
+      // asked — just wait for the answer.
+      const askNothing = !cfg.form && !interpolateVars(cfg.prompt_text ?? "", run.vars).trim();
+      if (!askNothing) try {
         const { whatsapp_message_id } = cfg.form
           ? // Ask with an in-chat form (see CollectInputNodeConfig.form).
             await engineSendFlowForm({
@@ -1782,6 +1802,85 @@ async function handleNudgeReply(
   }
   const outcome = await advanceFromNodeKey(db, run, target, nodes);
   return { consumed: true, flow_run_id: run.id, outcome: outcome.outcome };
+}
+
+/**
+ * Products picked in the product picker (/pedir/<token>) arrive here:
+ * they're added to the customer's list in the main flow (a new quiet
+ * run if there's none) and the bot shows the list step ("Su lista … ¿Cómo
+ * desea su factura?") with the estimated total. Lines carry price and
+ * code (see catalog/order-lines.ts); the customer's note is added as
+ * typed lines.
+ */
+export async function receiveCatalogOrder(args: {
+  accountId: string;
+  contactId: string;
+  conversationId: string;
+  lines: string[];
+  note?: string;
+}): Promise<{ ok: true; flow_run_id: string } | { ok: false; error: string }> {
+  const db = supabaseAdmin();
+  const flow = await findDefaultEntryFlow(db, args.accountId);
+  if (!flow?.entry_node_id) return { ok: false, error: "no_flow" };
+  const nodes = await loadAllNodes(db, flow.id);
+  const listNode = [...nodes.values()].find((n) => !!textFallbackOf(n)?.edit_list_var);
+  const listVar = listNode ? textFallbackOf(listNode)!.edit_list_var! : null;
+  if (!listNode || !listVar) return { ok: false, error: "no_list_step" };
+
+  const { data: config } = await db
+    .from("whatsapp_config")
+    .select("user_id")
+    .eq("account_id", args.accountId)
+    .maybeSingle();
+  const userId = (config as { user_id?: string } | null)?.user_id;
+  if (!userId) return { ok: false, error: "no_whatsapp_config" };
+
+  let run = await loadActiveRunForContact(db, args.accountId, args.contactId);
+  if (run && run.flow_id !== flow.id) {
+    await endRun(db, run.id, "timed_out", "catalog_order");
+    run = null;
+  }
+  if (!run) {
+    const started = await startNewRun(
+      db,
+      flow,
+      {
+        accountId: args.accountId,
+        userId,
+        contactId: args.contactId,
+        conversationId: args.conversationId,
+        message: { kind: "text", text: "", meta_message_id: `catalog-${Date.now()}` },
+      },
+      nodes,
+      { silent: true },
+    );
+    run = started.flow_run_id ? await loadRun(db, started.flow_run_id) : null;
+    if (!run) return { ok: false, error: "run_not_started" };
+  }
+
+  const noteLines = (args.note ?? "")
+    .split("\n")
+    .map((l) => l.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .slice(0, 20);
+  const existing = typeof run.vars[listVar] === "string" ? (run.vars[listVar] as string).trim() : "";
+  const list = [existing, ...args.lines, ...noteLines].filter(Boolean).join("\n");
+  const vars: Record<string, unknown> = {
+    ...run.vars,
+    [listVar]: list,
+    [`${listVar}_numbered`]: numberLines(list),
+    [`${listVar}_last`]: args.lines.length ? `${args.lines.length} producto(s) del catálogo` : noteLines.join(", "),
+    __from_catalog: true,
+  };
+  for (const k of ["__pending_clarification", "__pending_line_edit", "__pending_list_answer", "__pending_disambiguation", "__pending_guide", "__offered_product"]) {
+    delete vars[k];
+  }
+  await saveVars(db, run, vars);
+  clearPendingDebounce(run.id);
+  clearPendingIdleNudge(run.id);
+  await logEvent(db, run.id, "node_entered", listNode.node_key, { reason: "catalog_order", lines: args.lines.length });
+  await advanceFromNodeKey(db, run, listNode.node_key, nodes);
+  return { ok: true, flow_run_id: run.id };
 }
 
 /** "Llámenme", "¿me pueden llamar?", "necesito que me llamen". */
@@ -2404,7 +2503,7 @@ async function handleListEditing(
     await sendEngineText(db, run, node.node_key, (await bizOf(db, run.account_id)).texts.editFailed, "list_edit_failed");
     return stay;
   }
-  return saveListAndAdvance(db, run, nodes, run.vars, cfg.edit_list_var, edited, cfg.next_node_key);
+  return saveListAndAdvance(db, run, nodes, run.vars, cfg.edit_list_var, keepCatalogLines(lines, edited), cfg.next_node_key);
 }
 
 /**
@@ -2498,6 +2597,28 @@ async function runNodeSideEffects(
 
   if (cfg.prefill_last_order) {
     await prefillLastOrder(db, run, node.node_key, cfg.prefill_last_order);
+  }
+
+  if (cfg.catalog_link && run.contact_id && run.conversation_id) {
+    const biz = await bizOf(db, run.account_id);
+    let link = "";
+    try {
+      const token = createOrderLinkToken({
+        accountId: run.account_id,
+        contactId: run.contact_id,
+        conversationId: run.conversation_id,
+        expiresAt: Math.floor(Date.now() / 1000) + 24 * 3600,
+      });
+      link = orderLinkUrl(biz.publicAppUrl || process.env.NEXT_PUBLIC_SITE_URL || "", token) ?? "";
+    } catch (err) {
+      console.error("[flows] catalog link failed:", err);
+    }
+    await saveVars(db, run, { ...run.vars, catalog_link: link });
+  }
+
+  if (cfg.list_total) {
+    const list = typeof run.vars[cfg.list_total] === "string" ? (run.vars[cfg.list_total] as string) : "";
+    await saveVars(db, run, { ...run.vars, order_total_line: totalLine(list) });
   }
 
   if (cfg.order_history_reply && run.contact_id) {
@@ -4283,7 +4404,8 @@ async function handleReplyForActiveRun(
       await sendListAndSuspend(db, run, currentNode);
     } else if (currentNode.node_type === "collect_input") {
       // Customer typed something we couldn't accept (empty after trim,
-      // or var_key missing — rare). Re-send the prompt so they try again.
+      // or var_key missing — rare). Re-send the prompt so they try again
+      // (a node without one asks the generic "didn't get that").
       const cfg = currentNode.config as unknown as CollectInputNodeConfig;
       try {
         await engineSendText({
@@ -4291,7 +4413,9 @@ async function handleReplyForActiveRun(
     userId: run.user_id,
           conversationId: run.conversation_id!,
           contactId: run.contact_id!,
-          text: interpolateVars(cfg.prompt_text, run.vars),
+          text:
+            interpolateVars(cfg.prompt_text ?? "", run.vars).trim() ||
+            (await bizOf(db, run.account_id)).texts.captureFailed,
         });
       } catch (err) {
         await logEvent(db, run.id, "error", currentNode.node_key, {

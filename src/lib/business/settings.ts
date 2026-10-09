@@ -56,6 +56,15 @@ export interface BusinessSettings {
   birthdayFieldName: string
   /** WooCommerce store URL (keys stay in the server environment). */
   woocommerceUrl: string
+  /**
+   * The CRM's public address (https://…), used to build links the bot
+   * sends — like the product picker. Falls back to NEXT_PUBLIC_SITE_URL.
+   */
+  publicAppUrl: string
+  /** The web shop's product feed (CSV), for the product picker. '' = picker off. */
+  shopFeedUrl: string
+  /** The business's WhatsApp number (digits, with country code), for "Volver a WhatsApp" links. */
+  whatsappNumber: string
   /** AI help with what customers send (uses the account's AI key). */
   aiFeatures: {
     /** Photo of a written list or of a product → order lines. */
@@ -182,6 +191,9 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
   crossSell: [],
   birthdayFieldName: 'Fecha de nacimiento',
   woocommerceUrl: '',
+  publicAppUrl: '',
+  shopFeedUrl: '',
+  whatsappNumber: '',
   aiFeatures: { readImages: true, transcribeAudio: true, entryRouter: true, audioDailyLimit: 200, answerQuestions: true },
   bakery: { entryNode: '' },
   texts: {
@@ -310,6 +322,9 @@ export function sanitizeSettings(stored: unknown): BusinessSettings {
     utcOffsetHours: Math.max(-12, Math.min(14, s.utcOffsetHours)),
     aiFeatures: { ...s.aiFeatures, audioDailyLimit: Math.max(0, Math.min(5000, Math.round(s.aiFeatures.audioDailyLimit))) },
     phoneCountryCode: s.phoneCountryCode.replace(/\D/g, ''),
+    whatsappNumber: s.whatsappNumber.replace(/\D/g, ''),
+    publicAppUrl: s.publicAppUrl.trim().replace(/\/+$/, ''),
+    shopFeedUrl: s.shopFeedUrl.trim(),
     // Seven days or none (= always open); a partial week is padded closed.
     openingHours: hours.length ? [...hours, ...Array(7 - hours.length).fill(null)] : [],
     staffPhones: strings(s.staffPhones, 20),

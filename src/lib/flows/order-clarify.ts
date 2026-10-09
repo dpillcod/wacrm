@@ -64,6 +64,7 @@ const APPLY_TASK = `Tarea: al cliente se le hizo una pregunta sobre su pedido y 
 Formato: {"lines": ["línea 1", "línea 2"]}`;
 
 const EDIT_TASK = `Tarea: el cliente revisó su lista y pide un cambio. Aplica EXACTAMENTE lo que pide: quitar, cambiar cantidad, reemplazar o agregar productos. Los números que menciona se refieren a la numeración de la lista ("quitar el 3" = quitar la línea 3). No toques las demás líneas.
+Las líneas con precio y código ("2 × NOMBRE · $1,30 c/u (cód. 123)") cópialas EXACTAMENTE igual; si pide otra cantidad, cambia solo el número del inicio.
 Si no se entiende qué quiere cambiar, devuelve la lista sin cambios con "understood": false.
 
 Formato: {"lines": ["línea 1", "línea 2"], "understood": true}`;
