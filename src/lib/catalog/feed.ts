@@ -123,7 +123,8 @@ export function feedToProducts(rows: string[][]): ShopProductRow[] {
       title,
       price,
       sale_price: sale !== null && sale > 0 && sale < price ? sale : null,
-      image_url: /^https:\/\//.test(image) ? image : null,
+      // The shop's generic "no photo" image counts as no photo.
+      image_url: /^https:\/\//.test(image) && !/placeholder/i.test(image) ? image : null,
       link: /^https:\/\//.test(link) ? link : null,
       department,
       category,

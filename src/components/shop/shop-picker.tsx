@@ -108,12 +108,15 @@ export function ShopPicker({
   storeName,
   customerName,
   backHref,
+  hasOffers,
   initial,
 }: {
   token: string;
   storeName: string;
   customerName: string;
   backHref: string;
+  /** Any product on offer? Without, the "Ofertas" filter is hidden. */
+  hasOffers: boolean;
   initial: { items: ShopItem[]; total: number; facets: ShopFacets };
 }) {
   const storageKey = `pedir:${token.slice(-22)}`;
@@ -399,9 +402,11 @@ export function ShopPicker({
           <button type="button" className={styles.chip} aria-pressed={!filters.dep && !filters.sale} onClick={() => pickChip(null)}>
             Todo
           </button>
-          <button type="button" className={styles.chip} aria-pressed={filters.sale} onClick={() => pickChip(SALE)}>
-            🔥 Ofertas
-          </button>
+          {hasOffers && (
+            <button type="button" className={styles.chip} aria-pressed={filters.sale} onClick={() => pickChip(SALE)}>
+              🔥 Ofertas
+            </button>
+          )}
           {departments.map((d) => (
             <button key={d.name} type="button" className={styles.chip} aria-pressed={filters.dep === d.name} onClick={() => pickChip(d.name)}>
               {niceTitle(d.name)}
@@ -535,17 +540,21 @@ export function ShopPicker({
               </button>
             ))}
           </div>
-          <h3>Mostrar</h3>
-          <div className={styles.opts}>
-            <button
-              type="button"
-              className={styles.chip}
-              aria-pressed={filters.sale}
-              onClick={() => setFilters((f) => ({ ...f, sale: !f.sale }))}
-            >
-              🔥 Solo ofertas
-            </button>
-          </div>
+          {hasOffers && (
+            <>
+              <h3>Mostrar</h3>
+              <div className={styles.opts}>
+                <button
+                  type="button"
+                  className={styles.chip}
+                  aria-pressed={filters.sale}
+                  onClick={() => setFilters((f) => ({ ...f, sale: !f.sale }))}
+                >
+                  🔥 Solo ofertas
+                </button>
+              </div>
+            </>
+          )}
           {filters.dep && categories.length > 0 && (
             <>
               <h3>Categoría de {niceTitle(filters.dep)}</h3>

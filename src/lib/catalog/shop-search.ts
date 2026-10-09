@@ -63,7 +63,12 @@ export async function searchShop(
       q = q.order("title", { ascending: true });
       break;
     default:
-      q = q.order("sold_90d", { ascending: false }).order("title", { ascending: true });
+      // Best sellers first; among equals (or before any sales data),
+      // products with a photo.
+      q = q
+        .order("sold_90d", { ascending: false })
+        .order("image_url", { ascending: true, nullsFirst: false })
+        .order("title", { ascending: true });
   }
   const { data, count, error } = await q.range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
   if (error) throw new Error(error.message);

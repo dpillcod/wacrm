@@ -73,14 +73,17 @@ export default async function PedirPage({ params }: { params: Promise<{ token: s
   let items: ShopItem[] = [];
   let total = 0;
   let facets: ShopFacets = { departments: [], categories: [] };
+  let hasOffers = false;
   try {
-    const [r, f] = await Promise.all([
+    const [r, f, offers] = await Promise.all([
       searchShop(db, accountId, { sort: "pop", page: 0 }),
       shopFacets(db, accountId, "", null),
+      db.from("shop_products").select("sku").eq("account_id", accountId).not("sale_price", "is", null).limit(1),
     ]);
     items = r.items;
     total = r.total;
     facets = f;
+    hasOffers = (offers.data ?? []).length > 0;
   } catch (err) {
     console.error("[pedir] first page failed:", err);
   }
@@ -106,6 +109,7 @@ export default async function PedirPage({ params }: { params: Promise<{ token: s
         storeName={biz.name || "Elegir productos"}
         customerName={firstName}
         backHref={backHref}
+        hasOffers={hasOffers}
         initial={{ items, total, facets }}
       />
     </div>
