@@ -15,6 +15,7 @@
 
 import { requireApiKey } from '@/lib/auth/api-context';
 import { ok, badRequest, toApiErrorResponse } from '@/lib/api/v1/respond';
+import { refreshShopPopularity } from '@/lib/catalog/shop-sync';
 
 const MAX_BATCH = 2000;
 
@@ -95,6 +96,7 @@ export async function POST(request: Request) {
     }
 
     let removed = 0;
+    let updated = 0;
     if (body.done === true) {
       // Drop codes this upload didn't include — only when the upload
       // looks complete (a cut-off run must not empty the table).
@@ -112,11 +114,12 @@ export async function POST(request: Request) {
         if (error) throw new Error(`erp_products prune: ${error.message}`);
         removed = count ?? 0;
       }
-      const { error } = await ctx.supabase.rpc('refresh_shop_popularity', { p_account: ctx.accountId });
-      if (error) throw new Error(`refresh_shop_popularity: ${error.message}`);
+      const pop = await refreshShopPopularity(ctx.supabase, ctx.accountId);
+      if (!pop.ok) throw new Error(`refresh shop popularity: ${pop.error}`);
+      updated = pop.updated;
     }
 
-    return ok({ saved: rows.length, removed, done: body.done === true });
+    return ok({ saved: rows.length, removed, updated, done: body.done === true });
   } catch (err) {
     return toApiErrorResponse(err);
   }

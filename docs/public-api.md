@@ -285,7 +285,7 @@ Every batch of one upload carries the same `started_at`. A final call
 `{ "started_at": …, "done": true }` removes the codes that upload didn't
 include (only when it looks complete) and refreshes the picker's sales
 and stock. Only the fields above are stored — anything else in a row
-(costs, suppliers…) is ignored. Returns `{ "data": { "saved", "removed", "done" } }`.
+(costs, suppliers…) is ignored. Returns `{ "data": { "saved", "removed", "updated", "done" } }`.
 
 ## Pagination
 

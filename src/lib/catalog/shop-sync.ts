@@ -71,8 +71,8 @@ async function doSync(db: SupabaseClient, accountId: string): Promise<ShopSyncRe
     if (error) console.error("[shop-sync] prune failed:", error.message);
     removed = count ?? 0;
   }
-  const { error: popErr } = await db.rpc("refresh_shop_popularity", { p_account: accountId });
-  if (popErr) console.error("[shop-sync] popularity refresh failed:", popErr.message);
+  const pop = await refreshShopPopularity(db, accountId);
+  if (!pop.ok) console.error("[shop-sync] popularity refresh failed:", pop.error);
   return { ok: true, products: products.length, removed, ms: Date.now() - started };
 }
 
@@ -95,4 +95,23 @@ export async function refreshShopIfStale(db: SupabaseClient, accountId: string):
   } catch (err) {
     console.error("[shop-sync] staleness check failed:", err);
   }
+}
+
+/**
+ * Copy the ERP's sales and stock onto the shop's products, a slice per
+ * call (see migration 047) so no single statement hits the timeout.
+ */
+export async function refreshShopPopularity(
+  db: SupabaseClient,
+  accountId: string,
+): Promise<{ ok: true; updated: number } | { ok: false; error: string; updated: number }> {
+  let updated = 0;
+  for (let i = 0; i < 200; i++) {
+    const { data, error } = await db.rpc("refresh_shop_popularity_batch", { p_account: accountId, p_limit: 2000 });
+    if (error) return { ok: false, error: error.message, updated };
+    const n = Number(data) || 0;
+    updated += n;
+    if (n === 0) break;
+  }
+  return { ok: true, updated };
 }
