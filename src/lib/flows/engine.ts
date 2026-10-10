@@ -81,6 +81,7 @@ import {
 } from "../catalog/carts";
 import {
   billingLine,
+  FINAL_CONSUMER,
   greetingName,
   isRefusal,
   loadCustomerProfile,
@@ -248,12 +249,20 @@ export function optionByText(
 ): { reply_id: string; title: string } | null {
   const said = normalizeForMatch(text);
   if (!said) return null;
-  for (const o of optionsOf(node)) {
-    const names = [o.title, ...(o.aliases ?? [])].map(normalizeForMatch).filter(Boolean);
-    if (names.includes(said)) return { reply_id: o.reply_id, title: o.title };
+  // "quiero cotizar", "necesito hablar con un asesor": the option's words
+  // after a polite lead-in count too.
+  const bare = said.replace(OPTION_LEAD_IN, "").trim();
+  for (const candidate of bare && bare !== said ? [said, bare] : [said]) {
+    for (const o of optionsOf(node)) {
+      const names = [o.title, ...(o.aliases ?? [])].map(normalizeForMatch).filter(Boolean);
+      if (names.includes(candidate)) return { reply_id: o.reply_id, title: o.title };
+    }
   }
   return null;
 }
+
+const OPTION_LEAD_IN =
+  /^((por favor|porfa|disculpe|buenas|buenos dias|buenas tardes|buenas noches|hola)\s+)*((yo\s+)?(quiero|quisiera|deseo|desearia|necesito|me gustaria|quiero ver|ver|para|solo|solamente)\s+)+((un|una|el|la|los|las|mi|mis)\s+)?/;
 
 /** The number of options when `text` is an option number that doesn't exist ("9" of 7), else null. */
 export function outOfRangeOption(
@@ -1901,6 +1910,9 @@ export async function receiveCatalogOrder(args: {
   return { ok: true, flow_run_id: run.id };
 }
 
+const PROFILE_REQUIRED_TEXT =
+  "Para atender sus pedidos necesitamos registrarle *una sola vez* 🙂 Escríbame su nombre completo, cédula y correo, o toque *Registrar mis datos*.";
+
 /** Run vars from a saved profile: greeting name and invoice data. */
 function profileVars(p: CustomerProfile, current: Record<string, unknown>): Record<string, unknown> {
   return {
@@ -2828,8 +2840,12 @@ async function runNodeSideEffects(
     const refused = !fromForm && isRefusal(typed);
     const parsed = parseCustomerProfile(fromForm ? { fields } : { text: typed }, biz.phoneCountryCode);
     let vars: Record<string, unknown>;
+    // "Consumidor final" isn't a profile when the node asks for real data.
+    const finalNotAllowed = !!cfg.profile_required && parsed.ok && parsed.profile.idNumber === FINAL_CONSUMER;
     if (refused) {
       vars = { ...run.vars, profile_ok: "", profile_refused: "si", profile_problem: "" };
+    } else if (finalNotAllowed) {
+      vars = { ...run.vars, profile_ok: "", profile_problem: PROFILE_REQUIRED_TEXT };
     } else if (parsed.ok) {
       try {
         await saveCustomerProfile(db, {

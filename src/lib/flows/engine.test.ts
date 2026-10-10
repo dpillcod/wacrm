@@ -570,3 +570,34 @@ describe("stripOrderLeadIn", () => {
     expect(stripOrderLeadIn("quiero")).toBe("quiero");
   });
 });
+
+const leadInMenu = {
+  node_type: "send_list",
+  config: {
+    sections: [
+      {
+        rows: [
+          { reply_id: "pedido", title: "Pedidos en línea", aliases: ["pedir", "comprar"] },
+          { reply_id: "mantenimiento", title: "Cotizar y mantenimiento", aliases: ["cotizar", "plomero"] },
+          { reply_id: "persona", title: "Hablar con un asesor", aliases: ["asesor"] },
+        ],
+      },
+    ],
+  },
+};
+
+describe("optionByText with a lead-in", () => {
+  it("matches a title or alias", () => {
+    expect(optionByText(leadInMenu, "Cotizar")?.reply_id).toBe("mantenimiento");
+    expect(optionByText(leadInMenu, "pedidos en linea")?.reply_id).toBe("pedido");
+  });
+  it("matches after a polite lead-in", () => {
+    expect(optionByText(leadInMenu, "Quiero cotizar")?.reply_id).toBe("mantenimiento");
+    expect(optionByText(leadInMenu, "hola, necesito un plomero")?.reply_id).toBe("mantenimiento");
+    expect(optionByText(leadInMenu, "quisiera hablar con un asesor por favor")).toBeNull();
+    expect(optionByText(leadInMenu, "deseo hablar con un asesor")?.reply_id).toBe("persona");
+  });
+  it("doesn't take a product for an option", () => {
+    expect(optionByText(leadInMenu, "quiero 2 libras de arroz")).toBeNull();
+  });
+});

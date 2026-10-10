@@ -297,6 +297,8 @@ export interface NodeSideEffectsConfig {
    * `{{vars.profile_refused}}` = "si" instead (nothing saved).
    */
   save_customer_profile?: string;
+  /** With save_customer_profile: "consumidor final" isn't accepted — name, ID number and email are required. */
+  profile_required?: boolean;
   /**
    * Sets `{{vars.order_total_line}}` from the list in this var: the
    * estimated total of the products picked from the catalog (they carry
