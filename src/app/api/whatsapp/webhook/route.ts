@@ -1033,11 +1033,17 @@ async function parseMessageContent(
 
     case 'document':
       if (message.document?.id) {
+        const url = await verifyAndBuildUrl(message.document.id)
         return {
           ...empty,
           contentText:
             message.document.caption || message.document.filename || null,
-          mediaUrl: await verifyAndBuildUrl(message.document.id),
+          // The file's own name rides on the URL (the caption may replace
+          // it in contentText), so opening or saving it keeps its name.
+          mediaUrl:
+            url && message.document.filename
+              ? `${url}?name=${encodeURIComponent(message.document.filename.slice(0, 120))}`
+              : url,
           mediaType: message.document.mime_type,
         }
       }

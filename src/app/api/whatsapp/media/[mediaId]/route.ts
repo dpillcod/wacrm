@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
+import { mediaFilename } from '@/lib/whatsapp/media-filename'
 
 export async function GET(
   request: Request,
@@ -73,11 +74,21 @@ export async function GET(
       accessToken,
     })
 
+    // ?name= (the file's original name) and ?download=1: open it in the
+    // browser (PDF, image — to look at or print) or save it, always with
+    // a real name and extension so the computer knows what opens it.
+    const mime = contentType || mediaInfo.mimeType || 'application/octet-stream'
+    const url = new URL(request.url)
+    const filename = mediaFilename(url.searchParams.get('name'), mime, mediaId)
+    const disposition = url.searchParams.get('download') === '1' ? 'attachment' : 'inline'
+
     return new Response(new Uint8Array(buffer), {
       status: 200,
       headers: {
-        'Content-Type': contentType || mediaInfo.mimeType || 'application/octet-stream',
-        'Cache-Control': 'public, max-age=86400',
+        'Content-Type': mime,
+        'Content-Disposition': `${disposition}; filename="${filename.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+        // Private: it's a customer's file behind the team's login.
+        'Cache-Control': 'private, max-age=86400',
       },
     })
   } catch (error) {

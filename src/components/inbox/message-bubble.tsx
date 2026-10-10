@@ -14,6 +14,8 @@ import {
   ImageOff,
   CornerDownLeft,
   Sparkles,
+  ExternalLink,
+  Download,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ReplyQuote } from "./reply-quote";
@@ -112,12 +114,42 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
   }
 
   return (
-    <img
-      src={src ?? ""}
-      alt={alt}
-      className="max-h-64 max-w-60 rounded-lg object-cover"
-      onError={() => setError(true)}
-    />
+    // Click to see it full size in a new tab (zoom, print, save).
+    <a href={src ?? undefined} target="_blank" rel="noopener noreferrer" title={alt}>
+      {/* eslint-disable-next-line @next/next/no-img-element -- a blob of the customer's photo */}
+      <img
+        src={src ?? ""}
+        alt={alt}
+        className="max-h-64 max-w-60 cursor-zoom-in rounded-lg object-cover"
+        onError={() => setError(true)}
+      />
+    </a>
+  );
+}
+
+/** "/api/whatsapp/media/1?name=x" + download → "/api/whatsapp/media/1?name=x&download=1". */
+function withParam(url: string, key: string, value: string): string {
+  return `${url}${url.includes("?") ? "&" : "?"}${key}=${encodeURIComponent(value)}`;
+}
+
+/** "Open" (in the browser, to look at or print) and "Download" (save to the computer). */
+function MediaActions({ url, t }: { url: string; t: ReturnType<typeof useTranslations> }) {
+  const proxied = url.startsWith("/api/whatsapp/media/");
+  return (
+    <div className="mt-1 flex gap-3 text-xs">
+      <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
+        <ExternalLink className="h-3.5 w-3.5" />
+        {t("open")}
+      </a>
+      <a
+        href={proxied ? withParam(url, "download", "1") : url}
+        download
+        className="inline-flex items-center gap-1 text-primary hover:underline"
+      >
+        <Download className="h-3.5 w-3.5" />
+        {t("download")}
+      </a>
+    </div>
   );
 }
 
@@ -134,7 +166,10 @@ function MessageContent({ message, t }: { message: Message, t: ReturnType<typeof
       return (
         <div>
           {message.media_url ? (
-            <MediaImage url={message.media_url} alt="Shared image" />
+            <>
+              <MediaImage url={message.media_url} alt="Shared image" />
+              <MediaActions url={message.media_url} t={t} />
+            </>
           ) : (
             <MediaUnavailable label={t("photo")} t={t} />
           )}
@@ -182,17 +217,20 @@ function MessageContent({ message, t }: { message: Message, t: ReturnType<typeof
         return <MediaUnavailable label={message.content_text || t("document")} t={t} />;
       }
       return (
-        <a
-          href={message.media_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2 text-sm hover:bg-muted"
-        >
-          <FileText className="h-5 w-5 shrink-0 text-muted-foreground" />
-          <span className="truncate">
-            {message.content_text || t("document")}
-          </span>
-        </a>
+        <div>
+          <a
+            href={message.media_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2 text-sm hover:bg-muted"
+          >
+            <FileText className="h-5 w-5 shrink-0 text-muted-foreground" />
+            <span className="truncate">
+              {message.content_text || t("document")}
+            </span>
+          </a>
+          <MediaActions url={message.media_url} t={t} />
+        </div>
       );
 
     case "template":

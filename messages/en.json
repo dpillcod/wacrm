@@ -247,6 +247,8 @@
       "audio": "Audio",
       "unavailable": "{label} unavailable",
       "document": "Document",
+      "open": "Open",
+      "download": "Download",
       "locationShared": "Location shared",
       "template": "Template",
       "buttonReply": "Button reply",
