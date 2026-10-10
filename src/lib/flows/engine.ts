@@ -55,7 +55,7 @@ import {
   type NotifyStaffResult,
 } from "../whatsapp/staff-notify";
 import { localPhone, toInternational } from "../whatsapp/phone-utils";
-import { findOrderPipeline, notifyAccountInApp, upsertOrderCard } from "../pipelines/order-cards";
+import { customerWindowOpen, findOrderPipeline, notifyAccountInApp, upsertOrderCard } from "../pipelines/order-cards";
 import {
   csatThanks,
   isOrderStatusQuestion,
@@ -70,7 +70,15 @@ import { nextGuideStep, type GuideAnswer } from "./service-guide";
 import { acceptOfferedProduct, answerInFlow, looksLikeQuestion } from "./question-answer";
 import { nextOpeningPhrase } from "./store-policy";
 import { createOrderLinkToken, orderLinkUrl } from "../catalog/order-link";
-import { keepCatalogLines, totalLine } from "../catalog/order-lines";
+import { keepCatalogLines, money, totalLine } from "../catalog/order-lines";
+import {
+  cartOrderLines,
+  cartsDueForReminder,
+  clearCart,
+  loadCart,
+  markCartReminded,
+  type StoredCart,
+} from "../catalog/carts";
 import {
   billingLine,
   greetingName,
@@ -1935,6 +1943,158 @@ async function customerStartVars(
   return { contact_name: contactName };
 }
 
+/** The customer's personal product-picker link (24 h), or "" when the CRM has no public address. */
+async function catalogLink(db: AdminClient, accountId: string, contactId: string, conversationId: string): Promise<string> {
+  try {
+    const biz = await bizOf(db, accountId);
+    const token = createOrderLinkToken({
+      accountId,
+      contactId,
+      conversationId,
+      expiresAt: Math.floor(Date.now() / 1000) + 24 * 3600,
+    });
+    return orderLinkUrl(biz.publicAppUrl || process.env.NEXT_PUBLIC_SITE_URL || "", token) ?? "";
+  } catch (err) {
+    console.error("[flows] catalog link failed:", err);
+    return "";
+  }
+}
+
+// ============================================================
+// A cart left in the product picker: one reminder with buttons
+// ("Enviar mi pedido" / "Ver carrito") after CART_REMINDER_MS without
+// changes, in opening hours and inside the free 24 h window. An
+// in-memory timer per cart, plus sweepCartReminders from the cron for
+// carts whose timer was lost (restart) or fell outside opening hours.
+// ============================================================
+
+const CART_SEND_PREFIX = "cart_send:";
+const CART_VIEW_PREFIX = "cart_view:";
+// 30 minutes; CART_REMINDER_DELAY_MS shortens it for tests.
+export const CART_REMINDER_MS = Number(process.env.CART_REMINDER_DELAY_MS) || 30 * 60_000;
+const pendingCartReminders = new Map<string, ReturnType<typeof setTimeout>>();
+
+/** (Re)start the reminder timer for a contact's cart — call after every save. */
+export function scheduleCartReminder(accountId: string, contactId: string): void {
+  const key = `${accountId}:${contactId}`;
+  const existing = pendingCartReminders.get(key);
+  if (existing) clearTimeout(existing);
+  pendingCartReminders.set(
+    key,
+    setTimeout(() => {
+      pendingCartReminders.delete(key);
+      const db = supabaseAdmin();
+      loadCart(db, accountId, contactId)
+        .then((cart) =>
+          cart && !cart.remindedAt && Date.now() - Date.parse(cart.updatedAt) >= CART_REMINDER_MS - 1000
+            ? sendCartReminder(db, cart)
+            : false,
+        )
+        .catch((err) => console.error("[flows] cart reminder failed:", err));
+    }, CART_REMINDER_MS + 2000),
+  );
+}
+
+/** Carts due for their reminder (from the cron). Returns how many were reminded. */
+export async function sweepCartReminders(db: AdminClient = supabaseAdmin()): Promise<number> {
+  let sent = 0;
+  for (const cart of await cartsDueForReminder(db, CART_REMINDER_MS)) {
+    if (await sendCartReminder(db, cart).catch(() => false)) sent += 1;
+  }
+  return sent;
+}
+
+async function configOwner(db: AdminClient, accountId: string): Promise<string | null> {
+  const { data } = await db.from("whatsapp_config").select("user_id").eq("account_id", accountId).maybeSingle();
+  return (data as { user_id?: string } | null)?.user_id ?? null;
+}
+
+async function sendCartReminder(db: AdminClient, cart: StoredCart): Promise<boolean> {
+  if (!cart.conversationId || !cart.items.length) return false;
+  const biz = await bizOf(db, cart.accountId);
+  // Closed now: the cron tries again once the store opens.
+  if (!isWithinBusinessHours(biz)) return false;
+  const userId = await configOwner(db, cart.accountId);
+  if (!userId) return false;
+  const windowOpen = await customerWindowOpen(db, cart.conversationId);
+  const { total, units } = await cartOrderLines(db, cart.accountId, cart.items);
+  // Claim it first, so the timer and the cron never both send it.
+  if (!(await markCartReminded(db, cart))) return false;
+  if (!windowOpen || units === 0) return false;
+  await engineSendInteractiveButtons({
+    accountId: cart.accountId,
+    userId,
+    conversationId: cart.conversationId,
+    contactId: cart.contactId,
+    bodyText: renderText(biz.texts.cartReminder, {
+      productos: `${units} producto${units === 1 ? "" : "s"}`,
+      total: money(total),
+    }),
+    buttons: [
+      { id: `${CART_SEND_PREFIX}${cart.contactId}`, title: "✅ Enviar mi pedido" },
+      { id: `${CART_VIEW_PREFIX}${cart.contactId}`, title: "🛒 Ver carrito" },
+    ],
+  });
+  return true;
+}
+
+/** Taps on the cart reminder's buttons. Null when it isn't one. */
+async function handleCartReply(
+  db: AdminClient,
+  input: DispatchInboundInput & { isFirstInboundMessage: boolean },
+  replyId: string,
+): Promise<DispatchInboundResult | null> {
+  const send = replyId.startsWith(CART_SEND_PREFIX);
+  if (!send && !replyId.startsWith(CART_VIEW_PREFIX)) return null;
+  const contactId = replyId.slice((send ? CART_SEND_PREFIX : CART_VIEW_PREFIX).length);
+  if (contactId !== input.contactId) return { consumed: true, outcome: "no_match" };
+  const biz = await bizOf(db, input.accountId);
+  const cart = await loadCart(db, input.accountId, input.contactId);
+  const reply = (text: string) =>
+    engineSendText({
+      accountId: input.accountId,
+      userId: input.userId,
+      conversationId: input.conversationId,
+      contactId: input.contactId,
+      text,
+    });
+  if (!cart || (!cart.items.length && !cart.note.trim())) {
+    await reply(biz.texts.cartEmpty);
+    return { consumed: true, outcome: "no_match" };
+  }
+  if (send) {
+    const { lines } = await cartOrderLines(db, input.accountId, cart.items);
+    const result = await receiveCatalogOrder({
+      accountId: input.accountId,
+      contactId: input.contactId,
+      conversationId: input.conversationId,
+      lines,
+      note: cart.note,
+    });
+    if (!result.ok) {
+      console.error("[flows] cart send failed:", result.error);
+      return { consumed: false, outcome: "no_match" };
+    }
+    await clearCart(db, input.accountId, input.contactId);
+    return { consumed: true, flow_run_id: result.flow_run_id, outcome: "advanced" };
+  }
+  const link = await catalogLink(db, input.accountId, input.contactId, input.conversationId);
+  if (!link) {
+    await reply(biz.texts.cartEmpty);
+    return { consumed: true, outcome: "no_match" };
+  }
+  await engineSendCtaUrl({
+    accountId: input.accountId,
+    userId: input.userId,
+    conversationId: input.conversationId,
+    contactId: input.contactId,
+    bodyText: biz.texts.cartView,
+    buttonText: "🛒 Ver mi carrito",
+    url: link,
+  });
+  return { consumed: true, outcome: "advanced" };
+}
+
 /** "Llámenme", "¿me pueden llamar?", "necesito que me llamen". */
 export function isCallRequest(text: string): boolean {
   const t = normalizeForMatch(text);
@@ -2040,6 +2200,8 @@ async function dispatchInboundToFlowsInner(
       if (csatResult) return csatResult;
       const nudgeResult = await handleNudgeReply(db, input, input.message.reply_id);
       if (nudgeResult) return nudgeResult;
+      const cartResult = await handleCartReply(db, input, input.message.reply_id);
+      if (cartResult) return cartResult;
     }
 
     // "Llámenme" / "¿me pueden llamar?": urgent alert to the team — unless
@@ -2701,19 +2863,7 @@ async function runNodeSideEffects(
   }
 
   if (cfg.catalog_link && run.contact_id && run.conversation_id) {
-    const biz = await bizOf(db, run.account_id);
-    let link = "";
-    try {
-      const token = createOrderLinkToken({
-        accountId: run.account_id,
-        contactId: run.contact_id,
-        conversationId: run.conversation_id,
-        expiresAt: Math.floor(Date.now() / 1000) + 24 * 3600,
-      });
-      link = orderLinkUrl(biz.publicAppUrl || process.env.NEXT_PUBLIC_SITE_URL || "", token) ?? "";
-    } catch (err) {
-      console.error("[flows] catalog link failed:", err);
-    }
+    const link = await catalogLink(db, run.account_id, run.contact_id, run.conversation_id);
     await saveVars(db, run, { ...run.vars, catalog_link: link });
   }
 
@@ -3510,6 +3660,9 @@ async function sendIdleNudge(
   if (!holdsList && (entryNode as { node_key?: string } | null)?.node_key === expectedNodeKey) return;
   // Once per conversation is a reminder; twice is nagging.
   if (freshRun.vars.__idle_nudged) return;
+  // Picking products in the catalog (a cart in progress): not idle — the
+  // cart has its own reminder.
+  if (freshRun.contact_id && (await loadCart(db, freshRun.account_id, freshRun.contact_id).catch(() => null))) return;
   await saveVars(db, freshRun, { ...freshRun.vars, __idle_nudged: true });
   const texts = (await bizOf(db, freshRun.account_id)).texts;
   // A list left half-way gets one more chance two hours later.

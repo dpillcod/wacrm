@@ -20,9 +20,16 @@ const MAX_QTY = 999;
 const SALE = "__sale__";
 
 type CartLine = { qty: number; title: string; price: number; thumb: string | null };
-type Cart = Record<string, CartLine>;
+export type Cart = Record<string, CartLine>;
+/** A product the customer ordered before, with the quantity they last asked for. */
+export type UsualItem = ShopItem & { lastQty: number };
 type Page = { items: ShopItem[]; total: number; facets?: ShopFacets | null };
 type Filters = { q: string; dep: string | null; cat: string | null; sort: ShopSort; sale: boolean };
+
+/** The cart as the server stores it (compared to skip saving what didn't change). */
+function cartKey(cart: Cart, note: string): string {
+  return JSON.stringify({ items: Object.entries(cart).map(([sku, l]) => ({ sku, qty: l.qty })), note });
+}
 
 function money(n: number): string {
   return `$${n.toFixed(2).replace(".", ",")}`;
@@ -110,6 +117,9 @@ export function ShopPicker({
   backHref,
   hasOffers,
   initial,
+  serverCart,
+  usual,
+  deliveryNote,
 }: {
   token: string;
   storeName: string;
@@ -118,6 +128,12 @@ export function ShopPicker({
   /** Any product on offer? Without, the "Ofertas" filter is hidden. */
   hasOffers: boolean;
   initial: { items: ShopItem[]; total: number; facets: ShopFacets };
+  /** The cart kept on the server (from an earlier link), used when this phone has none for this link. */
+  serverCart: { cart: Cart; note: string };
+  /** "Sus productos de siempre", from past orders (empty for a new customer). */
+  usual: UsualItem[];
+  /** One line about delivery for the cart ('' = none). */
+  deliveryNote: string;
 }) {
   const storageKey = `pedir:${token.slice(-22)}`;
   const [filters, setFilters] = useState<Filters>({ q: "", dep: null, cat: null, sort: "pop", sale: false });
@@ -136,6 +152,8 @@ export function ShopPicker({
   const [sendError, setSendError] = useState<null | { text: string; back?: boolean }>(null);
   const [done, setDone] = useState<null | { total: number }>(null);
   const [restored, setRestored] = useState(false);
+  // What the server has, so only real changes are sent (and re-arm the reminder).
+  const synced = useRef<string | null>(null);
 
   // Pages already fetched (by query), so going back to a section is instant.
   const [cache] = useState(() => new Map<string, Page>([[queryString({ q: "", dep: null, cat: null, sort: "pop", sale: false }, 0), initial]]));
@@ -151,15 +169,19 @@ export function ShopPicker({
       const saved = JSON.parse(localStorage.getItem(storageKey) ?? "null") as
         | { cart?: Cart; note?: string; view?: "list" | "grid" }
         | null;
-      if (saved?.cart && typeof saved.cart === "object") setCart(saved.cart);
-      if (typeof saved?.note === "string") setNote(saved.note);
+      const hasLocal = !!saved?.cart && typeof saved.cart === "object";
+      setCart(hasLocal ? saved!.cart! : serverCart.cart);
+      setNote(typeof saved?.note === "string" && hasLocal ? saved.note : serverCart.note);
       if (saved?.view === "grid") setView("grid");
     } catch {
-      // private mode / blocked storage: start empty
+      // private mode / blocked storage: the server's cart
+      setCart(serverCart.cart);
+      setNote(serverCart.note);
     }
+    synced.current = cartKey(serverCart.cart, serverCart.note);
     setRestored(true);
     /* eslint-enable react-hooks/set-state-in-effect */
-  }, [storageKey]);
+  }, [storageKey, serverCart]);
 
   useEffect(() => {
     if (!restored) return;
@@ -169,6 +191,27 @@ export function ShopPicker({
       // ignore
     }
   }, [cart, note, view, restored, storageKey]);
+
+  // Keep the cart on the server too (a short pause after the last change):
+  // a new link opens with it, and the bot can remind them if they leave.
+  useEffect(() => {
+    if (!restored || done) return;
+    const key = cartKey(cart, note);
+    if (key === synced.current) return;
+    const t = setTimeout(() => {
+      fetch(`/api/pedir/${encodeURIComponent(token)}/cart`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: key,
+        keepalive: true,
+      })
+        .then((res) => {
+          if (res.ok) synced.current = key;
+        })
+        .catch(() => undefined);
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [cart, note, restored, done, token]);
 
   // Type → search after a short pause.
   useEffect(() => {
@@ -277,6 +320,44 @@ export function ShopPicker({
     window.scrollTo({ top: 0 });
     if (dep === SALE) setFilters((f) => ({ ...f, dep: null, cat: null, sale: !f.sale }));
     else setFilters((f) => ({ ...f, dep, cat: null, sale: false }));
+  }
+
+  function addAllUsual() {
+    setSendError(null);
+    setCart((c) => {
+      const next = { ...c };
+      for (const u of usual) {
+        if (!next[u.sku]) next[u.sku] = { qty: Math.min(MAX_QTY, Math.max(1, u.lastQty)), title: u.title, price: unitPrice(u), thumb: u.thumb };
+      }
+      return next;
+    });
+  }
+
+  const showUsual = usual.length > 0 && !filters.q && !filters.dep && !filters.cat && !filters.sale;
+  const usualAllIn = usual.every((u) => cart[u.sku]);
+
+  function renderItem(item: ShopItem) {
+    const price = unitPrice(item);
+    const onSale = price < item.price;
+    return (
+      <article key={item.sku} className={styles.item}>
+        <div className={styles.img}>
+          <ProductImage key={item.sku} item={item} />
+          {onSale && <span className={styles.off}>-{Math.round((1 - price / item.price) * 100)}%</span>}
+        </div>
+        <div className={styles.info}>
+          <div className={styles.nm}>{niceTitle(item.title)}</div>
+          <div className={styles.sys}>Cód. {item.sku}</div>
+          <div className={styles.row}>
+            <span className={styles.pr}>
+              {money(price)}
+              {onSale && <s>{money(item.price)}</s>}
+            </span>
+            <Qty qty={cart[item.sku]?.qty ?? 0} name={niceTitle(item.title)} onChange={(d) => changeQty(item, d)} />
+          </div>
+        </div>
+      </article>
+    );
   }
 
   function addTypedToNote() {
@@ -433,30 +514,23 @@ export function ShopPicker({
         <span>{SORTS.find((s) => s.key === filters.sort)?.label}</span>
       </div>
 
+      {showUsual && (
+        <section className={styles.usual} aria-label="Sus productos de siempre">
+          <div className={styles.sectionHead}>
+            <h2>⭐ Sus productos de siempre</h2>
+            <button type="button" className={styles.addAll} onClick={addAllUsual} disabled={usualAllIn}>
+              {usualAllIn ? "✓ Agregados" : `Agregar todo (${usual.length})`}
+            </button>
+          </div>
+          <div className={`${styles.items} ${view === "grid" ? styles.grid : ""}`}>{usual.map((u) => renderItem(u))}</div>
+          <div className={styles.sectionHead}>
+            <h2>🔥 Más vendidos</h2>
+          </div>
+        </section>
+      )}
+
       <main className={`${styles.items} ${view === "grid" ? styles.grid : ""} ${loading && page === 0 ? styles.fading : ""}`}>
-        {items.map((item) => {
-          const price = unitPrice(item);
-          const onSale = price < item.price;
-          return (
-            <article key={item.sku} className={styles.item}>
-              <div className={styles.img}>
-                <ProductImage key={item.sku} item={item} />
-                {onSale && <span className={styles.off}>-{Math.round((1 - price / item.price) * 100)}%</span>}
-              </div>
-              <div className={styles.info}>
-                <div className={styles.nm}>{niceTitle(item.title)}</div>
-                <div className={styles.sys}>Cód. {item.sku}</div>
-                <div className={styles.row}>
-                  <span className={styles.pr}>
-                    {money(price)}
-                    {onSale && <s>{money(item.price)}</s>}
-                  </span>
-                  <Qty qty={cart[item.sku]?.qty ?? 0} name={niceTitle(item.title)} onChange={(d) => changeQty(item, d)} />
-                </div>
-              </div>
-            </article>
-          );
-        })}
+        {items.filter((item) => !showUsual || !usual.some((u) => u.sku === item.sku)).map((item) => renderItem(item))}
       </main>
 
       {loadError === "expired" && (
@@ -623,6 +697,7 @@ export function ShopPicker({
             </div>
           )}
           <p className={styles.hint}>Precios con IVA. El asesor confirma disponibilidad y el costo de envío.</p>
+          {deliveryNote && <p className={styles.delivery}>{deliveryNote}</p>}
           <h3>¿Algo que no encontró?</h3>
           <textarea
             value={note}

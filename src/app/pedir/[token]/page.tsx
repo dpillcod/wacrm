@@ -5,7 +5,9 @@ import { readOrderLinkToken } from "@/lib/catalog/order-link";
 import { searchShop, shopFacets, type ShopFacets, type ShopItem } from "@/lib/catalog/shop-search";
 import { refreshShopIfStale } from "@/lib/catalog/shop-sync";
 import { loadBusinessSettings } from "@/lib/business/settings";
-import { ShopPicker } from "@/components/shop/shop-picker";
+import { thumbnailUrl } from "@/lib/catalog/feed";
+import { loadCart, loadUsualProducts, productsBySku } from "@/lib/catalog/carts";
+import { ShopPicker, type Cart, type UsualItem } from "@/components/shop/shop-picker";
 import styles from "@/components/shop/shop-picker.module.css";
 
 // /pedir/<token> — the customer's product picker. The signed link (sent
@@ -89,6 +91,35 @@ export default async function PedirPage({ params }: { params: Promise<{ token: s
   }
   void refreshShopIfStale(db, accountId);
 
+  // The cart kept from an earlier link, and the customer's usual products.
+  const serverCart: { cart: Cart; note: string } = { cart: {}, note: "" };
+  let usual: UsualItem[] = [];
+  try {
+    const [stored, usualRows] = await Promise.all([
+      loadCart(db, accountId, contactId),
+      loadUsualProducts(db, accountId, contactId),
+    ]);
+    const products = await productsBySku(db, accountId, [
+      ...(stored?.items ?? []).map((i) => i.sku),
+      ...usualRows.map((u) => u.sku),
+    ]);
+    for (const it of stored?.items ?? []) {
+      const p = products.get(it.sku);
+      if (!p) continue;
+      const price = p.salePrice !== null && p.salePrice < p.price ? p.salePrice : p.price;
+      serverCart.cart[it.sku] = { qty: it.qty, title: p.title, price, thumb: thumbnailUrl(p.image) };
+    }
+    serverCart.note = stored?.note ?? "";
+    usual = usualRows.flatMap((u) => {
+      const p = products.get(u.sku);
+      return p && p.inStock
+        ? [{ sku: p.sku, title: p.title, price: p.price, salePrice: p.salePrice, thumb: thumbnailUrl(p.image), image: p.image, department: null, category: null, lastQty: u.lastQty }]
+        : [];
+    });
+  } catch (err) {
+    console.error("[pedir] cart / usual products failed:", err);
+  }
+
   if (total === 0) {
     return (
       <Message
@@ -111,6 +142,9 @@ export default async function PedirPage({ params }: { params: Promise<{ token: s
         backHref={backHref}
         hasOffers={hasOffers}
         initial={{ items, total, facets }}
+        serverCart={serverCart}
+        usual={usual}
+        deliveryNote={biz.shopDeliveryNote}
       />
     </div>
   );

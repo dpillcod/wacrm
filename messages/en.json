@@ -1757,6 +1757,8 @@
         "woocommerceHint": "The API keys stay in the server environment (WOOCOMMERCE_KEY / _SECRET).",
         "publicAppUrl": "CRM public address",
         "publicAppUrlHint": "The https address customers open, e.g. the product picker link the bot sends.",
+        "shopDeliveryNote": "Delivery note in the product picker",
+        "shopDeliveryNoteHint": "One line shown in the customer's cart, e.g. delivery area, hours and who pays it.",
         "idNumberField": "ID number field",
         "idNumberFieldHint": "Contact custom field where the bot keeps the customer's ID number (cédula / RUC) for invoices. Created automatically.",
         "whatsappNumber": "Business WhatsApp number",
@@ -1826,7 +1828,10 @@
         "totalPending": "\"What's the total?\" after the order went to staff",
         "thanksReply": "\"Thanks\" after the order went to staff",
         "callRequestOpen": "Customer asks to be called (open)",
-        "callRequestClosed": "Customer asks to be called (closed)"
+        "callRequestClosed": "Customer asks to be called (closed)",
+        "cartReminder": "Cart left in the product picker",
+        "cartView": "\"See cart\" on that reminder",
+        "cartEmpty": "Cart already sent or empty"
       },
       "ai": {
         "title": "AI with photos, voice notes and first messages",

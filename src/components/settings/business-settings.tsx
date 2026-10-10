@@ -69,6 +69,9 @@ const TEXT_KEYS: (keyof Texts)[] = [
   "thanksReply",
   "callRequestOpen",
   "callRequestClosed",
+  "cartReminder",
+  "cartView",
+  "cartEmpty",
 ];
 const AI_FEATURE_KEYS: ("readImages" | "transcribeAudio" | "entryRouter" | "answerQuestions")[] = [
   "answerQuestions",
@@ -291,6 +294,9 @@ export function BusinessSettingsPanel() {
           </Field>
           <Field label={t("links.whatsappNumber")} hint={t("links.whatsappNumberHint")}>
             {text("whatsappNumber", { placeholder: "593999999999" })}
+          </Field>
+          <Field label={t("links.shopDeliveryNote")} hint={t("links.shopDeliveryNoteHint")}>
+            {text("shopDeliveryNote")}
           </Field>
           <Field label={t("links.shopFeedUrl")} hint={t("links.shopFeedUrlHint")}>
             {text("shopFeedUrl", { placeholder: "https://…/feed-whatsapp.csv" })}

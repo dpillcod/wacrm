@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { resolveFallbackPolicy } from '@/lib/flows/fallback'
+import { sweepCartReminders } from '@/lib/flows/engine'
 
 /**
  * Sweep abandoned active flow runs.
@@ -48,6 +49,13 @@ export async function GET(request: Request) {
   const admin = supabaseAdmin()
   const now = new Date()
 
+  // Carts left in the product picker whose reminder timer was lost
+  // (restart) or fell outside opening hours.
+  const cartReminders = await sweepCartReminders(admin).catch((err) => {
+    console.error('[flows/cron] cart reminders failed:', err)
+    return 0
+  })
+
   // Pull all currently-active runs along with their parent flow's
   // fallback_policy. Joined in one query — the small set of active
   // runs per tenant keeps this cheap.
@@ -62,7 +70,7 @@ export async function GET(request: Request) {
     console.error('[flows-cron] active-run scan failed:', error.message)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
-  if (!runs?.length) return NextResponse.json({ swept: 0 })
+  if (!runs?.length) return NextResponse.json({ swept: 0, cartReminders })
 
   type Row = {
     id: string
@@ -108,5 +116,5 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.json({ swept })
+  return NextResponse.json({ swept, cartReminders })
 }

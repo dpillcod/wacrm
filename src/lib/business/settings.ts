@@ -54,6 +54,8 @@ export interface BusinessSettings {
   crossSell: CrossSellRule[]
   /** Contact custom field holding the birthday (MM-DD) for the birthday flow. */
   birthdayFieldName: string
+  /** One line about delivery shown in the product picker's cart ('' = none). */
+  shopDeliveryNote: string
   /** Contact custom field that keeps the customer's ID number (cédula / RUC) for invoices. */
   idNumberFieldName: string
   /** WooCommerce store URL (keys stay in the server environment). */
@@ -126,6 +128,12 @@ export interface BusinessSettings {
     callRequestOpen: string
     /** …outside opening hours; {cuando} = "mañana a partir de las 7am". */
     callRequestClosed: string
+    /** A cart left in the product picker; {productos} = "3 productos", {total} = "$6,70". */
+    cartReminder: string
+    /** "Ver carrito" on that reminder (above the link button). */
+    cartView: string
+    /** "Enviar mi pedido" when the cart was already sent or is empty. */
+    cartEmpty: string
   }
   /** Home services (plumbing, electricity, painting, locks…): their own board. */
   serviceBoard: {
@@ -193,6 +201,7 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
   crossSell: [],
   birthdayFieldName: 'Fecha de nacimiento',
   idNumberFieldName: 'Cédula',
+  shopDeliveryNote: '',
   woocommerceUrl: '',
   publicAppUrl: '',
   shopFeedUrl: '',
@@ -231,6 +240,9 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
     thanksReply: '¡Con gusto! 🙂 Cualquier cosa, aquí estamos.',
     callRequestOpen: '📞 ¡Listo! Ya avisamos a nuestro equipo: le llamaremos en los próximos minutos a este número.',
     callRequestClosed: '📞 Recibido. Ahora estamos fuera de horario; le llamaremos {cuando} a este número 🙂',
+    cartReminder: '🛒 Dejó {productos} en su carrito del catálogo ({total}). ¿Se los envío a nuestro asesor?',
+    cartView: 'Aquí está su carrito, tal como lo dejó 👇',
+    cartEmpty: 'Su carrito ya fue enviado o está vacío 🙂 Si necesita algo más, escríbame.',
   },
   serviceBoard: {
     pipelineName: 'Servicios',
