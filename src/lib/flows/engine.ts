@@ -3030,30 +3030,55 @@ async function answerOrderStatusQuestion(
 
 async function assignServiceNumber(db: AdminClient, run: FlowRunRow): Promise<void> {
   if (run.vars.service_number) return;
-  const { count } = await db
-    .from("flow_runs")
-    .select("id", { count: "exact", head: true })
-    .eq("account_id", run.account_id)
-    .not("vars->>service_number", "is", null);
   await saveVars(db, run, {
     ...run.vars,
-    service_number: `S-${String((count ?? 0) + 1).padStart(4, "0")}`,
+    service_number: await nextRunNumber(db, run.account_id, "service_number", "S-"),
   });
+}
+
+/**
+ * The next free order / service number ("0012", "S-0003"): after the
+ * highest one in use, so deleting some (test orders, say) never makes a
+ * number come round twice. Not a DB sequence: two orders confirmed in
+ * the same instant could share one — rare at this volume, and it's a
+ * human reference, never a key.
+ */
+async function nextRunNumber(db: AdminClient, accountId: string, varKey: string, prefix = ""): Promise<string> {
+  const used = db.from("flow_runs").select("id", { count: "exact", head: true }).eq("account_id", accountId);
+  const [{ count }, { data: top }] = await Promise.all([
+    used.not(`vars->>${varKey}`, "is", null),
+    db
+      .from("flow_runs")
+      .select(`n:vars->>${varKey}`)
+      .eq("account_id", accountId)
+      .not(`vars->>${varKey}`, "is", null)
+      .order(`vars->>${varKey}`, { ascending: false })
+      .limit(20),
+  ]);
+  const highest = Math.max(
+    0,
+    ...((top ?? []) as unknown as { n: string | null }[]).map((r) => Number(String(r.n ?? "").replace(/\D/g, "")) || 0),
+  );
+  let next = Math.max((count ?? 0) + 1, highest + 1);
+  // Past 9999 the text order above isn't numeric: make sure it's free.
+  for (let i = 0; i < 50; i++) {
+    const candidate = `${prefix}${String(next).padStart(4, "0")}`;
+    const { count: taken } = await db
+      .from("flow_runs")
+      .select("id", { count: "exact", head: true })
+      .eq("account_id", accountId)
+      .eq(`vars->>${varKey}`, candidate);
+    if (!taken) return candidate;
+    next += 1;
+  }
+  return `${prefix}${String(next).padStart(4, "0")}`;
 }
 
 async function assignOrderNumber(db: AdminClient, run: FlowRunRow): Promise<void> {
   if (run.vars.order_number) return;
-  // Count-based, not a DB sequence: two orders confirmed in the same
-  // instant could share a number — rare at this volume, and the number
-  // is a human reference, never a key.
-  const { count } = await db
-    .from("flow_runs")
-    .select("id", { count: "exact", head: true })
-    .eq("account_id", run.account_id)
-    .not("vars->>order_number", "is", null);
   await saveVars(db, run, {
     ...run.vars,
-    order_number: String((count ?? 0) + 1).padStart(4, "0"),
+    order_number: await nextRunNumber(db, run.account_id, "order_number"),
   });
 }
 
