@@ -287,6 +287,16 @@ export interface NodeSideEffectsConfig {
    */
   catalog_link?: boolean;
   /**
+   * Save the customer's billing profile from this collect var (a form's
+   * `<var>_nombre/_cedula/_correo`, or typed text; "consumidor final"
+   * too) onto the contact — see flows/customer-profile.ts. Sets
+   * `{{vars.profile_ok}}` ("si" or ""), and on a problem
+   * `{{vars.profile_problem}}` (what to fix) and clears the var so the
+   * customer can answer again; on success the greeting name and
+   * `{{vars.billing_info}}` / `{{vars.billing_line}}`.
+   */
+  save_customer_profile?: string;
+  /**
    * Sets `{{vars.order_total_line}}` from the list in this var: the
    * estimated total of the products picked from the catalog (they carry
    * their price), or "" when none has a price.

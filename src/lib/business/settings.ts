@@ -54,6 +54,8 @@ export interface BusinessSettings {
   crossSell: CrossSellRule[]
   /** Contact custom field holding the birthday (MM-DD) for the birthday flow. */
   birthdayFieldName: string
+  /** Contact custom field that keeps the customer's ID number (cédula / RUC) for invoices. */
+  idNumberFieldName: string
   /** WooCommerce store URL (keys stay in the server environment). */
   woocommerceUrl: string
   /**
@@ -190,6 +192,7 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
   customerInfo: '',
   crossSell: [],
   birthdayFieldName: 'Fecha de nacimiento',
+  idNumberFieldName: 'Cédula',
   woocommerceUrl: '',
   publicAppUrl: '',
   shopFeedUrl: '',

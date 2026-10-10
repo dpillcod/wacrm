@@ -1757,6 +1757,8 @@
         "woocommerceHint": "The API keys stay in the server environment (WOOCOMMERCE_KEY / _SECRET).",
         "publicAppUrl": "CRM public address",
         "publicAppUrlHint": "The https address customers open, e.g. the product picker link the bot sends.",
+        "idNumberField": "ID number field",
+        "idNumberFieldHint": "Contact custom field where the bot keeps the customer's ID number (cédula / RUC) for invoices. Created automatically.",
         "whatsappNumber": "Business WhatsApp number",
         "whatsappNumberHint": "Digits with country code, e.g. 593999999999. Used for the \"Back to WhatsApp\" button.",
         "shopFeedUrl": "Web shop product feed (CSV)",

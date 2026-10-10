@@ -298,6 +298,9 @@ export function BusinessSettingsPanel() {
           <Field label={t("links.birthdayField")} hint={t("links.birthdayFieldHint")}>
             {text("birthdayFieldName")}
           </Field>
+          <Field label={t("links.idNumberField")} hint={t("links.idNumberFieldHint")}>
+            {text("idNumberFieldName")}
+          </Field>
         </div>
       </Section>
 

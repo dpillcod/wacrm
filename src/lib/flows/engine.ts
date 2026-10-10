@@ -71,6 +71,15 @@ import { acceptOfferedProduct, answerInFlow, looksLikeQuestion } from "./questio
 import { nextOpeningPhrase } from "./store-policy";
 import { createOrderLinkToken, orderLinkUrl } from "../catalog/order-link";
 import { keepCatalogLines, totalLine } from "../catalog/order-lines";
+import {
+  billingLine,
+  greetingName,
+  loadCustomerProfile,
+  parseCustomerProfile,
+  profileProblemText,
+  saveCustomerProfile,
+  type CustomerProfile,
+} from "./customer-profile";
 import { formatFormReply } from "../whatsapp/flow-form";
 import { INTERACTIVE_LIMITS } from "../whatsapp/meta-api";
 import { isPriceQuestion } from "./price-question";
@@ -1883,6 +1892,48 @@ export async function receiveCatalogOrder(args: {
   return { ok: true, flow_run_id: run.id };
 }
 
+/** Run vars from a saved profile: greeting name and invoice data. */
+function profileVars(p: CustomerProfile, current: Record<string, unknown>): Record<string, unknown> {
+  return {
+    contact_name: p.name ? ` ${greetingName(p.name)}` : current.contact_name ?? "",
+    customer_registered: "si",
+    billing_info: billingLine(p),
+    billing_line: billingLine(p),
+  };
+}
+
+/**
+ * A new run's first vars: `contact_name` (" Juan", or "" — so
+ * "¡Hola{{vars.contact_name}}!" reads right either way) and, for a
+ * registered customer, the name they gave and their invoice data (see
+ * customer-profile.ts). Best-effort: a lookup failure only means an
+ * unpersonalized greeting.
+ */
+async function customerStartVars(
+  db: AdminClient,
+  accountId: string,
+  contactId: string,
+): Promise<Record<string, unknown>> {
+  let contactName = "";
+  try {
+    const { data: contactRow } = await db.from("contacts").select("name").eq("id", contactId).maybeSingle();
+    const rawName = (contactRow as { name?: string | null } | null)?.name;
+    if (typeof rawName === "string" && rawName.trim().length > 0) {
+      contactName = ` ${rawName.trim().split(/\s+/)[0]}`;
+    }
+  } catch (err) {
+    console.error("[flows] contact name lookup failed:", err);
+  }
+  try {
+    const biz = await bizOf(db, accountId);
+    const profile = await loadCustomerProfile(db, accountId, contactId, biz.idNumberFieldName);
+    if (profile) return { contact_name: contactName, ...profileVars(profile, { contact_name: contactName }) };
+  } catch (err) {
+    console.error("[flows] customer profile lookup failed:", err);
+  }
+  return { contact_name: contactName };
+}
+
 /** "Llámenme", "¿me pueden llamar?", "necesito que me llamen". */
 export function isCallRequest(text: string): boolean {
   const t = normalizeForMatch(text);
@@ -2597,6 +2648,52 @@ async function runNodeSideEffects(
 
   if (cfg.prefill_last_order) {
     await prefillLastOrder(db, run, node.node_key, cfg.prefill_last_order);
+  }
+
+  if (cfg.save_customer_profile && run.contact_id) {
+    const key = cfg.save_customer_profile;
+    const biz = await bizOf(db, run.account_id);
+    const fields: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(run.vars)) {
+      if (k.startsWith(`${key}_`)) fields[k.slice(key.length + 1)] = v;
+    }
+    const typed = typeof run.vars[key] === "string" ? (run.vars[key] as string) : "";
+    const fromForm = ["nombre", "cedula", "correo"].some((k) => k in fields);
+    const parsed = parseCustomerProfile(fromForm ? { fields } : { text: typed }, biz.phoneCountryCode);
+    let vars: Record<string, unknown>;
+    if (parsed.ok) {
+      try {
+        await saveCustomerProfile(db, {
+          accountId: run.account_id,
+          userId: run.user_id,
+          contactId: run.contact_id,
+          idFieldName: biz.idNumberFieldName,
+          profile: parsed.profile,
+        });
+      } catch (err) {
+        // Not kept for next time, but this order still carries the data.
+        console.error("[flows] saving the customer profile failed:", err);
+      }
+      vars = { ...run.vars, ...profileVars(parsed.profile, run.vars), profile_ok: "si", profile_problem: "" };
+    } else {
+      vars = { ...run.vars, profile_ok: "", profile_problem: profileProblemText(parsed) };
+    }
+    // Typed data that isn't complete stays, so the next message adds to
+    // it (minus a wrong ID number, to be typed again); otherwise the raw
+    // answers go — kept on the contact when valid, and never mistaken
+    // for an order list (the "su lista quedó guardada" reminder reads
+    // *_numbered).
+    if (!parsed.ok && !fromForm) {
+      vars[key] = parsed.problem === "id" ? typed.replace(/\d[\d .-]{8,20}\d/g, " ").trim() : typed;
+    } else {
+      delete vars[key];
+    }
+    for (const k of Object.keys(fields)) delete vars[`${key}_${k}`];
+    await saveVars(db, run, vars);
+    await logEvent(db, run.id, "node_entered", node.node_key, {
+      reason: parsed.ok ? "customer_profile_saved" : "customer_profile_invalid",
+      problem: parsed.ok ? null : parsed.problem,
+    });
   }
 
   if (cfg.catalog_link && run.contact_id && run.conversation_id) {
@@ -4483,20 +4580,7 @@ async function startNewRun(
   // either "¡Hola Juan!" or "¡Hola!" without a second no-name template.
   // Best-effort: a lookup failure just means an unpersonalized greeting,
   // never a reason to fail the run.
-  let contactName = "";
-  try {
-    const { data: contactRow } = await db
-      .from("contacts")
-      .select("name")
-      .eq("id", input.contactId)
-      .maybeSingle();
-    const rawName = (contactRow as { name?: string | null } | null)?.name;
-    if (typeof rawName === "string" && rawName.trim().length > 0) {
-      contactName = ` ${rawName.trim().split(/\s+/)[0]}`;
-    }
-  } catch (err) {
-    console.error("[flows] contact name lookup failed:", err);
-  }
+  const greetVars = await customerStartVars(db, flow.account_id, input.contactId);
 
   // INSERT — partial unique index `idx_one_active_run_per_contact`
   // catches concurrent inserts with 23505. We catch and return as
@@ -4517,7 +4601,7 @@ async function startNewRun(
       conversation_id: input.conversationId,
       status: "active",
       current_node_key: startAt,
-      vars: { ...(opts.vars ?? {}), contact_name: contactName },
+      vars: { ...(opts.vars ?? {}), ...greetVars },
     })
     .select("*")
     .maybeSingle();
@@ -4654,20 +4738,7 @@ export async function startFlowRunForExternalEvent(
   }
   const nodes = await loadAllNodes(db, flow.id);
 
-  let contactName = "";
-  try {
-    const { data: contactRow } = await db
-      .from("contacts")
-      .select("name")
-      .eq("id", args.contactId)
-      .maybeSingle();
-    const rawName = (contactRow as { name?: string | null } | null)?.name;
-    if (typeof rawName === "string" && rawName.trim().length > 0) {
-      contactName = ` ${rawName.trim().split(/\s+/)[0]}`;
-    }
-  } catch (err) {
-    console.error("[flows] contact name lookup failed:", err);
-  }
+  const greetVars = await customerStartVars(db, flow.account_id, args.contactId);
 
   if (args.supersedeActive) {
     const existing = await loadActiveRunForContact(db, flow.account_id, args.contactId);
@@ -4684,7 +4755,7 @@ export async function startFlowRunForExternalEvent(
       conversation_id: args.conversationId,
       status: "active",
       current_node_key: flow.entry_node_id,
-      vars: { contact_name: contactName, ...args.vars },
+      vars: { ...greetVars, ...args.vars },
     })
     .select("*")
     .maybeSingle();

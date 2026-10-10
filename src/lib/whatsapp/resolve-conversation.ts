@@ -19,6 +19,7 @@
 // ============================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { hasRealName } from '@/lib/contacts/real-name';
 
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe';
 import { sanitizePhoneForMeta, isValidE164 } from '@/lib/whatsapp/phone-utils';
@@ -91,7 +92,8 @@ export async function resolveConversationByPhone(
   const existing = await findExistingContact(db, accountId, sanitized);
   if (existing) {
     contactId = existing.id;
-    if (name && name !== existing.name) {
+    // Only when the contact has no real name yet (see hasRealName).
+    if (name && name !== existing.name && !hasRealName(existing.name)) {
       await db
         .from('contacts')
         .update({ name, updated_at: new Date().toISOString() })
