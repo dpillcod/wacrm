@@ -1940,7 +1940,10 @@ async function customerStartVars(
   } catch (err) {
     console.error("[flows] customer profile lookup failed:", err);
   }
-  return { contact_name: contactName };
+  // Not registered (yet): a list reached some other way (repeat an
+  // order, a catalog cart) shows "Consumidor final" — "Otros datos"
+  // changes it — never an empty invoice line.
+  return { contact_name: contactName, billing_info: "Consumidor final", billing_line: "Consumidor final" };
 }
 
 /** The customer's personal product-picker link (24 h), or "" when the CRM has no public address. */
