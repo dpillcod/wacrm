@@ -84,6 +84,11 @@ export function isFinalConsumer(text: string): boolean {
   return /^(consumidor\s*final|cf|sin\s+datos|sin\s+factura|no\s+deseo\s+factura|final)\.?$/.test(plain(text));
 }
 
+/** "no acepto", "no autorizo", "no gracias" — declines to give data. */
+export function isRefusal(text: string): boolean {
+  return /^(no|no acepto|no autorizo|no gracias|no deseo|no quiero|no doy mis datos|no, gracias)[.!]*$/.test(plain(text));
+}
+
 /**
  * Read a profile from a submitted form ({nombre, cedula, correo}) or a
  * typed message ("Juan Pérez 0102030405 juan@mail.com", in any order).

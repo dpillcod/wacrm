@@ -4,6 +4,7 @@ import {
   FINAL_CONSUMER,
   greetingName,
   isFinalConsumer,
+  isRefusal,
   parseCustomerProfile,
   profileProblemText,
   validCedula,
@@ -56,6 +57,11 @@ describe("parseCustomerProfile", () => {
       ok: true,
       profile: { name: "Luis Alberto Quito Peña", idNumber: "0102030400", email: "luis@correo.com" },
     });
+  });
+  it("tells a refusal apart", () => {
+    expect(isRefusal("No acepto")).toBe(true);
+    expect(isRefusal("no")).toBe(true);
+    expect(isRefusal("Noemí Torres 0102030400")).toBe(false);
   });
   it("takes 'consumidor final'", () => {
     expect(isFinalConsumer("Consumidor final")).toBe(true);

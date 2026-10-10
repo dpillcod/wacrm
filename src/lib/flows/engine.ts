@@ -74,6 +74,7 @@ import { keepCatalogLines, totalLine } from "../catalog/order-lines";
 import {
   billingLine,
   greetingName,
+  isRefusal,
   loadCustomerProfile,
   parseCustomerProfile,
   profileProblemText,
@@ -2659,9 +2660,12 @@ async function runNodeSideEffects(
     }
     const typed = typeof run.vars[key] === "string" ? (run.vars[key] as string) : "";
     const fromForm = ["nombre", "cedula", "correo"].some((k) => k in fields);
+    const refused = !fromForm && isRefusal(typed);
     const parsed = parseCustomerProfile(fromForm ? { fields } : { text: typed }, biz.phoneCountryCode);
     let vars: Record<string, unknown>;
-    if (parsed.ok) {
+    if (refused) {
+      vars = { ...run.vars, profile_ok: "", profile_refused: "si", profile_problem: "" };
+    } else if (parsed.ok) {
       try {
         await saveCustomerProfile(db, {
           accountId: run.account_id,
@@ -2683,7 +2687,7 @@ async function runNodeSideEffects(
     // answers go — kept on the contact when valid, and never mistaken
     // for an order list (the "su lista quedó guardada" reminder reads
     // *_numbered).
-    if (!parsed.ok && !fromForm) {
+    if (!parsed.ok && !fromForm && !refused) {
       vars[key] = parsed.problem === "id" ? typed.replace(/\d[\d .-]{8,20}\d/g, " ").trim() : typed;
     } else {
       delete vars[key];
@@ -2691,8 +2695,8 @@ async function runNodeSideEffects(
     for (const k of Object.keys(fields)) delete vars[`${key}_${k}`];
     await saveVars(db, run, vars);
     await logEvent(db, run.id, "node_entered", node.node_key, {
-      reason: parsed.ok ? "customer_profile_saved" : "customer_profile_invalid",
-      problem: parsed.ok ? null : parsed.problem,
+      reason: refused ? "customer_profile_refused" : parsed.ok ? "customer_profile_saved" : "customer_profile_invalid",
+      problem: refused || parsed.ok ? null : parsed.problem,
     });
   }
 

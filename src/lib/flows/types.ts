@@ -293,7 +293,8 @@ export interface NodeSideEffectsConfig {
    * `{{vars.profile_ok}}` ("si" or ""), and on a problem
    * `{{vars.profile_problem}}` (what to fix) and clears the var so the
    * customer can answer again; on success the greeting name and
-   * `{{vars.billing_info}}` / `{{vars.billing_line}}`.
+   * `{{vars.billing_info}}` / `{{vars.billing_line}}`. "No acepto" sets
+   * `{{vars.profile_refused}}` = "si" instead (nothing saved).
    */
   save_customer_profile?: string;
   /**
