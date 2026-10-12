@@ -66,7 +66,7 @@ import {
 } from "../pipelines/order-stages";
 import { updateWooOrder } from "../woocommerce/client";
 import { classifyFirstMessage, readImage, transcribeAudio, type ImageReading } from "../ai/media-understanding";
-import { nextGuideStep, type GuideAnswer } from "./service-guide";
+import { isPurchaseOnly, nextGuideStep, purchaseItemFrom, type GuideAnswer } from "./service-guide";
 import { acceptOfferedProduct, answerInFlow, looksLikeQuestion } from "./question-answer";
 import { nextOpeningPhrase } from "./store-policy";
 import { createOrderLinkToken, orderLinkUrl } from "../catalog/order-link";
@@ -1716,6 +1716,13 @@ async function runServiceGuide(
   const cfg = node.config as unknown as CollectInputNodeConfig;
   const max = Math.max(0, Math.min(cfg.ai_guide?.max_questions ?? 3, 5));
   const initial = String(run.vars[cfg.var_key] ?? "").trim();
+  const redirect = (node.config as NodeSideEffectsConfig).purchase_redirect;
+  // "Solo comprar la herramienta" as an answer: no need to ask the AI.
+  const lastAnswer = answers.at(-1)?.a ?? "";
+  if (redirect && lastAnswer && isPurchaseOnly(lastAnswer)) {
+    const r = await switchToPurchase(db, run, nodes, node.node_key, redirect, purchaseItemFrom(lastAnswer) || initial);
+    return { outcome: r.outcome === "handed_off" || r.outcome === "completed" ? r.outcome : "advanced" };
+  }
   const step = await nextGuideStep(db, run.account_id, run.conversation_id, {
     context: interpolateVars(cfg.ai_guide?.context ?? "", run.vars),
     initial,
@@ -1723,6 +1730,11 @@ async function runServiceGuide(
     remaining: max - answers.length,
     kind: cfg.ai_guide?.kind,
   });
+  // The advisor says the customer only wants to buy something.
+  if (redirect && step?.purchase) {
+    const r = await switchToPurchase(db, run, nodes, node.node_key, redirect, step.purchase);
+    return { outcome: r.outcome === "handed_off" || r.outcome === "completed" ? r.outcome : "advanced" };
+  }
   const vars: Record<string, unknown> = { ...run.vars };
   delete vars.__pending_guide;
   vars[`${cfg.var_key}_qa`] = answers.map((x) => `• ${x.q} → ${x.a}`).join("\n");
@@ -2108,6 +2120,51 @@ async function handleCartReply(
     url: link,
   });
   return { consumed: true, outcome: "advanced" };
+}
+
+/**
+ * A service request turned purchase (see NodeSideEffectsConfig
+ * .purchase_redirect): put the product on the order list and continue
+ * at the order branch, which asks "¿Algo más?" (registering the customer
+ * first if needed). `item` is what to order; "" uses what the customer
+ * first described (`item_var`).
+ */
+async function switchToPurchase(
+  db: AdminClient,
+  run: FlowRunRow,
+  nodes: Map<string, FlowNodeRow>,
+  fromNodeKey: string,
+  redirect: { next: string; item_var?: string; list_var?: string },
+  item: string,
+): Promise<DispatchInboundResult> {
+  if (!nodes.has(redirect.next)) {
+    console.error("[flows] purchase_redirect points to a missing node:", redirect.next);
+    return { consumed: false, flow_run_id: run.id, outcome: "no_match" };
+  }
+  const listVar = redirect.list_var || "order_text";
+  const described = redirect.item_var && typeof run.vars[redirect.item_var] === "string" ? (run.vars[redirect.item_var] as string) : "";
+  const line = stripOrderLeadIn((item || described).replace(/\s+/g, " ").trim()).replace(/[.!]+$/, "").trim();
+  const vars: Record<string, unknown> = { ...run.vars };
+  for (const k of ["__pending_guide", "__pending_clarification", "__offered_product"]) delete vars[k];
+  if (line) {
+    const existing = typeof vars[listVar] === "string" ? (vars[listVar] as string).trim() : "";
+    const list = [existing, line].filter(Boolean).join("\n");
+    vars[listVar] = list;
+    vars[`${listVar}_numbered`] = numberLines(list);
+    vars[`${listVar}_last`] = line;
+  }
+  await saveVars(db, run, vars);
+  clearPendingDebounce(run.id);
+  await logEvent(db, run.id, "node_entered", fromNodeKey, { reason: "service_to_purchase", item: line });
+  await sendEngineText(
+    db,
+    run,
+    fromNodeKey,
+    "🛒 ¡Entendido! Eso lo tenemos en la tienda: se lo anoto como *pedido* (no hace falta técnico).",
+    "service_to_purchase",
+  );
+  const outcome = await advanceFromNodeKey(db, run, redirect.next, nodes);
+  return { consumed: true, flow_run_id: run.id, outcome: outcome.outcome };
 }
 
 /** "Llámenme", "¿me pueden llamar?", "necesito que me llamen". */
@@ -4080,6 +4137,14 @@ async function handleReplyForActiveRun(
       ? (currentNode.config as unknown as CollectInputNodeConfig)
       : undefined;
   const currentTextFallback = textFallbackOf(currentNode);
+
+  // A service request that is really a purchase ("solo quiero comprar la
+  // herramienta"): the product goes on the order and the run continues
+  // there — instead of asking for a photo, an address and a time.
+  const purchaseRedirect = (currentNode.config as NodeSideEffectsConfig).purchase_redirect;
+  if (purchaseRedirect && message.kind === "text" && isPurchaseOnly(message.text)) {
+    return switchToPurchase(db, run, nodes, currentNode.node_key, purchaseRedirect, purchaseItemFrom(message.text));
+  }
 
   // A typed option number counts as tapping that option — unless a
   // product pick list is open, where the number means one of ITS rows

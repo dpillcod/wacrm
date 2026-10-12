@@ -300,6 +300,16 @@ export interface NodeSideEffectsConfig {
   /** With save_customer_profile: "consumidor final" isn't accepted — name, ID number and email are required. */
   profile_required?: boolean;
   /**
+   * Any node of a service request: when the customer turns out to only
+   * want to BUY something ("solo quiero comprar la herramienta", "solo
+   * necesito el destornillador", or the service advisor says so), the
+   * product goes on the order list (`list_var`, default "order_text") and
+   * the run continues at `next` (e.g. the order branch's start).
+   * `item_var` holds what the customer first described, used when the
+   * phrase itself doesn't name the product.
+   */
+  purchase_redirect?: { next: string; item_var?: string; list_var?: string };
+  /**
    * Sets `{{vars.order_total_line}}` from the list in this var: the
    * estimated total of the products picked from the catalog (they carry
    * their price), or "" when none has a price.

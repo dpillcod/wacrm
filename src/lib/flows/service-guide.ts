@@ -34,6 +34,12 @@ export interface GuideStep {
   summary: string;
   /** One short safety tip for an urgent problem, if any. */
   tip: string | null;
+  /**
+   * Set when the customer only wants to BUY something (a tool, a part,
+   * material) — no job to do: what to put on their order, e.g.
+   * "1 destornillador Torx T9". The flow then continues as an order.
+   */
+  purchase?: string | null;
 }
 
 /** Model reply → GuideStep; null when it isn't the expected JSON. */
@@ -51,8 +57,63 @@ export function parseGuideStep(raw: string): GuideStep | null {
   // While still asking, the model may leave the summary for later.
   const question = str(j.question);
   const summary = str(j.summary) ?? "";
+  const purchase = str(j.purchase);
+  if (purchase) return { question: null, summary, tip: null, purchase };
   if (!question && !summary) return null;
   return { question, summary, tip: str(j.tip) };
+}
+
+const plainText = (s: string) =>
+  s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+
+// Words that mean there IS a job to do (someone has to come or work).
+const JOB_WORDS =
+  /\b(tecnic[oa]s?|maestro|gasfiter[oa]|plomer[oa]|electricista|pintor|instal\w*|arregl\w*|repar\w*|pinten|pintar|cambien|revis\w*|visita|que (vaya|venga|vengan|vayan))\b/;
+const PURCHASE_PATTERNS = [
+  // "solo comprar la herramienta", "solo necesito el destornillador", "nomás eso"
+  /\b(solo|solamente|nomas|no mas|unicamente)\s+(quiero\s+|necesito\s+|deseo\s+|busco\s+|era\s+|es\s+)?(comprar|compro|el|la|los|las|un|una|unos|unas|eso|esa|ese|para comprar)\b/,
+  // "quiero comprar…", "necesito comprar…"
+  /\b(quiero|quisiera|deseo|necesito|busco|voy a|vengo a)\s+comprar\b/,
+  // "no necesito técnico", "no quiero que vengan"
+  /\bno\s+(necesito|quiero|requiero|hace falta)\s+(un\s+|una\s+|el\s+|al\s+|que\s+)?(tecnic\w*|servicio|visita|que (vaya|venga|vengan)|maestro)/,
+  // "es para comprar", "solo la herramienta"
+  /\b(es|era)\s+(solo\s+)?para\s+comprar\b/,
+  /\bsolo\s+(la|el)\s+(herramienta|producto|repuesto|material|pieza)\b/,
+];
+
+/**
+ * "Solo quiero comprar la herramienta", "solo necesito el destornillador",
+ * "no necesito técnico": during a service request, the customer actually
+ * wants to buy something. Phrases that name a job ("que venga un técnico a
+ * instalarlo") don't count, except an explicit "no necesito técnico".
+ */
+export function isPurchaseOnly(text: string): boolean {
+  const t = plainText(text);
+  if (!t) return false;
+  if (/\bno\s+(necesito|quiero|requiero|hace falta)\s+(un\s+|una\s+|el\s+|al\s+|que\s+)?(tecnic|servicio|visita|que (vaya|venga|vengan)|maestro)/.test(t)) {
+    return true;
+  }
+  if (JOB_WORDS.test(t)) return false;
+  return PURCHASE_PATTERNS.some((p) => p.test(t));
+}
+
+const GENERIC_ITEM = /^(la |el |los |las |un |una |unos |unas )?(herramienta|producto|repuesto|material|pieza|eso|esa|ese|nada mas|nada)$/;
+
+/**
+ * The product to put on the order, from the purchase phrase ("solo
+ * necesito el destornillador" → "destornillador"), or "" when the phrase
+ * doesn't name one ("solo comprar la herramienta") — the caller then uses
+ * what the customer first described.
+ */
+export function purchaseItemFrom(text: string): string {
+  let t = plainText(text)
+    .replace(/[.!¡¿?,]+/g, " ")
+    .replace(/\b(solo|solamente|nomas|no mas|unicamente|quiero|quisiera|deseo|necesito|busco|voy a|vengo a|comprar|compro|para|es|era|gracias|por favor)\b/g, " ")
+    .replace(/\bno\s+(un\s+|una\s+|el\s+|al\s+|que\s+)?(tecnic\w*|servicio|visita|maestro)\b.*$/, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  t = t.replace(/^(el|la|los|las)\s+/, "");
+  return t.length < 3 || GENERIC_ITEM.test(t) ? "" : t;
 }
 
 export type GuideKind = "home_service" | "bakery";
@@ -92,7 +153,8 @@ Reglas:
 - "tip" SOLO si hay un riesgo real ahora mismo (agua saliendo sin control, chispas, olor a quemado o a gas): UN consejo de seguridad corto (ej. "Mientras tanto, cierre la llave de paso del agua"). En cualquier otro caso, "tip": null.
 - Trata al cliente de "usted". Sé cálido y breve.
 - "summary": el trabajo en 1 a 3 líneas claras para el encargado (qué, dónde, detalles útiles), sin saludos.
-Responde SOLO con JSON: {"question": "..." o null, "tip": "..." o null, "summary": "..."}`;
+- Si el cliente en realidad solo quiere COMPRAR un producto, herramienta, repuesto o material (no necesita que un técnico vaya), deja de preguntar: responde con "purchase" = lo que quiere comprar, con la cantidad si la dijo (ej. "1 destornillador Torx T9"), "question": null y "summary": "". Si no está claro si quiere comprarlo o que se lo instalen, pregúntalo.
+Responde SOLO con JSON: {"question": "..." o null, "tip": "..." o null, "summary": "...", "purchase": null o "..."}`;
 }
 
 export async function nextGuideStep(
@@ -149,6 +211,7 @@ export async function nextGuideStep(
       usage: result.usage,
     });
     const step = parseGuideStep(result.text);
+    if (step && args.kind === "bakery") step.purchase = null;
     if (step && args.remaining <= 0) step.question = null;
     return step;
   } catch (err) {
