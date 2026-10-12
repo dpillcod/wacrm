@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { BellRing } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import type { Notification } from "@/types";
+import { isSystemGenericAssignment, localizedText } from "@/lib/notifications/display";
 
 /**
  * Makes a new in-app notification impossible to miss on a shop-floor
@@ -21,6 +22,7 @@ import type { Notification } from "@/types";
  */
 export function NotificationAlerts() {
   const t = useTranslations("NotificationAlerts");
+  const tn = useTranslations("NotificationsPage");
   const router = useRouter();
   const audioRef = useRef<AudioContext | null>(null);
   // Rendered client-side only (the dashboard shell waits for auth).
@@ -73,10 +75,13 @@ export function NotificationAlerts() {
         { event: "INSERT", schema: "public", table: "notifications" },
         (payload) => {
           const row = payload.new as Notification;
+          // The bot's own order/service notification comes with it.
+          if (isSystemGenericAssignment(row)) return;
           chime();
           if ("Notification" in window && window.Notification.permission === "granted") {
-            const popup = new window.Notification(row.title, {
-              body: row.body ?? "",
+            const text = localizedText(row, tn);
+            const popup = new window.Notification(text.title, {
+              body: text.body ?? "",
               tag: row.id,
             });
             popup.onclick = () => {
@@ -91,7 +96,7 @@ export function NotificationAlerts() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [chime, router]);
+  }, [chime, router, tn]);
 
   const enable = async () => {
     unlockAudio();
