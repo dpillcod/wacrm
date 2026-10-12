@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { decrypt } from './encryption'
-import { sendTemplateMessage } from './meta-api'
+import { sendInteractiveButtons, sendTemplateMessage, sendTextMessage } from './meta-api'
 import { toInternational } from './phone-utils'
 import { loadBusinessSettings, type BusinessSettings } from '../business/settings'
 
@@ -13,13 +13,14 @@ import { loadBusinessSettings, type BusinessSettings } from '../business/setting
  * reuse the flows/automations senders (they all require an existing
  * contact + conversation to attach the outbound message to).
  *
- * It goes out as a template (`aviso_pedido_nuevo` by default). A
- * template is free only inside a staff member's 24h customer-service
- * window — i.e. if they wrote to the bot in the last 24h. The store
- * runs without a Meta payment method, so outside that window Meta
- * rejects it (131042). Staff therefore "clock in" by writing *turno*
- * to the bot each day (see the flows engine's staff check-in), and
- * only numbers with an open window are messaged at all.
+ * Only staff with an open 24h customer-service window are messaged —
+ * they "clock in" by writing *turno* to the bot each day (see the flows
+ * engine's staff check-in). Inside that window a plain text message is
+ * free and needs no Meta payment method, so that's what goes out by
+ * default (found live: Meta rejects EVERY template with 131042 when the
+ * account has no payment method, even inside the window). Set
+ * ORDER_NOTIFICATION_MODE=template to send the `aviso_pedido_nuevo`
+ * template instead (needs a payment method on the WhatsApp account).
  *
  * Best-effort by design: a failed staff notification must never break
  * the handoff itself. Callers should fire this and swallow/log errors
@@ -96,6 +97,24 @@ export async function lastInboundWithinWindow(
   return createdAt ? new Date(createdAt) : null
 }
 
+/** Reply id of the "✅ Recibido" button on staff alerts — tapping it renews that person's 24h window. */
+export const STAFF_ACK_ID = 'staff_ack'
+const ACK_BUTTON = [{ id: STAFF_ACK_ID, title: '✅ Recibido' }]
+// Meta's limit for an interactive message's body.
+const BUTTON_BODY_MAX = 1024
+
+/** The plain-text staff alert: who, what (multi-line is fine here), and a link to the chat. */
+export function staffAlertText(args: { contactName: string; summary: string; link?: string | null }): string {
+  const lines = [
+    `🔔 *Aviso para el personal*${args.contactName.trim() ? ` — ${args.contactName.trim()}` : ''}`,
+    '',
+    args.summary.trim() || '(sin detalle)',
+  ]
+  if (args.link) lines.push('', `👉 Abrir en el CRM: ${args.link}`)
+  // WhatsApp's text limit is 4096 characters.
+  return lines.join('\n').slice(0, 4000)
+}
+
 export interface NotifyStaffResult {
   sent: { phone: string; messageId: string }[]
   failed: { phone: string; error: string }[]
@@ -111,10 +130,14 @@ export async function notifyStaffOfHandoff(
     /** Resolved (vars already interpolated) summary of what the
      *  customer asked for — shown as the template's second variable. */
     summary: string
+    /** The conversation, for an "open in the CRM" link in the text alert. */
+    conversationId?: string | null
   },
 ): Promise<NotifyStaffResult> {
-  const phones = getStaffPhones(await loadBusinessSettings(db, args.accountId))
+  const biz = await loadBusinessSettings(db, args.accountId)
+  const phones = getStaffPhones(biz)
   if (phones.length === 0) return { sent: [], failed: [], skipped: [] }
+  const asTemplate = process.env.ORDER_NOTIFICATION_MODE === 'template'
 
   const templateName = process.env.ORDER_NOTIFICATION_TEMPLATE ?? 'aviso_pedido_nuevo'
   const templateLanguage = process.env.ORDER_NOTIFICATION_TEMPLATE_LANG ?? 'es'
@@ -150,19 +173,27 @@ export async function notifyStaffOfHandoff(
   // running order shouldn't blow past that and fail every send.
   const summary = sanitizeForTemplateParam(args.summary).slice(0, 900) || '(sin detalle)'
 
+  const text = staffAlertText({
+    contactName: args.contactName,
+    summary: args.summary,
+    link: args.conversationId && biz.publicAppUrl ? `${biz.publicAppUrl}/inbox?c=${args.conversationId}` : null,
+  })
+
   const sent: { phone: string; messageId: string }[] = []
   const failed: { phone: string; error: string }[] = []
   await Promise.all(
     onShift.map(async (phone) => {
       try {
-        const { messageId } = await sendTemplateMessage({
-          phoneNumberId: config.phone_number_id,
-          accessToken,
-          to: phone,
-          templateName,
-          language: templateLanguage,
-          params: [sanitizeForTemplateParam(args.contactName) || 'Cliente', summary],
-        })
+        const { messageId } = asTemplate
+          ? await sendTemplateMessage({
+              phoneNumberId: config.phone_number_id,
+              accessToken,
+              to: phone,
+              templateName,
+              language: templateLanguage,
+              params: [sanitizeForTemplateParam(args.contactName) || 'Cliente', summary],
+            })
+          : await sendAlertWithAck(config.phone_number_id, accessToken, phone, text)
         sent.push({ phone, messageId })
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
@@ -172,4 +203,30 @@ export async function notifyStaffOfHandoff(
     }),
   )
   return { sent, failed, skipped }
+}
+
+/**
+ * The alert with a "✅ Recibido" button (one message when it fits the
+ * button body limit, otherwise the text and then a short button message).
+ * A tap counts as the staff member writing to the bot, so it renews
+ * their free 24h window without typing *turno* again.
+ */
+async function sendAlertWithAck(
+  phoneNumberId: string,
+  accessToken: string,
+  to: string,
+  text: string,
+): Promise<{ messageId: string }> {
+  if (text.length <= BUTTON_BODY_MAX) {
+    return sendInteractiveButtons({ phoneNumberId, accessToken, to, bodyText: text, buttons: ACK_BUTTON })
+  }
+  const first = await sendTextMessage({ phoneNumberId, accessToken, to, text })
+  await sendInteractiveButtons({
+    phoneNumberId,
+    accessToken,
+    to,
+    bodyText: 'Toque *Recibido* cuando lo vea 🙂 (así sus avisos siguen activos).',
+    buttons: ACK_BUTTON,
+  }).catch((err) => console.error('[staff-notify] ack button failed:', err instanceof Error ? err.message : err))
+  return first
 }

@@ -50,6 +50,7 @@ import {
 } from "../ai/catalog";
 import {
   getStaffPhones,
+  STAFF_ACK_ID,
   notifyStaffOfHandoff,
   sanitizeForTemplateParam,
   type NotifyStaffResult,
@@ -2236,6 +2237,7 @@ async function requestCallBack(
     accountId: input.accountId,
     contactName: c?.name?.trim() || "Cliente",
     summary: `📞 PIDE QUE LO LLAMEN — ${phone}${order}`,
+    conversationId: input.conversationId,
   }).catch(() => null);
 }
 
@@ -3181,7 +3183,8 @@ async function alertStaff(
   const result = await notifyStaffOfHandoff(db, {
     accountId: run.account_id,
     contactName: typeof contactNameVar === "string" ? contactNameVar.trim() : "",
-    summary: phone ? `📞 ${phone} · ${summary}` : summary,
+    summary: phone ? `📞 ${phone}\n${summary}` : summary,
+    conversationId: run.conversation_id,
   });
   for (const s of result.sent) {
     await logEvent(db, run.id, "message_sent", nodeKey, {
@@ -3527,9 +3530,13 @@ async function handleStaffCheckIn(
   db: AdminClient,
   input: DispatchInboundInput,
 ): Promise<DispatchInboundResult | null> {
-  if (input.message.kind !== "text") return null;
   const biz = await bizOf(db, input.accountId);
-  if (!isStaffCheckInText(biz, input.message.text)) return null;
+  // "turno" typed, or "✅ Recibido" tapped on a staff alert — either one
+  // (re)opens the free 24h window for that staff member's alerts.
+  const isCheckIn =
+    (input.message.kind === "text" && isStaffCheckInText(biz, input.message.text)) ||
+    (input.message.kind === "interactive_reply" && input.message.reply_id === STAFF_ACK_ID);
+  if (!isCheckIn) return null;
   const staff = getStaffPhones(biz);
   if (staff.length === 0) return null;
   const { data: contact } = await db
