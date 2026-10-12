@@ -40,6 +40,8 @@ export interface GuideStep {
    * "1 destornillador Torx T9". The flow then continues as an order.
    */
   purchase?: string | null;
+  /** The question is "just buy it, or have it installed?" — asked with two buttons. */
+  buyOrInstall?: boolean;
 }
 
 /** Model reply → GuideStep; null when it isn't the expected JSON. */
@@ -60,7 +62,9 @@ export function parseGuideStep(raw: string): GuideStep | null {
   const purchase = str(j.purchase);
   if (purchase) return { question: null, summary, tip: null, purchase };
   if (!question && !summary) return null;
-  return { question, summary, tip: str(j.tip) };
+  const step: GuideStep = { question, summary, tip: str(j.tip) };
+  if (question && j.buy_or_install === true) step.buyOrInstall = true;
+  return step;
 }
 
 const plainText = (s: string) =>
@@ -153,8 +157,8 @@ Reglas:
 - "tip" SOLO si hay un riesgo real ahora mismo (agua saliendo sin control, chispas, olor a quemado o a gas): UN consejo de seguridad corto (ej. "Mientras tanto, cierre la llave de paso del agua"). En cualquier otro caso, "tip": null.
 - Trata al cliente de "usted". Sé cálido y breve.
 - "summary": el trabajo en 1 a 3 líneas claras para el encargado (qué, dónde, detalles útiles), sin saludos.
-- Si el cliente en realidad solo quiere COMPRAR un producto, herramienta, repuesto o material (no necesita que un técnico vaya), deja de preguntar: responde con "purchase" = lo que quiere comprar, con la cantidad si la dijo (ej. "1 destornillador Torx T9"), "question": null y "summary": "". Si no está claro si quiere comprarlo o que se lo instalen, pregúntalo.
-Responde SOLO con JSON: {"question": "..." o null, "tip": "..." o null, "summary": "...", "purchase": null o "..."}`;
+- Si el cliente en realidad solo quiere COMPRAR un producto, herramienta, repuesto o material (no necesita que un técnico vaya), deja de preguntar: responde con "purchase" = lo que quiere comprar, con la cantidad si la dijo (ej. "1 destornillador Torx T9"), "question": null y "summary": "". Si el cliente solo nombra un producto o pieza (ej. "necesito una chapa", "un tomacorriente doble", "una llave para el lavabo") sin decir que hay que instalarlo, cambiarlo o repararlo, NO lo asumas: tu PRIMERA pregunta es si solo quiere comprarlo o que se lo instalen, en una pregunta corta, con "buy_or_install": true (el cliente responde con dos botones: "Solo comprarlo" / "Que lo instalen").
+Responde SOLO con JSON: {"question": "..." o null, "tip": "..." o null, "summary": "...", "purchase": null o "...", "buy_or_install": true o false}`;
 }
 
 export async function nextGuideStep(
@@ -211,7 +215,10 @@ export async function nextGuideStep(
       usage: result.usage,
     });
     const step = parseGuideStep(result.text);
-    if (step && args.kind === "bakery") step.purchase = null;
+    if (step && args.kind === "bakery") {
+      step.purchase = null;
+      step.buyOrInstall = false;
+    }
     if (step && args.remaining <= 0) step.question = null;
     return step;
   } catch (err) {

@@ -1744,7 +1744,24 @@ async function runServiceGuide(
   if (step?.question && answers.length < max) {
     vars.__pending_guide = { node_key: node.node_key, question: step.question, answers } satisfies PendingGuide;
     await saveVars(db, run, vars);
-    await sendEngineText(db, run, node.node_key, tip ? `${tip}\n\n${step.question}` : step.question, "service_guide_question");
+    const body = tip ? `${tip}\n\n${step.question}` : step.question;
+    if (step.buyOrInstall && redirect) {
+      // "¿Solo comprarlo o que se lo instalen?" — two taps beat typing.
+      await engineSendInteractiveButtons({
+        accountId: run.account_id,
+        userId: run.user_id,
+        conversationId: run.conversation_id!,
+        contactId: run.contact_id!,
+        bodyText: body,
+        buttons: [
+          { id: `${GUIDE_BUY_PREFIX}${run.id}`, title: "🛒 Solo comprarlo" },
+          { id: `${GUIDE_INSTALL_PREFIX}${run.id}`, title: "🔧 Que lo instalen" },
+        ],
+      });
+      await logEvent(db, run.id, "message_sent", node.node_key, { reason: "service_guide_buy_or_install" });
+    } else {
+      await sendEngineText(db, run, node.node_key, body, "service_guide_question");
+    }
     return { outcome: "advanced" };
   }
 
@@ -2121,6 +2138,9 @@ async function handleCartReply(
   });
   return { consumed: true, outcome: "advanced" };
 }
+
+const GUIDE_BUY_PREFIX = "guide_buy:";
+const GUIDE_INSTALL_PREFIX = "guide_install:";
 
 /**
  * A service request turned purchase (see NodeSideEffectsConfig
@@ -4399,6 +4419,16 @@ async function handleReplyForActiveRun(
   // The customer is answering the service advisor's question.
   const pendingGuide = run.vars.__pending_guide as PendingGuide | undefined;
   if (pendingGuide && pendingGuide.node_key === currentNode.node_key) {
+    // A tap on "🛒 Solo comprarlo" / "🔧 Que lo instalen".
+    if (message.kind === "interactive_reply" && message.reply_id === `${GUIDE_BUY_PREFIX}${run.id}`) {
+      const redirect = (currentNode.config as NodeSideEffectsConfig).purchase_redirect;
+      if (redirect) return switchToPurchase(db, run, nodes, currentNode.node_key, redirect, "");
+    }
+    if (message.kind === "interactive_reply" && message.reply_id === `${GUIDE_INSTALL_PREFIX}${run.id}`) {
+      const answers = [...pendingGuide.answers, { q: pendingGuide.question, a: "Quiere que un técnico se lo instale" }];
+      const guided = await runServiceGuide(db, run, currentNode, nodes, answers);
+      return { consumed: true, flow_run_id: run.id, outcome: guided.outcome };
+    }
     if (message.kind === "text" && message.text.trim()) {
       const answers = [...pendingGuide.answers, { q: pendingGuide.question, a: message.text.trim() }];
       const guided = await runServiceGuide(db, run, currentNode, nodes, answers);
