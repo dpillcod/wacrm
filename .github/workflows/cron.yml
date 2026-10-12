@@ -42,6 +42,10 @@ name: Scheduled maintenance cron
 #                             accounts that set one. Every 2 hours: the
 #                             feed itself is rebuilt hourly.
 #
+#   /api/calendar/daily-agenda - each morning (12:00 UTC = 7am in
+#                             Ecuador) the day's service visits and
+#                             bakery orders for the team.
+#
 # All these endpoints require the same X-Cron-Secret header (by design,
 # see their route.ts comments) — set as the CRON_SECRET repo secret
 # below, matching AUTOMATION_CRON_SECRET on the actual deployment.
@@ -50,6 +54,7 @@ on:
     - cron: "*/15 * * * *"
     - cron: "0 8 * * *"
     - cron: "40 */2 * * *"
+    - cron: "0 12 * * *"
   workflow_dispatch: {}
 
 jobs:
@@ -62,6 +67,13 @@ jobs:
           curl -sf -o /dev/null -w "catalog/shop-sync -> %{http_code}\n" \
             -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
             "${{ secrets.WACRM_BASE_URL }}/api/catalog/shop-sync"
+
+      - name: Send today's agenda (7am Ecuador)
+        if: github.event.schedule == '0 12 * * *' || github.event_name == 'workflow_dispatch'
+        run: |
+          curl -sf -o /dev/null -w "calendar/daily-agenda -> %{http_code}\n" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.WACRM_BASE_URL }}/api/calendar/daily-agenda"
 
       - name: Sweep stale flow runs
         if: github.event.schedule != '40 */2 * * *'

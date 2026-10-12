@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/automations/admin-client'
 import { engineSendInteractiveButtons, engineSendText } from '@/lib/flows/meta-send'
 import { customerWindowOpen } from '@/lib/pipelines/order-cards'
 import { loadBusinessSettings } from '@/lib/business/settings'
+import { syncDealCalendar } from '@/lib/calendar/appointments'
 import {
   CSAT_OPTIONS,
   csatReplyId,
@@ -61,6 +62,9 @@ export async function POST(
   }
 
   await stopFollowUpsForCard(db, deal.id)
+  // A cancelled column takes the appointment off Google Calendar (and a
+  // move back puts it again); the stage also shows in the event.
+  await syncDealCalendar(db, deal.id)
 
   const ref = orderRefFromTitle(deal.title)
   const kind = isOrders ? orderStageKind(stage?.name ?? '') : serviceStageKind(stage?.name ?? '')

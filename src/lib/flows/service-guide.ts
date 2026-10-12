@@ -42,6 +42,8 @@ export interface GuideStep {
   purchase?: string | null;
   /** The question is "just buy it, or have it installed?" — asked with two buttons. */
   buyOrInstall?: boolean;
+  /** Bakery: when it's wanted, "YYYY-MM-DDTHH:mm" in the business's local time, once known. */
+  when?: string | null;
 }
 
 /** Model reply → GuideStep; null when it isn't the expected JSON. */
@@ -64,6 +66,8 @@ export function parseGuideStep(raw: string): GuideStep | null {
   if (!question && !summary) return null;
   const step: GuideStep = { question, summary, tip: str(j.tip) };
   if (question && j.buy_or_install === true) step.buyOrInstall = true;
+  const when = str(j.when);
+  if (when && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(when)) step.when = when;
   return step;
 }
 
@@ -137,7 +141,8 @@ Reglas:
 - "tip": null siempre.
 - Trata al cliente de "usted". Sé cálido y breve.
 - "summary": el encargo en 1 a 3 líneas claras para el encargado (qué, para cuántos, sabor/detalles, fecha y hora), sin saludos.
-Responde SOLO con JSON: {"question": "..." o null, "tip": null, "summary": "..."}`;
+- "when": la fecha y hora en que lo necesita, en formato "AAAA-MM-DDTHH:MM" (hora local, 24 h), calculada con la fecha de hoy que te doy; si dijo el día pero no la hora, usa 09:00; si todavía no dijo el día, null.
+Responde SOLO con JSON: {"question": "..." o null, "tip": null, "summary": "...", "when": "AAAA-MM-DDTHH:MM" o null}`;
 }
 
 function instructions(business: string, kind: GuideKind = "home_service"): string {
@@ -186,7 +191,19 @@ export async function nextGuideStep(
   if (!config?.apiKey) return null;
   const biz = await loadBusinessSettings(db, accountId);
   const business = [biz.name || "la tienda", biz.city].filter(Boolean).join(", ");
+  // The bakery advisor turns "el sábado a las 3" into a date: it needs today.
+  const today =
+    args.kind === "bakery"
+      ? `Hoy es ${new Intl.DateTimeFormat("es-EC", {
+          timeZone: biz.utcOffsetHours === -5 ? "America/Guayaquil" : "UTC",
+          weekday: "long",
+          day: "numeric",
+          month: "long",
+          year: "numeric",
+        }).format(new Date())}.`
+      : "";
   const content = [
+    today,
     args.context.trim(),
     `Lo que dijo el cliente: ${args.initial}`,
     ...args.answers.map((x, i) => `Pregunta ${i + 1}: ${x.q}\nRespuesta: ${x.a}`),

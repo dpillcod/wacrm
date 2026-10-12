@@ -569,7 +569,8 @@
     "card": {
       "noContact": "No contact",
       "won": "Won",
-      "lost": "Lost"
+      "lost": "Lost",
+      "appointment": "Appointment"
     },
     "form": {
       "editDeal": "Edit Deal",
@@ -614,7 +615,12 @@
       "toastMarkedLost": "Marked as lost",
       "toastReopened": "Deal reopened",
       "toastFailedDelete": "Failed to delete deal",
-      "toastDeleted": "Deal deleted"
+      "toastDeleted": "Deal deleted",
+      "appointment": "Appointment (date and time)",
+      "appointmentHint": "A service visit, or when a bakery order is ready. It's copied to Google Calendar and the customer is told the date.",
+      "toastAppointmentNotified": "Appointment saved — the customer was told the date on WhatsApp",
+      "toastAppointmentCall": "Appointment saved. The customer hasn't written in 24h, so WhatsApp can't tell them for free — call them",
+      "toastCalendarFailed": "Couldn't copy the appointment to Google Calendar"
     },
     "settings": {
       "managePipeline": "Manage Pipeline",

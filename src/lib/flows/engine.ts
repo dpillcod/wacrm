@@ -68,6 +68,7 @@ import {
 import { updateWooOrder } from "../woocommerce/client";
 import { classifyFirstMessage, readImage, transcribeAudio, type ImageReading } from "../ai/media-understanding";
 import { isPurchaseOnly, nextGuideStep, purchaseItemFrom, type GuideAnswer } from "./service-guide";
+import { localToUtc, remindAppointmentOnInbound, syncDealCalendar } from "../calendar/appointments";
 import { acceptOfferedProduct, answerInFlow, looksLikeQuestion } from "./question-answer";
 import { nextOpeningPhrase } from "./store-policy";
 import { createOrderLinkToken, orderLinkUrl } from "../catalog/order-link";
@@ -813,6 +814,15 @@ async function executeHandoff(
     });
     if (cardId && cardId !== run.vars.__deal_id) {
       await saveVars(db, run, { ...run.vars, __deal_id: cardId });
+    }
+    // The date the bakery advisor understood becomes the card's
+    // appointment (and a Google Calendar event) — staff confirm it.
+    if (cardId && typeof run.vars.__appointment_local === "string") {
+      const at = localToUtc(run.vars.__appointment_local, (await bizOf(db, run.account_id)).utcOffsetHours);
+      if (at) {
+        await db.from("deals").update({ appointment_at: at.toISOString() }).eq("id", cardId).is("appointment_at", null);
+        await syncDealCalendar(db, cardId).catch(() => undefined);
+      }
     }
   }
 
@@ -1739,6 +1749,8 @@ async function runServiceGuide(
   const vars: Record<string, unknown> = { ...run.vars };
   delete vars.__pending_guide;
   vars[`${cfg.var_key}_qa`] = answers.map((x) => `• ${x.q} → ${x.a}`).join("\n");
+  // A bakery order's date and time: the order card gets it as its appointment.
+  if (step?.when) vars.__appointment_local = step.when;
   const tip = step?.tip && !run.vars.__guide_tip_sent ? step.tip : null;
   if (tip) vars.__guide_tip_sent = true;
 
@@ -2284,6 +2296,15 @@ async function dispatchInboundToFlowsInner(
     // A staff member clocking in ("turno") — not a customer.
     const checkIn = await handleStaffCheckIn(db, input);
     if (checkIn) return checkIn;
+
+    // A customer with an appointment in the next day or so wrote (e.g.
+    // the "OK" we ask for the day before): remind them now, while it's
+    // free. Doesn't consume the message.
+    void remindAppointmentOnInbound(db, {
+      accountId: input.accountId,
+      contactId: input.contactId,
+      conversationId: input.conversationId,
+    }).catch((err) => console.error("[flows] appointment reminder failed:", err));
 
     // A tap on a post-handoff follow-up question belongs to that ended
     // run, whatever the contact is doing now.
@@ -3210,6 +3231,8 @@ function orderCardTitle(run: FlowRunRow): string {
       ? ` — ${run.vars.contact_name.trim()}`
       : "";
   if (run.vars.service_number) return `Servicio N° ${run.vars.service_number}${name}`;
+  // A bakery order (cake, party snacks): "Encargo" tells it apart on the board.
+  if (run.vars.order_number && run.vars.pst_detalle) return `Encargo N° ${run.vars.order_number}${name}`;
   if (run.vars.order_number) return `Pedido N° ${run.vars.order_number}${name}`;
   if (run.vars.order_id) return `Pedido web N° ${run.vars.order_id}${name}`;
   return `Pedido${name}`;

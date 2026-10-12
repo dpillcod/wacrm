@@ -569,7 +569,8 @@
     "card": {
       "noContact": "Sin contacto",
       "won": "Ganado",
-      "lost": "Perdido"
+      "lost": "Perdido",
+      "appointment": "Cita"
     },
     "form": {
       "editDeal": "Editar tarjeta",
@@ -614,7 +615,12 @@
       "toastMarkedLost": "Marcado como perdido",
       "toastReopened": "Tarjeta reabierta",
       "toastFailedDelete": "No se pudo eliminar la tarjeta",
-      "toastDeleted": "Tarjeta eliminada"
+      "toastDeleted": "Tarjeta eliminada",
+      "appointment": "Cita (fecha y hora)",
+      "appointmentHint": "La visita del técnico, o cuándo está listo un encargo de pastelería. Se copia a Google Calendar y se le avisa la fecha al cliente.",
+      "toastAppointmentNotified": "Cita guardada: se le avisó la fecha al cliente por WhatsApp",
+      "toastAppointmentCall": "Cita guardada. El cliente no escribió en las últimas 24 h, así que WhatsApp no permite avisarle gratis: llámelo",
+      "toastCalendarFailed": "No se pudo copiar la cita a Google Calendar"
     },
     "settings": {
       "managePipeline": "Administrar tablero",

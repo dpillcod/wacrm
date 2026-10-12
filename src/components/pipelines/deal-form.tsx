@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { notifyStageChange } from "@/lib/pipelines/notify-stage-change";
+import { notifyStageChange, saveAppointment } from "@/lib/pipelines/notify-stage-change";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
@@ -65,6 +65,8 @@ export function DealForm({
   const [stageId, setStageId] = useState("");
   const [assignedTo, setAssignedTo] = useState("");
   const [expectedCloseDate, setExpectedCloseDate] = useState("");
+  // "YYYY-MM-DDTHH:mm" in this computer's time (a datetime-local input).
+  const [appointment, setAppointment] = useState("");
   const [notes, setNotes] = useState("");
 
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -94,6 +96,7 @@ export function DealForm({
       setStageId(deal.stage_id);
       setAssignedTo(deal.assigned_to ?? "");
       setExpectedCloseDate(deal.expected_close_date ?? "");
+      setAppointment(toLocalInput(deal.appointment_at));
       setNotes(deal.notes ?? "");
     } else {
       setTitle("");
@@ -103,6 +106,7 @@ export function DealForm({
       setStageId(defaultStageId || stages[0]?.id || "");
       setAssignedTo("");
       setExpectedCloseDate("");
+      setAppointment("");
       setNotes("");
     }
   }, [open, deal, defaultStageId, stages, defaultCurrency]);
@@ -171,6 +175,7 @@ export function DealForm({
       expected_close_date: expectedCloseDate || null,
     };
 
+    let savedId = deal?.id ?? null;
     if (deal) {
       const { error } = await supabase
         .from("deals")
@@ -196,14 +201,28 @@ export function DealForm({
         setSaving(false);
         return;
       }
-      const { error } = await supabase
+      const { data: created, error } = await supabase
         .from("deals")
-        .insert({ ...payload, user_id: user.id, account_id: accountId, status: "open" });
+        .insert({ ...payload, user_id: user.id, account_id: accountId, status: "open" })
+        .select("id")
+        .single();
       if (error) {
         toast.error(t("toastFailedCreate"));
         setSaving(false);
         return;
       }
+      savedId = (created as { id: string } | null)?.id ?? null;
+    }
+
+    // The appointment goes through the server: Google Calendar + telling
+    // the customer the date.
+    const appointmentIso = appointment ? new Date(appointment).toISOString() : null;
+    const before = deal?.appointment_at ? new Date(deal.appointment_at).toISOString() : null;
+    if (savedId && appointmentIso !== before) {
+      const outcome = await saveAppointment(savedId, appointmentIso);
+      if (outcome?.customer === "notified") toast.success(t("toastAppointmentNotified"));
+      else if (outcome?.customer === "call_customer") toast.warning(t("toastAppointmentCall"));
+      if (outcome?.calendar === "failed") toast.error(t("toastCalendarFailed"));
     }
 
     setSaving(false);
@@ -243,6 +262,8 @@ export function DealForm({
   async function handleDelete() {
     if (!deal) return;
     setDeleting(true);
+    // Take it off Google Calendar first (no message to the customer).
+    if (deal.appointment_at) await saveAppointment(deal.id, null, false);
     const { error } = await supabase.from("deals").delete().eq("id", deal.id);
     setDeleting(false);
     if (error) {
@@ -333,6 +354,17 @@ export function DealForm({
                   ))}
                 </select>
               </div>
+            </div>
+
+            <div className="grid gap-2">
+              <Label className="text-muted-foreground">{t("appointment")}</Label>
+              <Input
+                type="datetime-local"
+                value={appointment}
+                onChange={(e) => setAppointment(e.target.value)}
+                className="border-border bg-muted text-foreground"
+              />
+              <p className="text-xs text-muted-foreground">{t("appointmentHint")}</p>
             </div>
 
             <div className="grid gap-2">
@@ -494,4 +526,13 @@ export function DealForm({
       </SheetContent>
     </Sheet>
   );
+}
+
+/** ISO instant → "YYYY-MM-DDTHH:mm" in this computer's time zone, for a datetime-local input. */
+function toLocalInput(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }

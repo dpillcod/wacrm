@@ -1,9 +1,9 @@
 "use client";
 
 import type { Deal, PipelineStage } from "@/types";
-import { Calendar, Check, X } from "lucide-react";
+import { Calendar, CalendarClock, Check, X } from "lucide-react";
 import { formatCurrency } from "@/lib/currency";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 
 interface DealCardProps {
   deal: Deal;
@@ -12,11 +12,21 @@ interface DealCardProps {
   isOverlay?: boolean;
 }
 
-function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString("en-US", {
+function formatDate(dateStr: string, locale: string) {
+  return new Date(dateStr).toLocaleDateString(locale, {
     month: "short",
     day: "numeric",
     year: "numeric",
+  });
+}
+
+function formatAppointment(iso: string, locale: string) {
+  return new Date(iso).toLocaleString(locale, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
   });
 }
 
@@ -28,6 +38,7 @@ function initials(name?: string, fallback?: string) {
 
 export function DealCard({ deal, stage, onEdit, isOverlay }: DealCardProps) {
   const t = useTranslations("Pipelines.card");
+  const locale = useLocale();
   const contactLabel = deal.contact?.name || deal.contact?.phone || t("noContact");
   const assigneeLabel = deal.assignee?.full_name || null;
 
@@ -84,11 +95,21 @@ export function DealCard({ deal, stage, onEdit, isOverlay }: DealCardProps) {
         <span className="text-sm font-bold text-primary">
           {formatCurrency(deal.value, deal.currency)}
         </span>
-        {deal.expected_close_date && (
-          <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-            <Calendar className="h-3 w-3" />
-            {formatDate(deal.expected_close_date)}
+        {deal.appointment_at ? (
+          <span
+            title={t("appointment")}
+            className="flex items-center gap-1 rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary"
+          >
+            <CalendarClock className="h-3 w-3" />
+            {formatAppointment(deal.appointment_at, locale)}
           </span>
+        ) : (
+          deal.expected_close_date && (
+            <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+              <Calendar className="h-3 w-3" />
+              {formatDate(deal.expected_close_date, locale)}
+            </span>
+          )
         )}
       </div>
 

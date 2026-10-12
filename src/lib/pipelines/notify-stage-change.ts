@@ -20,3 +20,44 @@ export async function notifyStageChange(dealId: string): Promise<StageChangeOutc
     return 'nothing'
   }
 }
+
+export type AppointmentOutcome = {
+  /** The customer was told the date / must be called / nothing to say. */
+  customer: 'notified' | 'call_customer' | 'send_failed' | 'nothing'
+  /** Google Calendar: copied, not set up, or failed. */
+  calendar: 'synced' | 'off' | 'failed' | 'nothing'
+}
+
+/**
+ * Save the card's appointment (ISO, or null to clear) through the server,
+ * which copies it to Google Calendar and tells the customer the date when
+ * that's free. Never throws.
+ */
+export async function saveAppointment(
+  dealId: string,
+  appointmentAt: string | null,
+  notify = true,
+): Promise<AppointmentOutcome | null> {
+  try {
+    const res = await fetch(`/api/pipelines/deals/${dealId}/appointment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ appointment_at: appointmentAt, notify }),
+    })
+    if (!res.ok) return null
+    const body = (await res.json()) as { calendar?: string; customer?: string }
+    return {
+      customer:
+        body.customer === 'sent'
+          ? 'notified'
+          : body.customer === 'window_closed'
+            ? 'call_customer'
+            : body.customer === 'failed'
+              ? 'send_failed'
+              : 'nothing',
+      calendar: body.calendar === 'synced' || body.calendar === 'removed' ? 'synced' : body.calendar === 'failed' ? 'failed' : body.calendar === 'off' ? 'off' : 'nothing',
+    }
+  } catch {
+    return null
+  }
+}

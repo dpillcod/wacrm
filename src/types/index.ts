@@ -392,6 +392,8 @@ export interface Deal {
   currency?: string;
   notes?: string;
   expected_close_date?: string;
+  /** A service visit / when a bakery order is ready (migration 049). */
+  appointment_at?: string | null;
   status?: DealStatus;
   created_at: string;
   updated_at?: string;
