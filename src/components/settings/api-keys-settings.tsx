@@ -22,7 +22,6 @@ import { Copy, KeyRound, Loader2, Plus, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -429,12 +428,15 @@ function CreateKeyDialog({
                       key={scope}
                       className="flex cursor-pointer items-start gap-2.5"
                     >
-                      <Checkbox
+                      {/* Native checkbox on purpose: the Base UI Checkbox
+                          inside a wrapping <label> toggled twice per click
+                          (button + label activation), so keys were created
+                          with no scopes. */}
+                      <input
+                        type="checkbox"
                         checked={scopes.includes(scope)}
-                        onCheckedChange={(checked) =>
-                          toggleScope(scope, checked === true)
-                        }
-                        className="mt-0.5"
+                        onChange={(e) => toggleScope(scope, e.target.checked)}
+                        className="accent-primary mt-0.5 size-4 shrink-0 cursor-pointer"
                       />
                       <span className="min-w-0">
                         <span className="text-foreground block font-mono text-xs">
