@@ -14,6 +14,7 @@ const h = vi.hoisted(() => ({
     claim: true as boolean,
     updatePayload: null as Record<string, unknown> | null,
     rpcCalls: [] as { name: string; args: unknown }[],
+    recentAgentMessages: [] as { created_at: string }[],
   },
 }))
 
@@ -33,6 +34,16 @@ vi.mock('./admin-client', () => ({
           in: () => chain,
           limit: () =>
             Promise.resolve({ data: h.state.autoResponders, error: null }),
+        }
+        return chain
+      }
+      if (table === 'messages') {
+        // .select().eq().eq().gte().limit() → a team member's recent message
+        const chain = {
+          select: () => chain,
+          eq: () => chain,
+          gte: () => chain,
+          limit: () => Promise.resolve({ data: h.state.recentAgentMessages, error: null }),
         }
         return chain
       }
@@ -83,6 +94,7 @@ function aiConfig(overrides: Partial<AiConfig> = {}): AiConfig {
 }
 
 beforeEach(() => {
+  h.state.recentAgentMessages = []
   h.state.conv = {
     assigned_agent_id: null,
     ai_autoreply_disabled: false,
@@ -155,6 +167,12 @@ describe('dispatchInboundToAiReply — eligibility gates', () => {
       ai_autoreply_disabled: false,
       ai_reply_count: 0,
     }
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.engineSendText).not.toHaveBeenCalled()
+  })
+
+  it('keeps quiet when a team member replied recently', async () => {
+    h.state.recentAgentMessages = [{ created_at: new Date().toISOString() }]
     await dispatchInboundToAiReply(ARGS)
     expect(h.engineSendText).not.toHaveBeenCalled()
   })

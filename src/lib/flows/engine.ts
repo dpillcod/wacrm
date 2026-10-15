@@ -85,9 +85,12 @@ import {
   billingLine,
   FINAL_CONSUMER,
   greetingName,
+  isFinalConsumer,
   isRefusal,
   loadCustomerProfile,
+  looksLikePersonName,
   parseCustomerProfile,
+  pickName,
   profileProblemText,
   saveCustomerProfile,
   type CustomerProfile,
@@ -307,6 +310,15 @@ export function isHumanRequest(text: string): boolean {
     /\b(hablar|comunicar(me)?|atender?me|contactar|pasar(me)?)\b.*\b(asesor|asesora|persona|alguien|humano|agente|vendedor|vendedora|encargad[oa]|operador[a]?)\b/.test(said) ||
     /\b(un|una) (asesor|asesora|persona|humano|agente)\b/.test(said) && said.split(" ").length <= 6
   );
+}
+
+/** "Indíqueme qué nomás está", "¿qué llevo?", "muéstreme mi lista" — not a product. */
+export function isListRequest(text: string): boolean {
+  const said = normalizeForMatch(text);
+  return said.length <= 80 && (
+    /\b((que|qie|qe|ke|q) (mas|nomas|no mas|tengo|llevo|lleva|esta|estan|hay|anoto|anotaron|pedi)|mi lista|la lista|mi pedido)\b/.test(said) &&
+      /\b(indiqueme|indique|indiquenme|digame|diga|muestreme|muestre|mandeme|mande|envieme|ver|leame|repitame|repita|que|qie)\b/.test(said)
+  ) && !/\b(esta mal|no esta|corregir|cambiar|quitar)\b/.test(said);
 }
 
 /** "Quiero 2 sacos de cemento" → "2 sacos de cemento" (the words before the product). */
@@ -1165,6 +1177,12 @@ async function advanceFromNodeKey(
     }
     if (node.node_type === "send_message") {
       const cfg = node.config as unknown as SendMessageNodeConfig;
+      // A message made only of a variable that's empty this time (e.g.
+      // "{{vars.profile_problem}}" with nothing new to say): skip it.
+      if (!interpolateVars(cfg.text, run.vars).trim()) {
+        currentKey = cfg.next_node_key;
+        continue;
+      }
       try {
         const { whatsapp_message_id } = await engineSendText({
           accountId: run.account_id,
@@ -2257,7 +2275,26 @@ async function switchToPurchase(
 /** "Llámenme", "¿me pueden llamar?", "necesito que me llamen". */
 export function isCallRequest(text: string): boolean {
   const t = normalizeForMatch(text);
-  return t.length <= 120 && /\b(llamenme|llameme|llamame|llamarme|me (pueden|puede|podrian|podria) llamar|que me llamen|me llaman|me llama|necesito una llamada|quiero una llamada|hablar por telefono|llamada telefonica|me devuelven la llamada|devuelvan la llamada)\b/.test(t);
+  return t.length <= 120 && (
+    /\b(llamenme|llameme|llamame|llamarme|me (pueden|puede|podrian|podria) llamar|que me llamen|me llaman|me llama|necesito una llamada|quiero una llamada|hablar por telefono|llamada telefonica|me devuelven la llamada|devuelvan la llamada)\b/.test(t) ||
+    // "Deme un número para llamar", "¿a qué número llamo?"
+    /\b(numero|telefono|celular)\b.*\b(llamar|llamo|llamarles|llamarlos|comunicarme|contactar(me|los)?)\b/.test(t) ||
+    /\b(deme|me da|me das|me puede dar|me pasa|paseme|digame|cual es) (un|el|su) (numero|telefono|celular)\b/.test(t)
+  );
+}
+
+/** "Está mal", "no está correcto", "la lista está mal" — a complaint, not an edit. */
+export function isListComplaint(text: string): boolean {
+  const t = normalizeForMatch(text);
+  return t.length <= 60 &&
+    /\b(esta mal|estan mal|no esta (bien|correct[oa])|no es (asi|eso)|todo mal|mal la lista|esta manana la lista|no era eso|incorrect[oa])\b/.test(t);
+}
+
+/** The customer is getting frustrated with the bot. */
+export function isFrustrated(text: string): boolean {
+  const t = normalizeForMatch(text);
+  return t.length <= 160 &&
+    /\b(no (me )?entiende(s|n)?|no me entendio|ya (le|te) dije|no sirve|pesimo|que mal servicio|que complicado|muy complicado|robot|bot tonto|no funciona|me estoy cansando|otra vez lo mismo)\b/.test(t);
 }
 
 const recentCallAlerts = new Map<string, number>();
@@ -2305,6 +2342,133 @@ async function requestCallBack(
     summary: `📞 PIDE QUE LO LLAMEN — ${phone}${order}`,
     conversationId: input.conversationId,
   }).catch(() => null);
+}
+
+export type TroubleReason =
+  | "edit_failed"
+  | "list_complaint"
+  | "registration_stuck"
+  | "frustrated"
+  | "invalid_options";
+
+const TROUBLE_TEXT: Record<TroubleReason, string> = {
+  edit_failed: "el bot no logra corregir la lista del cliente",
+  list_complaint: "el cliente dice que su lista está mal",
+  registration_stuck: "el cliente no logra completar el registro",
+  frustrated: "el cliente parece molesto con el bot",
+  invalid_options: "el cliente no logra elegir una opción del menú",
+};
+
+/**
+ * A conversation going wrong: tell the team right away (CRM + WhatsApp
+ * to staff on shift) so a person steps in before the sale is lost. Once
+ * per reason per run.
+ */
+async function alertTeamOfTrouble(
+  db: AdminClient,
+  run: FlowRunRow,
+  reason: TroubleReason,
+  lastMessage: string,
+): Promise<void> {
+  const sent = Array.isArray(run.vars.__trouble_alerts) ? (run.vars.__trouble_alerts as string[]) : [];
+  if (sent.includes(reason) || !run.contact_id) return;
+  // One WhatsApp alert per conversation every 10 minutes (staff phones
+  // shouldn't get five in a row); the CRM notification always goes.
+  const lastWhatsapp = typeof run.vars.__trouble_wa_at === "string" ? new Date(run.vars.__trouble_wa_at).getTime() : 0;
+  const whatsapp = Date.now() - lastWhatsapp > 10 * 60_000;
+  await saveVars(db, run, {
+    ...run.vars,
+    __trouble_alerts: [...sent, reason],
+    ...(whatsapp ? { __trouble_wa_at: new Date().toISOString() } : {}),
+  });
+  const biz = await bizOf(db, run.account_id);
+  const { data: contact } = await db.from("contacts").select("name, phone").eq("id", run.contact_id).maybeSingle();
+  const c = contact as { name?: string | null; phone?: string | null } | null;
+  const phone = c?.phone ? localPhone(c.phone.replace(/^\+/, ""), biz.phoneCountryCode) : "";
+  const name = c?.name?.trim() || "Cliente";
+  const said = lastMessage.trim() ? `\nÚltimo mensaje: "${lastMessage.trim().slice(0, 140)}"` : "";
+  await notifyAccountInApp(db, {
+    accountId: run.account_id,
+    conversationId: run.conversation_id,
+    contactId: run.contact_id,
+    title: `⚠️ Ayuda al cliente: ${name}${phone ? ` (${phone})` : ""}`,
+    body: `${TROUBLE_TEXT[reason][0].toUpperCase()}${TROUBLE_TEXT[reason].slice(1)}. Revise la conversación y escríbale.${said}`,
+  }).catch(() => null);
+  if (whatsapp) await notifyStaffOfHandoff(db, {
+    accountId: run.account_id,
+    contactName: name,
+    summary: `⚠️ CONVERSACIÓN COMPLICADA — ${TROUBLE_TEXT[reason]}${phone ? ` · ${phone}` : ""}${said}`,
+    conversationId: run.conversation_id ?? undefined,
+  }).catch(() => null);
+  await logEvent(db, run.id, "node_entered", run.current_node_key, { reason: "trouble_alert", trouble: reason });
+}
+
+/** Silence after which a customer's message counts as a new conversation. */
+const NEW_CONVERSATION_GAP_MS = 3 * 3_600_000;
+const recentNewConversationAlerts = new Map<string, number>();
+
+/** What the customer sent, in a few words, for an alert. */
+function messagePreview(message: ParsedInbound): string {
+  if (message.kind === "text") return message.text.replace(/\s+/g, " ").trim().slice(0, 140);
+  if (message.kind === "image") return "📷 Foto";
+  if (message.kind === "order") return "🛒 Carrito del catálogo";
+  if (message.kind === "interactive_reply") return message.reply_title ?? "";
+  if (message.kind === "other") return message.message_type === "audio" ? "🎤 Audio" : `📎 ${message.message_type}`;
+  return "";
+}
+
+/** Business setting `newConversationAlert`: the first message after 3 h of silence. */
+async function alertNewConversation(db: AdminClient, input: DispatchInboundInput): Promise<void> {
+  const biz = await bizOf(db, input.accountId);
+  if (biz.newConversationAlert === "off") return;
+  const last = recentNewConversationAlerts.get(input.contactId) ?? 0;
+  if (Date.now() - last < NEW_CONVERSATION_GAP_MS) return;
+  const { data: recent } = await db
+    .from("messages")
+    .select("id")
+    .eq("conversation_id", input.conversationId)
+    .eq("sender_type", "customer")
+    .gte("created_at", new Date(Date.now() - NEW_CONVERSATION_GAP_MS).toISOString())
+    .limit(2);
+  if ((recent ?? []).length > 1) return;
+  const { data: contact } = await db.from("contacts").select("name, phone").eq("id", input.contactId).maybeSingle();
+  const c = contact as { name?: string | null; phone?: string | null } | null;
+  const digits = (c?.phone ?? "").replace(/\D/g, "");
+  // Staff writing to the bot (e.g. "turno") aren't customers.
+  if (digits && getStaffPhones(biz).some((p) => p.endsWith(digits.slice(-9)))) return;
+  recentNewConversationAlerts.set(input.contactId, Date.now());
+  const phone = digits ? localPhone(digits, biz.phoneCountryCode) : "";
+  const name = c?.name?.trim() || "Cliente";
+  const preview = messagePreview(input.message);
+  await notifyAccountInApp(db, {
+    accountId: input.accountId,
+    conversationId: input.conversationId,
+    contactId: input.contactId,
+    title: `💬 Cliente escribiendo: ${name}${phone ? ` (${phone})` : ""}`,
+    body: preview ? `"${preview}"` : "Empezó una conversación.",
+  });
+  if (biz.newConversationAlert === "whatsapp") {
+    await notifyStaffOfHandoff(db, {
+      accountId: input.accountId,
+      contactName: name,
+      summary: `💬 NUEVA CONVERSACIÓN${phone ? ` — ${phone}` : ""}${preview ? `\n"${preview}"` : ""}`,
+      conversationId: input.conversationId,
+    });
+  }
+}
+
+/** Where products typed during registration are written down (the order flow's list). */
+const PROFILE_ORDER_VAR = "order_text";
+
+/** Part of the registration answer: an email, an ID number, a name, a label or "consumidor final". */
+function isProfileLine(line: string): boolean {
+  return (
+    /@/.test(line) ||
+    /\d[\d .-]{8,20}\d/.test(line) ||
+    isFinalConsumer(line) ||
+    isRefusal(line) ||
+    /\b(c[eé]dula|ruc|correo|nombres?|apellidos?)\b/i.test(line)
+  );
 }
 
 /** "Mis pedidos → Historial": the contact's last 3 orders, newest first. */
@@ -2360,6 +2524,10 @@ async function dispatchInboundToFlowsInner(
       conversationId: input.conversationId,
     }).catch((err) => console.error("[flows] appointment reminder failed:", err));
 
+    // A customer starting to write: tell the team (if the business wants
+    // it) so someone can follow the conversation from the start.
+    void alertNewConversation(db, input).catch((err) => console.error("[flows] new conversation alert failed:", err));
+
     // A tap on a post-handoff follow-up question belongs to that ended
     // run, whatever the contact is doing now.
     if (input.message.kind === "interactive_reply") {
@@ -2378,7 +2546,10 @@ async function dispatchInboundToFlowsInner(
     if (input.message.kind === "text" && isCallRequest(input.message.text)) {
       const running = await loadActiveRunForContact(db, input.accountId, input.contactId);
       const node = running?.current_node_key ? await loadNode(db, running.flow_id, running.current_node_key) : null;
-      if (node?.node_type !== "collect_input") {
+      // Where the customer types list corrections or registration data,
+      // asking for a phone call is never part of the answer.
+      const collect = node?.node_type === "collect_input" ? (node.config as { edit_list_var?: string; append?: boolean }) : null;
+      if (!collect || collect.edit_list_var || collect.append) {
         await requestCallBack(db, input, running);
         return { consumed: true, flow_run_id: running?.id, outcome: "no_match" };
       }
@@ -2883,13 +3054,46 @@ async function handleListEditing(
     return stay;
   }
 
+  // "Está mal" says something is wrong, not what: show the numbered
+  // list so they can point at the line — and let the team know.
+  if (isListComplaint(text)) {
+    await sendEngineText(
+      db,
+      run,
+      node.node_key,
+      `Disculpe 🙏 Esta es su lista:\n\n${numberLines(lines.join("\n"))}\n\nEscríbame el *número* del producto que está mal, o dígame qué cambio hago (ej. _quitar el 1_).`,
+      "list_complaint",
+    );
+    await alertTeamOfTrouble(db, run, "list_complaint", text);
+    return stay;
+  }
+
   const edited = await editOrderList(db, run.account_id, run.conversation_id, {
     lines,
     instruction: text,
   });
   if (!edited) {
+    // Second miss in a row: a person takes it from here.
+    const failures = (Number(run.vars.__edit_failures) || 0) + 1;
+    await saveVars(db, run, { ...run.vars, __edit_failures: failures });
+    if (failures >= 2) {
+      await sendEngineText(
+        db,
+        run,
+        node.node_key,
+        "Disculpe la confusión 🙏 Ya le pedí a una persona de nuestro equipo que revise su lista y le escriba por aquí.",
+        "list_edit_escalated",
+      );
+      await alertTeamOfTrouble(db, run, "edit_failed", text);
+      return stay;
+    }
     await sendEngineText(db, run, node.node_key, (await bizOf(db, run.account_id)).texts.editFailed, "list_edit_failed");
     return stay;
+  }
+  if (run.vars.__edit_failures) {
+    const reset = { ...run.vars };
+    delete reset.__edit_failures;
+    run.vars = reset;
   }
   return saveListAndAdvance(db, run, nodes, run.vars, cfg.edit_list_var, keepCatalogLines(lines, edited), cfg.next_node_key);
 }
@@ -2994,8 +3198,48 @@ async function runNodeSideEffects(
     for (const [k, v] of Object.entries(run.vars)) {
       if (k.startsWith(`${key}_`)) fields[k.slice(key.length + 1)] = v;
     }
-    const typed = typeof run.vars[key] === "string" ? (run.vars[key] as string) : "";
+    let typed = typeof run.vars[key] === "string" ? (run.vars[key] as string) : "";
     const fromForm = ["nombre", "cedula", "correo"].some((k) => k in fields);
+    // Customers keep ordering while they register ("necesito 6 paquetes",
+    // "cucharas pequeñas"): what isn't name / ID / email goes to the
+    // order list instead of being lost in the registration answer.
+    const noted: string[] = [];
+    if (!fromForm && typed) {
+      const all = typed.split("\n").map((l) => l.trim()).filter(Boolean);
+      // Of the lines that look like a name, only the one taken as the
+      // name stays ("Cucharas pequeñas" looks like one too).
+      const chosenName = pickName(all);
+      const keep = (l: string) =>
+        isProfileLine(l) || (looksLikePersonName(l) && pickName([l]) === chosenName);
+      let extras = all.filter((l) => !keep(l));
+      if (extras.length) {
+        typed = all.filter(keep).join("\n");
+        run.vars = { ...run.vars, [key]: typed };
+        // "Necesito 6 paquetes" right after "¿Tiene tortillas Mamá Fany?"
+        // → "6 paquetes tortillas Mamá Fany".
+        const offered = typeof run.vars.__offered_product === "string" ? run.vars.__offered_product : null;
+        if (offered) {
+          const accepted = extras.map((l) => acceptOfferedProduct(stripOrderLeadIn(l), offered));
+          noted.push(...accepted.filter((l): l is string => !!l));
+          extras = extras.filter((_, i) => !accepted[i]);
+          if (noted.length) {
+            const rest = { ...run.vars };
+            delete rest.__offered_product;
+            run.vars = rest;
+          }
+        }
+        if (extras.length && biz.aiFeatures.entryRouter) {
+          const route = await classifyFirstMessage(db, run.account_id, run.conversation_id, extras.join("\n"));
+          if (route?.intent === "order") noted.push(...route.lines.map((l) => l.trim()).filter(Boolean));
+        }
+        if (noted.length) {
+          const listVar = PROFILE_ORDER_VAR;
+          const existing = typeof run.vars[listVar] === "string" ? (run.vars[listVar] as string).trim() : "";
+          const list = [existing, ...noted].filter(Boolean).join("\n");
+          run.vars = { ...run.vars, [listVar]: list, [`${listVar}_numbered`]: numberLines(list), [`${listVar}_last`]: noted.at(-1) };
+        }
+      }
+    }
     const refused = !fromForm && isRefusal(typed);
     const parsed = parseCustomerProfile(fromForm ? { fields } : { text: typed }, biz.phoneCountryCode);
     let vars: Record<string, unknown>;
@@ -3020,8 +3264,31 @@ async function runNodeSideEffects(
       }
       vars = { ...run.vars, ...profileVars(parsed.profile, run.vars), profile_ok: "si", profile_problem: "" };
     } else {
-      vars = { ...run.vars, profile_ok: "", profile_problem: profileProblemText(parsed) };
+      const problem = profileProblemText(parsed);
+      // Nothing new for the registration and nothing written down ("voy a
+      // pasar viendo", "no gafas"): don't repeat the same reminder.
+      const repeated = !noted.length && problem === run.vars.__profile_last_problem;
+      vars = {
+        ...run.vars,
+        profile_ok: "",
+        __profile_last_problem: problem,
+        profile_problem: noted.length
+          ? `Anotado ✅ ${noted.join(", ")}\n\nPara continuar con su pedido, ${problem
+              .replace(/^Gracias 🙂 Me falta/, "me falta")
+              .replace(/^No recibí sus datos 🤔 Escríbame/, "escríbame")}`
+          : repeated
+            ? ""
+            : problem,
+      };
     }
+    // Someone should help: three tries with data that still isn't
+    // complete, or six rounds in all.
+    const triedData = typed !== String(run.vars.__profile_kept ?? "");
+    const attempts = parsed.ok || refused ? 0 : (Number(run.vars.__profile_attempts) || 0) + (triedData ? 1 : 0);
+    const rounds = parsed.ok || refused ? 0 : (Number(run.vars.__profile_rounds) || 0) + 1;
+    vars.__profile_attempts = attempts;
+    vars.__profile_rounds = rounds;
+    vars.__profile_kept = typed;
     // Typed data that isn't complete stays, so the next message adds to
     // it (minus a wrong ID number, to be typed again); otherwise the raw
     // answers go — kept on the contact when valid, and never mistaken
@@ -3037,7 +3304,9 @@ async function runNodeSideEffects(
     await logEvent(db, run.id, "node_entered", node.node_key, {
       reason: refused ? "customer_profile_refused" : parsed.ok ? "customer_profile_saved" : "customer_profile_invalid",
       problem: refused || parsed.ok ? null : parsed.problem,
+      ...(noted.length ? { noted_order_lines: noted } : {}),
     });
+    if (attempts >= 3 || rounds >= 6) await alertTeamOfTrouble(db, run, "registration_stuck", typed.split("\n").at(-1) ?? "");
   }
 
   if (cfg.catalog_link && run.contact_id && run.conversation_id) {
@@ -3556,6 +3825,8 @@ async function replyAfterHandoff(
   }
   // A plain "gracias" gets a short "con gusto", not the whole reminder.
   if (isAckOnly(input.message.text)) {
+    // The team is already talking with them: no automatic "con gusto".
+    if (await humanHasTakenOver(db, run)) return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
     const lastThanks = typeof run.vars.__thanks_at === "string" ? new Date(run.vars.__thanks_at).getTime() : 0;
     if (now - lastThanks < AFTER_HANDOFF_MIN_GAP_MS) return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
     await saveVars(db, run, { ...run.vars, __thanks_at: new Date(now).toISOString() });
@@ -4250,6 +4521,11 @@ async function handleReplyForActiveRun(
   // A service request that is really a purchase ("solo quiero comprar la
   // herramienta"): the product goes on the order and the run continues
   // there — instead of asking for a photo, an address and a time.
+  // "No me entiende", "ya le dije": a person should look now.
+  if (message.kind === "text" && isFrustrated(message.text)) {
+    await alertTeamOfTrouble(db, run, "frustrated", message.text);
+  }
+
   const purchaseRedirect = (currentNode.config as NodeSideEffectsConfig).purchase_redirect;
   if (purchaseRedirect && message.kind === "text" && isPurchaseOnly(message.text)) {
     return switchToPurchase(db, run, nodes, currentNode.node_key, purchaseRedirect, purchaseItemFrom(message.text));
@@ -4287,6 +4563,9 @@ async function handleReplyForActiveRun(
       if (max) {
         const biz = await bizOf(db, run.account_id);
         await sendEngineText(db, run, currentNode.node_key, renderText(biz.texts.invalidOption, { max: String(max) }), "invalid_option");
+        const misses = (Number(run.vars.__invalid_options) || 0) + 1;
+        await saveVars(db, run, { ...run.vars, __invalid_options: misses });
+        if (misses >= 2) await alertTeamOfTrouble(db, run, "invalid_options", message.text);
         return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
       }
     }
@@ -4392,7 +4671,10 @@ async function handleReplyForActiveRun(
     const vars = { ...run.vars };
     delete vars.__offered_product;
     await saveVars(db, run, vars);
-    const line = capturesOrderList ? acceptOfferedProduct(message.text, offered) : null;
+    // "Necesito 6 paquetes" counts like "6 paquetes".
+    const line = capturesOrderList
+      ? acceptOfferedProduct(message.text, offered) ?? acceptOfferedProduct(stripOrderLeadIn(message.text), offered)
+      : null;
     if (line) message = { ...message, text: line };
   }
 
@@ -4422,6 +4704,20 @@ async function handleReplyForActiveRun(
   // "sí" / "ok" / "gracias" and "quiero hablar con un asesor" are not
   // products — answer them instead of adding them to the list.
   if (message.kind === "text" && capturesOrderList && !run.vars.__pending_clarification) {
+    // "Indíqueme qué nomás está": read the list back instead of writing
+    // the request down as one more product.
+    const listVar = (currentCollectCfg?.append ? currentCollectCfg : currentTextFallback)!.var_key;
+    const numbered = run.vars[`${listVar}_numbered`] ?? run.vars.order_text_numbered;
+    if (isListRequest(message.text) && typeof numbered === "string" && numbered.trim()) {
+      await sendEngineText(
+        db,
+        run,
+        currentNode.node_key,
+        `📝 *Su lista hasta ahora:*\n\n${numbered}\n\nSi quiere agregar algo, escríbamelo; si ya está, escriba *listo* 🙂`,
+        "list_read_back",
+      );
+      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
     const reply = isHumanRequest(message.text)
       ? bizForRules.texts.humanRequest
       : isAckOnly(message.text)
@@ -4701,7 +4997,7 @@ async function handleReplyForActiveRun(
     // "listo" / "no tengo" where an optional photo was asked: no photo.
     if (
       validated !== null && cfg.accept === "image" && cfg.optional &&
-      (isAckOnly(validated) || /^(no|no tengo|sin foto|ninguna|nada)/.test(normalizeForMatch(validated)))
+      (isAckOnly(validated) || /^(no|no tengo|sin foto|ninguna|nada)b/.test(normalizeForMatch(validated)))
     ) {
       validated = "(sin foto)";
     }

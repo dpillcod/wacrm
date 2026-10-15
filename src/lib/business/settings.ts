@@ -69,6 +69,13 @@ export interface BusinessSettings {
   shopFeedUrl: string
   /** The business's WhatsApp number (digits, with country code), for "Volver a WhatsApp" links. */
   whatsappNumber: string
+  /**
+   * Tell the team when a customer starts a conversation (first message
+   * after 3 h of silence), so someone can follow it: 'off', 'app' (CRM
+   * notification) or 'whatsapp' (CRM + WhatsApp to staff on shift).
+   */
+  newConversationAlert: 'off' | 'app' | 'whatsapp'
+
   /** AI help with what customers send (uses the account's AI key). */
   aiFeatures: {
     /** Photo of a written list or of a product → order lines. */
@@ -208,6 +215,7 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
   publicAppUrl: '',
   shopFeedUrl: '',
   whatsappNumber: '',
+  newConversationAlert: 'off',
   aiFeatures: { readImages: true, transcribeAudio: true, entryRouter: true, audioDailyLimit: 200, answerQuestions: true },
   bakery: { entryNode: '' },
   texts: {
@@ -342,6 +350,7 @@ export function sanitizeSettings(stored: unknown): BusinessSettings {
     aiFeatures: { ...s.aiFeatures, audioDailyLimit: Math.max(0, Math.min(5000, Math.round(s.aiFeatures.audioDailyLimit))) },
     phoneCountryCode: s.phoneCountryCode.replace(/\D/g, ''),
     whatsappNumber: s.whatsappNumber.replace(/\D/g, ''),
+    newConversationAlert: (['off', 'app', 'whatsapp'] as const).includes(s.newConversationAlert) ? s.newConversationAlert : 'off',
     publicAppUrl: s.publicAppUrl.trim().replace(/\/+$/, ''),
     shopFeedUrl: s.shopFeedUrl.trim(),
     // Seven days or none (= always open); a partial week is padded closed.

@@ -377,6 +377,18 @@ export function BusinessSettingsPanel() {
         <Field label={t("staff.checkInWords")} hint={t("staff.checkInWordsHint")}>
           {area(draft.checkInWords, (v) => edit({ checkInWords: v }), 1)}
         </Field>
+        <Field label={t("staff.newConversation")} hint={t("staff.newConversationHint")}>
+          <select
+            className="h-9 w-full max-w-xs rounded-md border border-input bg-background px-2 text-sm"
+            value={s.newConversationAlert}
+            disabled={readOnly}
+            onChange={(e) => set({ newConversationAlert: e.target.value as BusinessSettings["newConversationAlert"] })}
+          >
+            <option value="off">{t("staff.newConversationOff")}</option>
+            <option value="app">{t("staff.newConversationApp")}</option>
+            <option value="whatsapp">{t("staff.newConversationWhatsapp")}</option>
+          </select>
+        </Field>
       </Section>
 
       <Section title={t("rules.title")} description={t("rules.desc")}>

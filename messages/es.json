@@ -1798,7 +1798,12 @@
         "phones": "Números del personal (uno por línea)",
         "phonesHint": "Formato local o internacional.",
         "checkInWords": "Palabras de turno",
-        "checkInWordsHint": "Separadas por comas, por ejemplo turno, avisos."
+        "checkInWordsHint": "Separadas por comas, por ejemplo turno, avisos.",
+        "newConversation": "Aviso de conversación nueva",
+        "newConversationHint": "Avisa al equipo cuando un cliente empieza a escribir (primer mensaje tras 3 horas sin hablar), para seguir la conversación a tiempo.",
+        "newConversationOff": "Apagado",
+        "newConversationApp": "Solo notificación en el CRM",
+        "newConversationWhatsapp": "CRM y WhatsApp al personal de turno"
       },
       "rules": {
         "title": "Reglas de pedidos",

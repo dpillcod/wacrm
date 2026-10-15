@@ -89,6 +89,45 @@ export function isRefusal(text: string): boolean {
   return /^(no|no acepto|no autorizo|no gracias|no deseo|no quiero|no doy mis datos|no, gracias)[.!]*$/.test(plain(text));
 }
 
+// Words that never appear in a person's name: "Voy a pasar viendo de su
+// tienda", "Solo 5 paquetes perdón", "Cuánto sale" are not names.
+const NOT_NAME_WORDS = new Set(
+  ("a al con de del el en la las lo los y o u e por para que su sus mi mis me te se le les un una unos unas " +
+    "es esta este esto estoy voy va vamos ir pasar paso viendo ver tienda tiene tienen tengo hay quiero quisiera " +
+    "necesito deseo puede pueden podria favor gracias perdon disculpe hola buenos buenas dias tardes noches " +
+    "cuanto cuanta cuesta sale precio solo nomas mas menos paquete paquetes funda fundas litro litros kilo libra " +
+    "no si ok listo bueno perfecto claro").split(" "),
+);
+// Particles that are fine INSIDE a name ("María de los Ángeles", "Juan del Pozo").
+const NAME_PARTICLES = new Set(["de", "del", "la", "las", "los", "y"]);
+
+/** "Pamela Gárate" yes; "Voy a pasar viendo de su tienda" no. */
+export function looksLikePersonName(line: string): boolean {
+  if (/[?¿!¡\d@]/.test(line)) return false;
+  const words = plain(line).replace(/[^a-zñ\s'-]/g, " ").split(/\s+/).filter(Boolean);
+  if (words.length < 2 || words.length > 6) return false;
+  return words.every((w, i) => {
+    if (NAME_PARTICLES.has(w)) return i > 0 && i < words.length - 1;
+    return w.length > 1 && !NOT_NAME_WORDS.has(w);
+  });
+}
+
+/**
+ * The customer's name among everything they typed while registering:
+ * the name written next to the ID number wins (same line or the line
+ * before it), then the last line that looks like a name.
+ */
+export function pickName(lines: string[]): string {
+  const withoutIds = lines.map((l) => l.replace(EMAIL_ALL, " ").replace(LABELS, " "));
+  const hasId = withoutIds.map((l) => /\d[\d .-]{8,20}\d/.test(l));
+  const candidates = withoutIds
+    .map((l, i) => ({ i, raw: l.replace(ID_ALL, " ").trim() }))
+    .filter((c) => looksLikePersonName(c.raw));
+  const nextToId = [...candidates].reverse().find((c) => hasId[c.i] || hasId[c.i + 1]);
+  const chosen = nextToId ?? candidates.at(-1);
+  return chosen ? tidyName(chosen.raw) : "";
+}
+
 /**
  * Read a profile from a submitted form ({nombre, cedula, correo}) or a
  * typed message ("Juan Pérez 0102030405 juan@mail.com", in any order).
@@ -113,11 +152,7 @@ export function parseCustomerProfile(
     // that holds a full name win.
     email = text.match(EMAIL_ALL)?.at(-1) ?? "";
     id = text.replace(EMAIL_ALL, " ").match(ID_ALL)?.at(-1)?.replace(/[\s.-]/g, "") ?? "";
-    const names = text
-      .split("\n")
-      .map((line) => tidyName(line.replace(EMAIL_ALL, " ").replace(ID_ALL, " ").replace(LABELS, " ")))
-      .filter(Boolean);
-    name = [...names].reverse().find((n) => n.split(" ").length >= 2) ?? names.at(-1) ?? "";
+    name = pickName(text.split("\n"));
   }
   name = tidyName(name);
   email = email.toLowerCase();
@@ -144,7 +179,7 @@ export function profileProblemText(p: Exclude<ProfileParse, { ok: true }>): stri
   if (p.missing.length === 3) return "No recibí sus datos 🤔 Escríbame su nombre completo, cédula y correo, o toque *Registrar mis datos*.";
   const parts = p.missing.map((m) => PART_NAMES[m]);
   const list = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} y ${parts.at(-1)}` : parts[0];
-  return `Anotado 🙂 Me falta ${list}.`;
+  return `Gracias 🙂 Me falta ${list}.`;
 }
 
 /** "Juan Carlos Pérez López" → "Juan Carlos"; "Ana Pérez" → "Ana". */

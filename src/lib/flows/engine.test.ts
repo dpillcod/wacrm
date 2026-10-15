@@ -21,6 +21,10 @@ import {
   numberLines,
   textFallbackOf,
   isBotAddressableNonText,
+  isCallRequest,
+  isFrustrated,
+  isListComplaint,
+  isListRequest,
   documentName,
   isAutoAdvancing,
   isSuspending,
@@ -611,5 +615,33 @@ describe("optionByText with a lead-in", () => {
   });
   it("doesn't take a product for an option", () => {
     expect(optionByText(leadInMenu, "quiero 2 libras de arroz")).toBeNull();
+  });
+});
+
+describe("real conversation 2026-10-15 (registration + corrections)", () => {
+  it("reads 'show me my list' requests", () => {
+    expect(isListRequest("Indiqueme qie nomas esta por fvaor")).toBe(true);
+    expect(isListRequest("¿Qué llevo?")).toBe(true);
+    expect(isListRequest("muéstreme mi lista")).toBe(true);
+    expect(isListRequest("2 fundas de leche")).toBe(false);
+  });
+
+  it("tells a complaint from an edit", () => {
+    expect(isListComplaint("Esta mal")).toBe(true);
+    expect(isListComplaint("No esta correcto")).toBe(true);
+    expect(isListComplaint("Esta mañana la lista")).toBe(true);
+    expect(isListComplaint("quitar el 3")).toBe(false);
+  });
+
+  it("asking for a number to call is a call request", () => {
+    expect(isCallRequest("Deme un número para llamar")).toBe(true);
+    expect(isCallRequest("¿a qué número les puedo llamar?")).toBe(true);
+    expect(isCallRequest("Necesito 6 paquetes")).toBe(false);
+  });
+
+  it("notices frustration", () => {
+    expect(isFrustrated("no me entiende")).toBe(true);
+    expect(isFrustrated("ya le dije que son cucharas")).toBe(true);
+    expect(isFrustrated("gracias")).toBe(false);
   });
 });

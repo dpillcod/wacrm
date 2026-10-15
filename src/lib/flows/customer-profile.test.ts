@@ -5,6 +5,7 @@ import {
   greetingName,
   isFinalConsumer,
   isRefusal,
+  looksLikePersonName,
   parseCustomerProfile,
   profileProblemText,
   validCedula,
@@ -44,7 +45,7 @@ describe("parseCustomerProfile", () => {
     expect(parseCustomerProfile({ text: "Ana 0102030400 ana@mail.com" }, "593")).toEqual({ ok: false, problem: "missing", missing: ["name"] });
     const onlyName = parseCustomerProfile({ text: "Luis Alberto Quito Peña" }, "593");
     expect(onlyName).toEqual({ ok: false, problem: "missing", missing: ["id", "email"] });
-    expect(profileProblemText(onlyName as never)).toBe("Anotado 🙂 Me falta su cédula o RUC y su correo para la factura.");
+    expect(profileProblemText(onlyName as never)).toBe("Gracias 🙂 Me falta su cédula o RUC y su correo para la factura.");
     expect(parseCustomerProfile({ text: "" }, "593")).toEqual({ ok: false, problem: "missing", missing: ["name", "id", "email"] });
   });
   it("uses the latest data when it's typed again after a correction", () => {
@@ -81,5 +82,36 @@ describe("greetingName / billingLine", () => {
   it("shows the invoice data on one line", () => {
     expect(billingLine({ name: "Ana Torres", idNumber: "0102030400", email: "a@b.co" })).toBe("Ana Torres · 0102030400 · a@b.co");
     expect(billingLine({ name: "", idNumber: FINAL_CONSUMER, email: "" })).toBe("Consumidor final");
+  });
+});
+
+describe("the name among everything typed while registering", () => {
+  it("keeps the name written next to the ID number (real case)", () => {
+    const typed = [
+      "Cucharás pequeñas",
+      "No gafas",
+      "Necesito 6 paquetes",
+      "Solo 5 paquetes Perdon",
+      "Pamela Gárate",
+      "0106507981",
+      "Cusnto sale ?",
+      "Voy a psar viendo de su tienda",
+      "pamelagarate1999@gmail.com",
+    ].join("\n");
+    const p = parseCustomerProfile({ text: typed }, "593");
+    expect(p.ok && p.profile.name).toBe("Pamela Gárate");
+  });
+
+  it("tells names from sentences", () => {
+    expect(looksLikePersonName("Pamela Gárate")).toBe(true);
+    expect(looksLikePersonName("María de los Ángeles Pérez")).toBe(true);
+    expect(looksLikePersonName("Voy a psar viendo de su tienda")).toBe(false);
+    expect(looksLikePersonName("Solo 5 paquetes Perdon")).toBe(false);
+    expect(looksLikePersonName("Cucharás pequeñas")).toBe(true); // two plain words: allowed, but…
+  });
+
+  it("…a name next to the ID beats a later two-word line", () => {
+    const p = parseCustomerProfile({ text: "Juan Pérez 0102030400\nCucharas pequeñas\njuan@mail.com" }, "593");
+    expect(p.ok && p.profile.name).toBe("Juan Pérez");
   });
 });

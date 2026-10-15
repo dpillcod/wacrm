@@ -39,8 +39,12 @@ function normalize(text: string): string {
 const LEAD_IN =
   /^((hola|buenas|buenos|buen|dias|tardes|noches|como esta|como estan|que tal|disculpe|disculpa|perdon|por favor|porfa|una pregunta|una consulta|consulta|pregunta|estimado|estimada|amigo|amiga|señorita|senorita|joven|oiga|oye)[\s,]*)+/;
 
+// "Perfecto, ¿saben venir en paquetes?": an acknowledgement before the
+// question. Whole words only ("y" must not eat the start of "yogur").
+const ACK_LEAD_IN = /^((perfecto|ok|okey|listo|bueno|claro|gracias|muchas gracias|dale|ya|y)([\s,.!]+|$))+/;
+
 const QUESTION_START =
-  /^(tiene|tienen|tendra|tendran|tendras|hay|habra|dispone|disponen|venden|vende|manejan|maneja|hacen|hace|realizan|aceptan|acepta|reciben|puedo|puede|pueden|se puede|como|donde|cuando|a que hora|hasta que hora|desde que hora|que|cual|cuales|cuanto|cuantos|cuanta|envian|entregan|llevan|trabajan|atienden|abren|cierran|facturan|me pueden|me puede|quisiera saber|queria saber|sabe si|saben si|existe|consiguen|traen)\b/;
+  /^(tiene|tienen|tendra|tendran|tendras|hay|habra|dispone|disponen|venden|vende|manejan|maneja|hacen|hace|realizan|aceptan|acepta|reciben|puedo|puede|pueden|se puede|como|donde|cuando|a que hora|hasta que hora|desde que hora|que|cual|cuales|cuanto|cuantos|cuanta|envian|entregan|llevan|trabajan|atienden|abren|cierran|facturan|me pueden|me puede|quisiera saber|queria saber|sabe si|saben si|sabe|saben|suelen|viene|vienen|existe|consiguen|traen)\b/;
 
 /**
  * Whether a message is a question rather than an order line: it has a
@@ -51,9 +55,11 @@ const QUESTION_START =
 export function looksLikeQuestion(text: string): boolean {
   const n = normalize(text);
   if (!n) return false;
-  const body = n.replace(/[¿?]/g, " ").replace(LEAD_IN, "").trim();
+  const body = n.replace(/[¿?]/g, " ").replace(/\s+/g, " ").replace(LEAD_IN, "").replace(ACK_LEAD_IN, "").trim();
   if (!body || /^\d/.test(body)) return false;
   if (/^que tal\b/.test(n) && body.split(" ").length <= 1) return false;
+  // "…en paquetes, ¿verdad?" written without the question mark.
+  if (/\b(verdad|verdsd|cierto)$/.test(body) && body.split(" ").length >= 3) return true;
   return n.includes("?") || n.includes("¿") || QUESTION_START.test(body);
 }
 
@@ -125,6 +131,30 @@ const SITUATION: Record<"menu" | "order" | "other", string> = {
 };
 
 /** One short, grounded answer to a question asked mid-flow (see the module note). */
+/** The conversation's last few messages before this one, oldest first. */
+async function recentMessages(
+  db: SupabaseClient,
+  conversationId: string,
+  current: string,
+): Promise<{ who: "Cliente" | "Tienda"; text: string }[]> {
+  const { data } = await db
+    .from("messages")
+    .select("sender_type, content_text")
+    .eq("conversation_id", conversationId)
+    .order("created_at", { ascending: false })
+    .limit(9);
+  const rows = ((data ?? []) as { sender_type: string; content_text: string | null }[])
+    .filter((m) => m.content_text?.trim())
+    .map((m) => ({
+      who: (m.sender_type === "customer" ? "Cliente" : "Tienda") as "Cliente" | "Tienda",
+      text: m.content_text!.replace(/\s+/g, " ").trim().slice(0, 200),
+    }))
+    .reverse();
+  // The question itself is usually already stored: leave it out.
+  if (rows.at(-1)?.who === "Cliente" && rows.at(-1)?.text === current.replace(/\s+/g, " ").trim().slice(0, 200)) rows.pop();
+  return rows.slice(-8);
+}
+
 export async function answerInFlow(
   db: SupabaseClient,
   accountId: string,
@@ -140,7 +170,16 @@ export async function answerInFlow(
   }
   if (!config?.apiKey) return null;
   const biz = await loadBusinessSettings(db, accountId);
-  const hints = await retrieveCatalogProducts(db, accountId, productSearchText(question) || question, 8).catch(() => []);
+  // The last messages, so "¿tiene plateadas?" is read as "cucharas
+  // plateadas" (not "gafas"), and the bot doesn't greet again mid-chat.
+  const recent = conversationId ? await recentMessages(db, conversationId, question) : [];
+  const previousAsk = [...recent].reverse().find((m) => m.who === "Cliente")?.text ?? "";
+  const searches = [productSearchText(question) || question];
+  if (previousAsk && (productSearchText(question) || question).split(" ").length <= 3) {
+    searches.unshift(`${productSearchText(previousAsk)} ${productSearchText(question)}`.trim());
+  }
+  const found = await Promise.all(searches.map((q) => retrieveCatalogProducts(db, accountId, q, 8).catch(() => [])));
+  const hints = [...new Map(found.flat().map((h) => [h.name, h])).values()].slice(0, 10);
   const system = [
     businessIntro(biz),
     `Respondes por WhatsApp una pregunta de un cliente. Trata al cliente de "usted"; sé cálido, claro y breve (1 a 3 frases).`,
@@ -154,10 +193,13 @@ Responde SOLO con JSON: {"reply": "...", "product": "..." o null}`,
     `Información del negocio:
 - Horario: ${hoursInWords(biz) || "consultar"}.
 ${biz.websiteUrl ? `- Página web: ${biz.websiteUrl}\n` : ""}${biz.customerInfo.trim() ? biz.customerInfo.trim() : ""}`,
+    recent.length
+      ? `Conversación reciente (para entender a qué se refiere; NO saludes de nuevo):\n${recent.map((m) => `${m.who}: ${m.text}`).join("\n")}`
+      : "",
     `Referencias del catálogo (nombres abreviados del sistema, solo para saber si existe algo parecido): ${
       hints.map((h) => h.name).join(" | ") || "(ninguna)"
     }`,
-  ].join("\n\n");
+  ].filter(Boolean).join("\n\n");
   try {
     const args = {
       apiKey: config.apiKey,

@@ -25,6 +25,9 @@ import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
  */
 const HANDOFF_ACK_MESSAGE = 'Un momento por favor, en breve un encargado le va a ayudar 🙂'
 
+/** How long after a team member's message the AI stays out of the conversation. */
+const HUMAN_RECENT_MS = 4 * 3_600_000
+
 /**
  * Hand a conversation off to a human: pause the bot (sticky until
  * re-enabled), route to the configured handoff agent (null leaves it
@@ -152,6 +155,20 @@ export async function dispatchInboundToAiReply(
     if (conv.ai_autoreply_disabled) {
       console.log('[ai auto-reply] skipped: ai_autoreply_disabled is true')
       return // handed off / turned off here
+    }
+    // A person from the team wrote here recently (without taking the
+    // conversation): they're talking with the customer — the bot keeps
+    // quiet instead of answering on top of them.
+    const { data: lastAgent } = await db
+      .from('messages')
+      .select('created_at')
+      .eq('conversation_id', conversationId)
+      .eq('sender_type', 'agent')
+      .gte('created_at', new Date(Date.now() - HUMAN_RECENT_MS).toISOString())
+      .limit(1)
+    if (lastAgent?.length) {
+      console.log('[ai auto-reply] skipped: a team member replied recently')
+      return
     }
     // Cheap early-out; the authoritative cap check is the atomic claim
     // below (this read can race a concurrent inbound). Reaching the cap

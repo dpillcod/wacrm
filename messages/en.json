@@ -1798,7 +1798,12 @@
         "phones": "Staff numbers (one per line)",
         "phonesHint": "Local or international format.",
         "checkInWords": "Check-in words",
-        "checkInWordsHint": "Comma-separated, e.g. turno, avisos."
+        "checkInWordsHint": "Comma-separated, e.g. turno, avisos.",
+        "newConversation": "New conversation alert",
+        "newConversationHint": "Tells the team when a customer starts writing (first message after 3 hours of silence), so someone can follow the conversation in time.",
+        "newConversationOff": "Off",
+        "newConversationApp": "CRM notification only",
+        "newConversationWhatsapp": "CRM and WhatsApp to staff on shift"
       },
       "rules": {
         "title": "Order rules",
