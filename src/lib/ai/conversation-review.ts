@@ -204,12 +204,18 @@ export async function reviewDueConversations(
     if (now - new Date(customer.at(-1)!.created_at).getTime() < SESSION_QUIET_MS) continue;
     if (customer.length === 1 && /^\s*(turno|gracias|ok|👍)\s*$/i.test(customer[0].content_text ?? "")) continue;
     const sessionStart = session[0].created_at;
-    const { data: done } = await db
+    const { data: done, error: lookupError } = await db
       .from("conversation_reviews")
       .select("id")
       .eq("conversation_id", c.id)
       .eq("session_start", sessionStart)
       .maybeSingle();
+    // Table missing (migration 050 not applied) or unreachable: stop
+    // here rather than paying for reviews that can't be saved.
+    if (lookupError) {
+      console.error("[conversation-review] reviews table unavailable:", lookupError.message);
+      break;
+    }
     if (done) continue;
     const verdict = await reviewSession(db, accountId, c.id, session);
     if (!verdict) break; // AI unavailable: try again next time
