@@ -3,6 +3,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { getLocale, getMessages } from 'next-intl/server';
 import { Inter } from "next/font/google";
 import Script from "next/script";
+import { connection } from "next/server";
 import "./globals.css";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { ThemedToaster } from "@/components/themed-toaster";
@@ -88,6 +89,10 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Render on each request, not at build time: the Docker build only
+  // sees a placeholder for the language (see Dockerfile), so a page
+  // prerendered then would stay in English whatever the deployment sets.
+  await connection();
   const locale = await getLocale();
   const messages = await getMessages();
 
