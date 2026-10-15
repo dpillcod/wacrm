@@ -22,6 +22,8 @@ import {
   textFallbackOf,
   isBotAddressableNonText,
   isCallRequest,
+  quantityCorrection,
+  withQuantity,
   isFrustrated,
   isListComplaint,
   isListRequest,
@@ -643,5 +645,22 @@ describe("real conversation 2026-10-15 (registration + corrections)", () => {
     expect(isFrustrated("no me entiende")).toBe(true);
     expect(isFrustrated("ya le dije que son cucharas")).toBe(true);
     expect(isFrustrated("gracias")).toBe(false);
+  });
+});
+
+describe("quantity corrections", () => {
+  it("reads the fix", () => {
+    expect(quantityCorrection("Solo 5 paquetes Perdon")).toBe("5 paquetes");
+    expect(quantityCorrection("mejor 3")).toBe("3");
+    expect(quantityCorrection("no, eran 4 libras")).toBe("4 libras");
+    expect(quantityCorrection("5 perdón")).toBe("5");
+    expect(quantityCorrection("2 panes")).toBeNull();
+    expect(quantityCorrection("5 paquetes de tortillas")).toBeNull();
+  });
+  it("applies it to the line", () => {
+    expect(withQuantity("6 paquetes tortillas Mamá Fany", "5 paquetes")).toBe("5 paquetes tortillas Mamá Fany");
+    expect(withQuantity("6 paquetes tortillas", "5")).toBe("5 paquetes tortillas");
+    expect(withQuantity("leche entera", "2")).toBe("2 leche entera");
+    expect(withQuantity("2 libras de arroz", "3 kilos")).toBe("3 kilos de arroz");
   });
 });

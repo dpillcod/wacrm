@@ -58,6 +58,12 @@ export function looksLikeQuestion(text: string): boolean {
   const body = n.replace(/[¿?]/g, " ").replace(/\s+/g, " ").replace(LEAD_IN, "").replace(ACK_LEAD_IN, "").trim();
   if (!body || /^\d/.test(body)) return false;
   if (/^que tal\b/.test(n) && body.split(" ").length <= 1) return false;
+  // "formas de pago", "horarios de atención": a topic asked about without
+  // a question mark (short, so "2 libras de arroz" never counts).
+  if (
+    body.split(" ").length <= 6 &&
+    /^(sus |los |las |el |la )?(formas? de pago|metodos? de pago|horarios?|horario de atencion|ubicacion|direccion|donde (estan|quedan)|delivery|envios?|costo de envio|precio del envio|telefono|numero de contacto)\b/.test(body)
+  ) return true;
   // "…en paquetes, ¿verdad?" written without the question mark.
   if (/\b(verdad|verdsd|cierto)$/.test(body) && body.split(" ").length >= 3) return true;
   return n.includes("?") || n.includes("¿") || QUESTION_START.test(body);

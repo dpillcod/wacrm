@@ -64,6 +64,13 @@ export function validIdNumber(id: string, countryCode: string): boolean {
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
 const EMAIL_ALL = new RegExp(EMAIL.source, "g");
 const ID_ALL = /\d[\d .-]{8,20}\d/g;
+// A shared location ("-2.9070, -79.0427") or a link isn't an ID number.
+const NOT_ID = /-?\d{1,3}\.\d{3,}\s*,\s*-?\d{1,3}\.\d{3,}|https?:\/\/\S+/g;
+
+/** The text without coordinates and links, for reading an ID number. */
+export function withoutCoordinates(text: string): string {
+  return text.replace(NOT_ID, " ");
+}
 const LABELS = /(^|\s)(nombres?|apellidos?|c[eé]dula|ruc|correo|email|mail|completo)\s*:?/giu;
 
 function tidyName(raw: string): string {
@@ -119,7 +126,7 @@ export function looksLikePersonName(line: string): boolean {
  */
 export function pickName(lines: string[]): string {
   const withoutIds = lines.map((l) => l.replace(EMAIL_ALL, " ").replace(LABELS, " "));
-  const hasId = withoutIds.map((l) => /\d[\d .-]{8,20}\d/.test(l));
+  const hasId = withoutIds.map((l) => /\d[\d .-]{8,20}\d/.test(withoutCoordinates(l)));
   const candidates = withoutIds
     .map((l, i) => ({ i, raw: l.replace(ID_ALL, " ").trim() }))
     .filter((c) => looksLikePersonName(c.raw));
@@ -151,7 +158,7 @@ export function parseCustomerProfile(
     // a correction: the last email, the last ID number and the last line
     // that holds a full name win.
     email = text.match(EMAIL_ALL)?.at(-1) ?? "";
-    id = text.replace(EMAIL_ALL, " ").match(ID_ALL)?.at(-1)?.replace(/[\s.-]/g, "") ?? "";
+    id = withoutCoordinates(text.replace(EMAIL_ALL, " ")).match(ID_ALL)?.at(-1)?.replace(/[\s.-]/g, "") ?? "";
     name = pickName(text.split("\n"));
   }
   name = tidyName(name);

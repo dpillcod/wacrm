@@ -115,3 +115,11 @@ describe("the name among everything typed while registering", () => {
     expect(p.ok && p.profile.name).toBe("Juan Pérez");
   });
 });
+
+describe("a shared location is not an ID number", () => {
+  it("ignores coordinates while registering", () => {
+    const p = parseCustomerProfile({ text: "-2.907023191452,-79.042709350586" }, "593");
+    expect(p.ok).toBe(false);
+    expect(!p.ok && p.problem).toBe("missing");
+  });
+});

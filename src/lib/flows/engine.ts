@@ -91,6 +91,7 @@ import {
   looksLikePersonName,
   parseCustomerProfile,
   pickName,
+  withoutCoordinates,
   profileProblemText,
   saveCustomerProfile,
   type CustomerProfile,
@@ -319,6 +320,31 @@ export function isListRequest(text: string): boolean {
     /\b((que|qie|qe|ke|q) (mas|nomas|no mas|tengo|llevo|lleva|esta|estan|hay|anoto|anotaron|pedi)|mi lista|la lista|mi pedido)\b/.test(said) &&
       /\b(indiqueme|indique|indiquenme|digame|diga|muestreme|muestre|mandeme|mande|envieme|ver|leame|repitame|repita|que|qie)\b/.test(said)
   ) && !/\b(esta mal|no esta|corregir|cambiar|quitar)\b/.test(said);
+}
+
+/**
+ * "Solo 5 paquetes, perdón", "mejor 3", "no, eran 4 libras": the
+ * customer fixes the quantity of what they just said. Returns the new
+ * quantity ("5 paquetes", "3") or null.
+ */
+export function quantityCorrection(text: string): string | null {
+  const t = normalizeForMatch(text).replace(/[.,!]/g, " ").replace(/\s+/g, " ").trim();
+  const m = t.match(
+    /^(?:(?:solo|solamente|mejor|no|perdon|disculpe|eran|son|corrijo|corrigiendo|perdone)\s+)+(\d+(?:[.,]\d+)?)(?:\s+([a-zñ]+))?(?:\s+(?:perdon|disculpe|por favor|nomas|no mas|mejor))*$/,
+  ) ?? t.match(/^(\d+(?:[.,]\d+)?)(?:\s+([a-zñ]+))?\s+(?:perdon|disculpe|mejor|nomas|no mas)$/);
+  if (!m) return null;
+  const unit = m[2] && !/^(perdon|disculpe|mejor|nomas)$/.test(m[2]) ? ` ${m[2]}` : "";
+  return `${m[1]}${unit}`;
+}
+
+/** "6 paquetes tortillas" + "5 paquetes" → "5 paquetes tortillas"; a line without quantity gets it in front. */
+export function withQuantity(line: string, quantity: string): string {
+  const [qty, unit] = quantity.split(" ");
+  const m = line.match(/^(\d+(?:[.,]\d+)?)\s+(\S+)?/);
+  if (!m) return `${quantity} ${line}`;
+  // Same unit (or none given): only the number changes.
+  if (!unit || (m[2] && normalizeForMatch(m[2]) === normalizeForMatch(unit))) return line.replace(/^\d+(?:[.,]\d+)?/, qty);
+  return line.replace(/^\d+(?:[.,]\d+)?\s+\S+/, quantity);
 }
 
 /** "Quiero 2 sacos de cemento" → "2 sacos de cemento" (the words before the product). */
@@ -2349,7 +2375,8 @@ export type TroubleReason =
   | "list_complaint"
   | "registration_stuck"
   | "frustrated"
-  | "invalid_options";
+  | "invalid_options"
+  | "human_request";
 
 const TROUBLE_TEXT: Record<TroubleReason, string> = {
   edit_failed: "el bot no logra corregir la lista del cliente",
@@ -2357,6 +2384,7 @@ const TROUBLE_TEXT: Record<TroubleReason, string> = {
   registration_stuck: "el cliente no logra completar el registro",
   frustrated: "el cliente parece molesto con el bot",
   invalid_options: "el cliente no logra elegir una opción del menú",
+  human_request: "el cliente pide hablar con una persona",
 };
 
 /**
@@ -2464,7 +2492,7 @@ const PROFILE_ORDER_VAR = "order_text";
 function isProfileLine(line: string): boolean {
   return (
     /@/.test(line) ||
-    /\d[\d .-]{8,20}\d/.test(line) ||
+    /\d[\d .-]{8,20}\d/.test(withoutCoordinates(line)) ||
     isFinalConsumer(line) ||
     isRefusal(line) ||
     /\b(c[eé]dula|ruc|correo|nombres?|apellidos?)\b/i.test(line)
@@ -3199,11 +3227,13 @@ async function runNodeSideEffects(
       if (k.startsWith(`${key}_`)) fields[k.slice(key.length + 1)] = v;
     }
     let typed = typeof run.vars[key] === "string" ? (run.vars[key] as string) : "";
+    const typedAtStart = typed;
     const fromForm = ["nombre", "cedula", "correo"].some((k) => k in fields);
     // Customers keep ordering while they register ("necesito 6 paquetes",
     // "cucharas pequeñas"): what isn't name / ID / email goes to the
     // order list instead of being lost in the registration answer.
     const noted: string[] = [];
+    const corrected: string[] = [];
     if (!fromForm && typed) {
       const all = typed.split("\n").map((l) => l.trim()).filter(Boolean);
       // Of the lines that look like a name, only the one taken as the
@@ -3217,20 +3247,41 @@ async function runNodeSideEffects(
         run.vars = { ...run.vars, [key]: typed };
         // "Necesito 6 paquetes" right after "¿Tiene tortillas Mamá Fany?"
         // → "6 paquetes tortillas Mamá Fany".
+        // "Solo 5 paquetes, perdón" fixes the line just written down.
         const offered = typeof run.vars.__offered_product === "string" ? run.vars.__offered_product : null;
-        if (offered) {
-          const accepted = extras.map((l) => acceptOfferedProduct(stripOrderLeadIn(l), offered));
-          noted.push(...accepted.filter((l): l is string => !!l));
-          extras = extras.filter((_, i) => !accepted[i]);
-          if (noted.length) {
-            const rest = { ...run.vars };
-            delete rest.__offered_product;
-            run.vars = rest;
-          }
+        const pending: string[] = [];
+        for (const l of extras) {
+          const fix = quantityCorrection(l);
+          const accepted = offered ? acceptOfferedProduct(stripOrderLeadIn(l), offered) : null;
+          if (fix && noted.length) noted[noted.length - 1] = withQuantity(noted[noted.length - 1], fix);
+          else if (fix && typeof run.vars[PROFILE_ORDER_VAR] === "string" && (run.vars[PROFILE_ORDER_VAR] as string).trim()) {
+            const lines = (run.vars[PROFILE_ORDER_VAR] as string).split("\n");
+            lines[lines.length - 1] = withQuantity(lines[lines.length - 1], fix);
+            const list = lines.join("\n");
+            run.vars = { ...run.vars, [PROFILE_ORDER_VAR]: list, [`${PROFILE_ORDER_VAR}_numbered`]: numberLines(list) };
+            corrected.push(lines[lines.length - 1]);
+          } else if (accepted) noted.push(accepted);
+          else pending.push(l);
+        }
+        extras = pending;
+        if (offered && noted.length) {
+          const rest = { ...run.vars };
+          delete rest.__offered_product;
+          run.vars = rest;
         }
         if (extras.length && biz.aiFeatures.entryRouter) {
           const route = await classifyFirstMessage(db, run.account_id, run.conversation_id, extras.join("\n"));
           if (route?.intent === "order") noted.push(...route.lines.map((l) => l.trim()).filter(Boolean));
+          // The customer kept typing while the AI read the products (often
+          // the name and ID number): take those messages into this round
+          // instead of overwriting them when saving.
+          const { data: fresh } = await db.from("flow_runs").select("vars").eq("id", run.id).maybeSingle();
+          const freshTyped = (fresh as { vars?: Record<string, unknown> } | null)?.vars?.[key];
+          if (typeof freshTyped === "string" && freshTyped.startsWith(typedAtStart) && freshTyped.length > typedAtStart.length) {
+            const arrived = freshTyped.slice(typedAtStart.length).split("\n").map((l) => l.trim()).filter(Boolean);
+            typed = [typed, ...arrived].filter(Boolean).join("\n");
+            run.vars = { ...run.vars, [key]: typed };
+          }
         }
         if (noted.length) {
           const listVar = PROFILE_ORDER_VAR;
@@ -3267,13 +3318,13 @@ async function runNodeSideEffects(
       const problem = profileProblemText(parsed);
       // Nothing new for the registration and nothing written down ("voy a
       // pasar viendo", "no gafas"): don't repeat the same reminder.
-      const repeated = !noted.length && problem === run.vars.__profile_last_problem;
+      const repeated = !noted.length && !corrected.length && problem === run.vars.__profile_last_problem;
       vars = {
         ...run.vars,
         profile_ok: "",
         __profile_last_problem: problem,
-        profile_problem: noted.length
-          ? `Anotado ✅ ${noted.join(", ")}\n\nPara continuar con su pedido, ${problem
+        profile_problem: noted.length || corrected.length
+          ? `${noted.length ? `Anotado ✅ ${noted.join(", ")}` : `Corregido ✅ ${corrected.join(", ")}`}\n\nPara continuar con su pedido, ${problem
               .replace(/^Gracias 🙂 Me falta/, "me falta")
               .replace(/^No recibí sus datos 🤔 Escríbame/, "escríbame")}`
           : repeated
@@ -3294,6 +3345,25 @@ async function runNodeSideEffects(
     // answers go — kept on the contact when valid, and never mistaken
     // for an order list (the "su lista quedó guardada" reminder reads
     // *_numbered).
+    if (parsed.ok && !fromForm) {
+      // Registered: anything else that came in this round (written while
+      // the AI was busy) is part of the order, not lost.
+      const chosen = parsed.profile.name;
+      const leftovers = typed
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l && !isProfileLine(l) && !(looksLikePersonName(l) && pickName([l]) === chosen));
+      const route = leftovers.length && biz.aiFeatures.entryRouter
+        ? await classifyFirstMessage(db, run.account_id, run.conversation_id, leftovers.join("\n"))
+        : null;
+      const items = route?.intent === "order" ? route.lines.map((l) => l.trim()).filter(Boolean) : [];
+      if (items.length) {
+        const existing = typeof vars[PROFILE_ORDER_VAR] === "string" ? (vars[PROFILE_ORDER_VAR] as string).trim() : "";
+        const list = [existing, ...items].filter(Boolean).join("\n");
+        vars[PROFILE_ORDER_VAR] = list;
+        vars[`${PROFILE_ORDER_VAR}_numbered`] = numberLines(list);
+      }
+    }
     if (!parsed.ok && !fromForm && !refused) {
       vars[key] = parsed.problem === "id" ? typed.replace(/\d[\d .-]{8,20}\d/g, " ").trim() : typed;
     } else {
@@ -4718,9 +4788,32 @@ async function handleReplyForActiveRun(
       );
       return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
     }
-    const reply = isHumanRequest(message.text)
-      ? bizForRules.texts.humanRequest
-      : isAckOnly(message.text)
+    // "Solo 5, perdón": fix the quantity of the last line instead of
+    // writing "5" as a product.
+    const fix = quantityCorrection(message.text);
+    const current = typeof run.vars[listVar] === "string" ? (run.vars[listVar] as string).trim() : "";
+    if (fix && current) {
+      const lines = current.split("\n");
+      lines[lines.length - 1] = withQuantity(lines[lines.length - 1], fix);
+      const list = lines.join("\n");
+      await saveVars(db, run, { ...run.vars, [listVar]: list, [`${listVar}_numbered`]: numberLines(list), [`${listVar}_last`]: lines.at(-1) });
+      await sendEngineText(db, run, currentNode.node_key, `Corregido ✅ ${lines.at(-1)}\n\n¿Algo más? Escríbalo, o escriba *listo* 🙂`, "quantity_corrected");
+      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
+    // "Quiero hablar con alguien" while ordering or registering: a person
+    // is told right away; the list stays.
+    if (isHumanRequest(message.text)) {
+      await alertTeamOfTrouble(db, run, "human_request", message.text);
+      await sendEngineText(
+        db,
+        run,
+        currentNode.node_key,
+        "Con gusto 🙂 Ya le aviso a una persona de nuestro equipo; le escribirá por aquí en breve. Lo que lleva anotado queda guardado.",
+        "human_request_alerted",
+      );
+      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
+    const reply = isAckOnly(message.text)
         ? bizForRules.texts.orderAck
         : null;
     if (reply) {
