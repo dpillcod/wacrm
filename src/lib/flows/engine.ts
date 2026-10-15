@@ -640,7 +640,9 @@ export function isBotAddressableNonText(message: ParsedInbound): boolean {
   return (
     message.kind === "order" ||
     (message.kind === "other" &&
-      (message.message_type === "audio" || message.message_type === "video"))
+      (message.message_type === "audio" ||
+        message.message_type === "video" ||
+        message.message_type === "document"))
   );
 }
 
@@ -1642,11 +1644,18 @@ async function startOrderFromFirstMessage(
     }
     // What they said becomes the description the advisor starts from.
     const startNode = nodes.get(entryNode)!;
-    const describedVar =
-      (startNode.config as { text_fallback?: { var_key?: string } }).text_fallback?.var_key ??
-      (route.intent === "service" ? "svc_problema" : "pst_detalle");
+    const fallback = (startNode.config as { text_fallback?: { var_key?: string; next_node_key?: string } })
+      .text_fallback;
+    const describedVar = fallback?.var_key ?? (route.intent === "service" ? "svc_problema" : "pst_detalle");
+    // Already described: skip the "¿qué tipo de trabajo?" menu and go
+    // straight to the advisor's questions (which also catch a purchase).
+    const describedNode = fallback?.next_node_key ? nodes.get(fallback.next_node_key) : undefined;
+    const skipMenu =
+      describedNode?.node_type === "collect_input" &&
+      (describedNode.config as unknown as CollectInputNodeConfig).var_key === describedVar &&
+      !!(describedNode.config as unknown as CollectInputNodeConfig).ai_guide;
     return startNewRun(db, defaultFlow, input, nodes, {
-      startAt: entryNode,
+      startAt: skipMenu ? describedNode!.node_key : entryNode,
       vars: { [describedVar]: input.message.text },
     });
   }
@@ -1700,6 +1709,51 @@ async function acknowledgeReceipt(
       conversationId: input.conversationId,
       contactId: input.contactId,
       title: "🧾 Comprobante de pago",
+      body,
+    });
+  }
+}
+
+/** The file name the webhook appends to a document's media URL (?name=…). */
+export function documentName(mediaUrl: string | null | undefined): string {
+  if (!mediaUrl) return "";
+  try {
+    return new URL(mediaUrl, "http://x").searchParams.get("name") ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** A file from the customer (a PDF to print, a list): say so, tell the team. */
+async function acknowledgeDocument(
+  db: AdminClient,
+  input: Pick<DispatchInboundInput, "accountId" | "userId" | "conversationId" | "contactId" | "message">,
+  run: FlowRunRow | null,
+): Promise<void> {
+  const biz = await bizOf(db, input.accountId);
+  const url = input.message.kind === "other" ? input.message.media_url : null;
+  const name = documentName(url);
+  try {
+    await engineSendText({
+      accountId: input.accountId,
+      userId: input.userId,
+      conversationId: input.conversationId,
+      contactId: input.contactId,
+      text: renderText(biz.texts.documentReceived, { archivo: name ? ` *${name}*` : "" }),
+    });
+  } catch (err) {
+    console.error("[flows] document acknowledgement failed:", err);
+  }
+  const body = `El cliente envió un archivo${name ? `: ${name}` : ""}. Revíselo en la conversación.${url ? `
+${url}` : ""}`;
+  if (run) {
+    await notifyTeamInApp(db, run, run.current_node_key, { title: orderTitle(run, "📄 Archivo del cliente"), body });
+  } else {
+    await notifyAccountInApp(db, {
+      accountId: input.accountId,
+      conversationId: input.conversationId,
+      contactId: input.contactId,
+      title: "📄 Archivo del cliente",
       body,
     });
   }
@@ -2470,6 +2524,11 @@ async function dispatchInboundToFlowsInner(
             // if the customer had typed their order at the greeting.
             const nodes = await loadAllNodes(db, defaultFlow.id);
             return startNewRun(db, defaultFlow, input, nodes);
+          }
+          // A file (a PDF to print, a list in Word): a person looks at it.
+          if (input.message.kind === "other" && input.message.message_type === "document") {
+            await acknowledgeDocument(db, input, null);
+            return { consumed: true, outcome: "no_match" };
           }
           // A voice note / video as the first message: ask for text.
           try {
@@ -4258,7 +4317,19 @@ async function handleReplyForActiveRun(
         return { consumed: true, flow_run_id: run.id, outcome: outcome.outcome };
       }
     }
-    if (message.message_type !== "sticker") {
+    if (message.message_type === "document") {
+      await acknowledgeDocument(
+        db,
+        {
+          accountId: run.account_id,
+          userId: run.user_id,
+          conversationId: run.conversation_id!,
+          contactId: run.contact_id!,
+          message,
+        },
+        run,
+      );
+    } else if (message.message_type !== "sticker") {
       await sendEngineText(db, run, currentNode.node_key, (await bizOf(db, run.account_id)).texts.nonTextReply, "non_text_reply");
     }
     return { consumed: true, flow_run_id: run.id, outcome: "no_match" };

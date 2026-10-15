@@ -112,6 +112,8 @@ export interface BusinessSettings {
     photoNotUnderstood: string
     /** A payment receipt photo (the team is notified). */
     receiptReceived: string
+    /** A file from the customer (PDF, Word…); {archivo} = " *name*" or "". The team is notified. */
+    documentReceived: string
     /** Customer went quiet in the middle of something that isn't an order list. */
     idleNudgeGeneral: string
     /** A voice note over 3 minutes. */
@@ -231,6 +233,8 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
     photoNotUnderstood:
       'Recibí su foto 🙂 pero no logré leer productos en ella. ¿Me escribe qué necesita, o me envía una foto más clara de su lista?',
     receiptReceived: '🧾 Recibimos su comprobante, ¡gracias! Nuestro equipo lo revisará y le confirmará por aquí 🙂',
+    documentReceived:
+      '📄 Recibimos su archivo{archivo}, ¡gracias! Una persona de nuestro equipo lo revisa y le responde por aquí 🙂',
     idleNudgeGeneral: '¿Sigue ahí? 🙂 Cuando pueda, respóndame y continuamos.',
     audioTooLong: 'Su audio es un poco largo 🙏 ¿Me lo puede escribir, o enviar uno más corto (menos de 3 minutos)?',
     recoveryReminder: '🛒 Su lista quedó guardada:\n{lista}\n\n¿Seguimos con su pedido?',

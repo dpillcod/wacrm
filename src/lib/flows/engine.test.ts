@@ -21,6 +21,7 @@ import {
   numberLines,
   textFallbackOf,
   isBotAddressableNonText,
+  documentName,
   isAutoAdvancing,
   isSuspending,
   isTerminal,
@@ -225,6 +226,14 @@ describe("isRestartCommand", () => {
   });
 });
 
+describe("documentName", () => {
+  it("reads the ?name the webhook appends", () => {
+    expect(documentName("/api/media/abc?name=Tarea%20final.pdf")).toBe("Tarea final.pdf");
+    expect(documentName("/api/media/abc")).toBe("");
+    expect(documentName(null)).toBe("");
+  });
+});
+
 describe("isBotAddressableNonText", () => {
   it("covers catalog carts and voice notes/videos, not stickers", () => {
     expect(
@@ -236,6 +245,9 @@ describe("isBotAddressableNonText", () => {
     expect(
       isBotAddressableNonText({ kind: "other", message_type: "sticker", media_url: null, meta_message_id: "m" }),
     ).toBe(false);
+    expect(
+      isBotAddressableNonText({ kind: "other", message_type: "document", media_url: "x?name=a.pdf", meta_message_id: "m" }),
+    ).toBe(true);
     expect(
       isBotAddressableNonText({ kind: "text", text: "hola", meta_message_id: "m" }),
     ).toBe(false);

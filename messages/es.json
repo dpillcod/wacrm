@@ -1828,6 +1828,7 @@
         "resumeOrder": "Vuelve a saludar en medio de un pedido",
         "photoNotUnderstood": "Foto sin productos",
         "receiptReceived": "Comprobante de pago recibido (se avisa al equipo)",
+        "documentReceived": "Archivo del cliente, ej. PDF para imprimir (se avisa al equipo)",
         "idleNudgeGeneral": "El cliente dejó de responder (fuera de un pedido)",
         "audioTooLong": "Nota de voz de más de ~3 minutos",
         "recoveryReminder": "Recordatorio 2 horas después de dejar una lista a medias",

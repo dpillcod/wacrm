@@ -231,7 +231,9 @@ Responde SOLO con JSON: {"kind":"list"|"product"|"receipt"|"other","lines":["...
 
 const ROUTE_TASK = `Este es un mensaje de un cliente por WhatsApp, sin una conversación de pedido abierta. Clasifícalo:
 - "order": está pidiendo productos para comprar (ej. "quiero 2 panes y una leche", "me manda 1 foco y un cemento"). Extrae los productos en "lines". ${LINE_RULES}
-- "service": necesita un TRABAJO en su casa o local (gasfitería, eléctricos, pintura, reparaciones: "se me dañó la llave del baño", "necesito un electricista", "quiero pintar la sala", "cambiar la chapa de la puerta").
+- "service": necesita que un TÉCNICO vaya a hacer un TRABAJO en su casa o local (gasfitería, eléctricos, pintura, reparaciones: "se me dañó la llave del baño", "necesito un electricista", "quiero pintar la sala", "que me cambien la chapa de la puerta"). NO es "service":
+  · nombrar un producto o herramienta sin pedir que alguien haga el trabajo ("chapas para puerta", "un destornillador torx", "pintura blanca") → "order" (o "question" si solo pregunta si hay o cuánto cuesta);
+  · algo que se hace en el mostrador de la tienda (impresiones, copias, anillados, plastificados, duplicar llaves, cortes, preparar pintura) → "question".
 - "bakery": quiere ENCARGAR pastelería o panadería para una fecha (torta, pastel, bocaditos, pan para un evento o negocio: "quiero una torta para el sábado", "bocaditos para 50 personas"). Comprar 2 panes para hoy es "order".
 - "question": pregunta algo (horario, ubicación, si tienen un producto, precio, cómo comprar) sin hacer todavía un pedido concreto.
 - "human": pide hablar con una persona o asesor, o tiene un reclamo.

@@ -1828,6 +1828,7 @@
         "resumeOrder": "Says hello again in the middle of an order",
         "photoNotUnderstood": "Photo with no products in it",
         "receiptReceived": "Payment receipt received (the team is notified)",
+        "documentReceived": "Customer file, e.g. a PDF to print (the team is notified)",
         "idleNudgeGeneral": "Customer went quiet (outside an order list)",
         "audioTooLong": "Voice note longer than ~3 minutes",
         "recoveryReminder": "Reminder 2 hours after a list was left half-way",

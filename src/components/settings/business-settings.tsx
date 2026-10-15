@@ -61,6 +61,7 @@ const TEXT_KEYS: (keyof Texts)[] = [
   "resumeOrder",
   "photoNotUnderstood",
   "receiptReceived",
+  "documentReceived",
   "idleNudgeGeneral",
   "audioTooLong",
   "recoveryReminder",
