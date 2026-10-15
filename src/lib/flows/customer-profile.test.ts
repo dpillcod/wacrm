@@ -123,3 +123,17 @@ describe("a shared location is not an ID number", () => {
     expect(!p.ok && p.problem).toBe("missing");
   });
 });
+
+describe("email optional", () => {
+  it("name and ID number are enough", () => {
+    const p = parseCustomerProfile({ text: "Pamela Gárate 0106507981" }, "593", false);
+    expect(p.ok && p.profile).toEqual({ name: "Pamela Gárate", idNumber: "0106507981", email: "" });
+    expect(p.ok && billingLine(p.profile)).toBe("Pamela Gárate · 0106507981");
+  });
+  it("still asks for what's missing", () => {
+    const p = parseCustomerProfile({ text: "Pamela Gárate" }, "593", false);
+    expect(!p.ok && profileProblemText(p, false)).toBe("Gracias 🙂 Me falta su cédula o RUC.");
+    const none = parseCustomerProfile({ text: "hola" }, "593", false);
+    expect(!none.ok && profileProblemText(none, false)).toContain("nombre completo y su cédula");
+  });
+});

@@ -299,6 +299,8 @@ export interface NodeSideEffectsConfig {
   save_customer_profile?: string;
   /** With save_customer_profile: "consumidor final" isn't accepted — name, ID number and email are required. */
   profile_required?: boolean;
+  /** With save_customer_profile: name and ID number are enough; an email is kept if given. */
+  profile_email_optional?: boolean;
   /**
    * Any node of a service request: when the customer turns out to only
    * want to BUY something ("solo quiero comprar la herramienta", "solo

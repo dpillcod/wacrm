@@ -142,6 +142,8 @@ export function pickName(lines: string[]): string {
 export function parseCustomerProfile(
   input: { fields?: Record<string, unknown>; text?: string },
   countryCode: string,
+  /** false: name and ID number are enough (an email is kept if given). */
+  emailRequired = true,
 ): ProfileParse {
   const f = input.fields ?? {};
   const field = (k: string) => (typeof f[k] === "string" ? (f[k] as string).trim() : "");
@@ -167,7 +169,10 @@ export function parseCustomerProfile(
   const missing: ProfilePart[] = [];
   if (name.split(" ").filter((w) => w.length > 1).length < 2) missing.push("name");
   if (!id) missing.push("id");
-  if (!EMAIL.test(email)) missing.push("email");
+  if (!EMAIL.test(email)) {
+    if (emailRequired) missing.push("email");
+    else email = "";
+  }
   if (missing.length) return { ok: false, problem: "missing", missing };
   return { ok: true, profile: { name, idNumber: id, email } };
 }
@@ -179,11 +184,15 @@ const PART_NAMES: Record<ProfilePart, string> = {
 };
 
 /** What to tell the customer when the data isn't complete or valid. */
-export function profileProblemText(p: Exclude<ProfileParse, { ok: true }>): string {
+export function profileProblemText(p: Exclude<ProfileParse, { ok: true }>, emailRequired = true): string {
   if (p.problem === "id") {
     return `La cédula o RUC *${p.bad}* no es válida 🤔 Revísela por favor y escríbala de nuevo.`;
   }
-  if (p.missing.length === 3) return "No recibí sus datos 🤔 Escríbame su nombre completo, cédula y correo, o toque *Registrar mis datos*.";
+  if (p.missing.length === (emailRequired ? 3 : 2)) {
+    return emailRequired
+      ? "No recibí sus datos 🤔 Escríbame su nombre completo, cédula y correo, o toque *Registrar mis datos*."
+      : "No recibí sus datos 🤔 Escríbame su nombre completo y su cédula (o RUC), por ejemplo: _Juan Pérez 0102030405_";
+  }
   const parts = p.missing.map((m) => PART_NAMES[m]);
   const list = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} y ${parts.at(-1)}` : parts[0];
   return `Gracias 🙂 Me falta ${list}.`;
@@ -198,7 +207,7 @@ export function greetingName(fullName: string): string {
 /** One line for the list step and the clerk's note. */
 export function billingLine(p: CustomerProfile): string {
   if (p.idNumber === FINAL_CONSUMER) return "Consumidor final";
-  return `${p.name} · ${p.idNumber} · ${p.email}`;
+  return [p.name, p.idNumber, p.email].filter(Boolean).join(" · ");
 }
 
 // ---------------------------------------------------------------- db
@@ -254,7 +263,8 @@ export async function saveCustomerProfile(
   if (profile.idNumber !== FINAL_CONSUMER) {
     const { error } = await db
       .from("contacts")
-      .update({ name: profile.name, email: profile.email, updated_at: new Date().toISOString() })
+      // No email given (optional): keep the one already on the contact.
+      .update({ name: profile.name, ...(profile.email ? { email: profile.email } : {}), updated_at: new Date().toISOString() })
       .eq("id", args.contactId)
       .eq("account_id", args.accountId);
     if (error) throw new Error(`contact: ${error.message}`);

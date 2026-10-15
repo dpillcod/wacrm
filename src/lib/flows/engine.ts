@@ -2053,6 +2053,9 @@ export async function receiveCatalogOrder(args: {
 const PROFILE_REQUIRED_TEXT =
   "Para atender sus pedidos necesitamos registrarle *una sola vez* 🙂 Escríbame su nombre completo, cédula y correo, o toque *Registrar mis datos*.";
 
+const PROFILE_REQUIRED_TEXT_NO_EMAIL =
+  "Para atender sus pedidos necesitamos registrarle *una sola vez* 🙂 Escríbame su nombre completo y su cédula (o RUC).";
+
 /** Run vars from a saved profile: greeting name and invoice data. */
 function profileVars(p: CustomerProfile, current: Record<string, unknown>): Record<string, unknown> {
   return {
@@ -3292,14 +3295,15 @@ async function runNodeSideEffects(
       }
     }
     const refused = !fromForm && isRefusal(typed);
-    const parsed = parseCustomerProfile(fromForm ? { fields } : { text: typed }, biz.phoneCountryCode);
+    const emailRequired = !cfg.profile_email_optional;
+    const parsed = parseCustomerProfile(fromForm ? { fields } : { text: typed }, biz.phoneCountryCode, emailRequired);
     let vars: Record<string, unknown>;
     // "Consumidor final" isn't a profile when the node asks for real data.
     const finalNotAllowed = !!cfg.profile_required && parsed.ok && parsed.profile.idNumber === FINAL_CONSUMER;
     if (refused) {
       vars = { ...run.vars, profile_ok: "", profile_refused: "si", profile_problem: "" };
     } else if (finalNotAllowed) {
-      vars = { ...run.vars, profile_ok: "", profile_problem: PROFILE_REQUIRED_TEXT };
+      vars = { ...run.vars, profile_ok: "", profile_problem: emailRequired ? PROFILE_REQUIRED_TEXT : PROFILE_REQUIRED_TEXT_NO_EMAIL };
     } else if (parsed.ok) {
       try {
         await saveCustomerProfile(db, {
@@ -3315,7 +3319,7 @@ async function runNodeSideEffects(
       }
       vars = { ...run.vars, ...profileVars(parsed.profile, run.vars), profile_ok: "si", profile_problem: "" };
     } else {
-      const problem = profileProblemText(parsed);
+      const problem = profileProblemText(parsed, emailRequired);
       // Nothing new for the registration and nothing written down ("voy a
       // pasar viendo", "no gafas"): don't repeat the same reminder.
       const repeated = !noted.length && !corrected.length && problem === run.vars.__profile_last_problem;
