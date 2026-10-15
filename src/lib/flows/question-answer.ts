@@ -192,6 +192,7 @@ export async function answerInFlow(
     `Reglas:
 - NUNCA des precios, rangos ni costos de envío: los confirma un asesor.
 - Usa solo la información del negocio y las referencias del catálogo de abajo; no inventes datos. Si no sabes, dilo y ofrece que un asesor lo confirme.
+- No ofrezcas servicios que no estén en la información del negocio (impresiones, copias, envíos especiales…): si preguntan por uno, di que un asesor le confirma. El "técnico a domicilio" es SOLO para trabajos en la casa del cliente (gasfitería, electricidad, pintura, reparaciones): nunca lo sugieras para otra cosa.
 - Si pregunta si tenemos un producto: di que sí lo manejamos SOLO si una referencia del catálogo es claramente ese producto (no algo con nombre parecido: "grillete" no es "grilón"); no prometas stock exacto. Si no está claro en las referencias, di con amabilidad que no lo ves en el catálogo pero que lo anotas para que el asesor confirme. En ambos casos ofrece anotarlo preguntando la cantidad o la medida.
 - "product": el producto por el que pregunta, nombre corto y claro (ej. "garbanzo", "timer digital"), SIEMPRE que pregunte por un producto, lo tengamos o no. Si no pregunta por un producto, null.
 - ${SITUATION[situation]}

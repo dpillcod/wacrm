@@ -88,6 +88,8 @@ export interface BusinessSettings {
     audioDailyLimit: number
     /** Answer questions asked in the middle of an order instead of writing them down. */
     answerQuestions: boolean
+    /** Review each conversation with AI once the customer stops writing; admins hear about problems. */
+    reviewConversations: boolean
   }
   /** Bakery orders (cakes, party snacks, bread). */
   bakery: {
@@ -216,7 +218,7 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
   shopFeedUrl: '',
   whatsappNumber: '',
   newConversationAlert: 'off',
-  aiFeatures: { readImages: true, transcribeAudio: true, entryRouter: true, audioDailyLimit: 200, answerQuestions: true },
+  aiFeatures: { readImages: true, transcribeAudio: true, entryRouter: true, audioDailyLimit: 200, answerQuestions: true, reviewConversations: false },
   bakery: { entryNode: '' },
   texts: {
     idleNudge: '¿Sigue ahí? Si tiene alguna duda, dígame y seguimos con su pedido 🙂',

@@ -74,11 +74,12 @@ const TEXT_KEYS: (keyof Texts)[] = [
   "cartView",
   "cartEmpty",
 ];
-const AI_FEATURE_KEYS: ("readImages" | "transcribeAudio" | "entryRouter" | "answerQuestions")[] = [
+const AI_FEATURE_KEYS: ("readImages" | "transcribeAudio" | "entryRouter" | "answerQuestions" | "reviewConversations")[] = [
   "answerQuestions",
   "readImages",
   "transcribeAudio",
   "entryRouter",
+  "reviewConversations",
 ];
 const MESSAGE_KEYS: (keyof Board["messages"])[] = ["paid", "ready", "delivered", "cancelled"];
 type ServiceBoard = BusinessSettings["serviceBoard"];

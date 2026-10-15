@@ -1851,6 +1851,8 @@
         "desc": "Uses the account's AI key. Prices are never given.",
         "answerQuestions": "Answer questions during an order",
         "answerQuestionsHint": "\"Do you have Grilon?\" or \"Do you deliver?\" is answered (and the product offered), never written down as a product.",
+        "reviewConversations": "Review each conversation",
+        "reviewConversationsHint": "When the customer stops writing (30 min), the AI reviews the conversation and tells the admins if something went wrong: unanswered questions, lost products, confused customers. Costs very little (budget model).",
         "readImages": "Read photos",
         "readImagesHint": "A photo of a written list, or of a product, becomes lines of the order.",
         "transcribeAudio": "Understand voice notes",

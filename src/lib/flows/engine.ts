@@ -2379,7 +2379,8 @@ export type TroubleReason =
   | "registration_stuck"
   | "frustrated"
   | "invalid_options"
-  | "human_request";
+  | "human_request"
+  | "photo_question";
 
 const TROUBLE_TEXT: Record<TroubleReason, string> = {
   edit_failed: "el bot no logra corregir la lista del cliente",
@@ -2388,6 +2389,7 @@ const TROUBLE_TEXT: Record<TroubleReason, string> = {
   frustrated: "el cliente parece molesto con el bot",
   invalid_options: "el cliente no logra elegir una opción del menú",
   human_request: "el cliente pide hablar con una persona",
+  photo_question: "el cliente mandó una foto que el bot no puede responder",
 };
 
 /**
@@ -4709,8 +4711,21 @@ async function handleReplyForActiveRun(
       );
       return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
     }
-    if (!reading || reading.kind === "other") {
-      await sendEngineText(db, run, currentNode.node_key, bizForRules.texts.photoNotUnderstood, "photo_not_understood");
+    // "¿Tienen este tipo de papel?" with a photo, or a photo the bot
+    // can't make out: a person looks at it (the bot can't tell products
+    // apart by their picture).
+    const asks = !!message.caption && looksLikeQuestion(message.caption);
+    if (!reading || reading.kind === "other" || asks) {
+      await sendEngineText(
+        db,
+        run,
+        currentNode.node_key,
+        asks
+          ? "📷 ¡Gracias por la foto! Se la paso a una persona de nuestro equipo para que le confirme; le escribirá por aquí en breve 🙂"
+          : bizForRules.texts.photoNotUnderstood,
+        asks ? "photo_question" : "photo_not_understood",
+      );
+      await alertTeamOfTrouble(db, run, "photo_question", `📷 ${message.caption ?? "(foto sin texto)"}`);
       return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
     }
     const lines = reading.lines;
