@@ -56,8 +56,10 @@ const REVIEW_TASK = `Tarea: revisa las líneas del pedido. Si una línea es vaga
 Nombra siempre el producto en la pregunta (ej. "¿La Coca-Cola la desea de 1, 2 o 3 litros?").
 Si hay una sola línea vaga, haz una sola pregunta corta. Si hay varias, empieza con "Para anotar bien su pedido:" y pon una línea por producto con viñeta "•" (ej. "• Foco: ¿LED o ahorrador? ¿De cuántos watts?"), máximo 3 productos.
 
+Si una línea NO es un producto (un comentario como "voy a pasar por la tienda", una aclaración como "no, gafas no", un saludo, una pregunta, un nombre de persona o un número de cédula), ponla como "" en su posición: no se anota.
+
 Formato: {"lines": ["línea 1", "línea 2"], "question": "pregunta" o null}
-"lines" debe tener una entrada por cada línea recibida, en el mismo orden.`;
+"lines" debe tener una entrada por cada línea recibida, en el mismo orden ("" para las que no son productos).`;
 
 const APPLY_TASK = `Tarea: al cliente se le hizo una pregunta sobre su pedido y respondió. Reescribe las líneas incorporando lo que respondió. Si la respuesta no aclara algo, deja esa línea como estaba. Si en la respuesta pide productos nuevos, agrégalos como líneas nuevas al final. No hagas más preguntas.
 
@@ -128,9 +130,12 @@ function cleanLines(value: unknown): string[] | null {
  */
 export function parseReviewResponse(raw: string, inputCount: number): ReviewResult | null {
   const json = extractJson(raw);
-  if (!json) return null;
-  const lines = cleanLines(json.lines);
-  if (!lines || lines.length !== inputCount) return null;
+  if (!json || !Array.isArray(json.lines)) return null;
+  // One entry per input line; "" marks a line that isn't a product
+  // (a comment, a clarification) — dropped, not lost by accident.
+  const positioned = (json.lines as unknown[]).map((l) => (typeof l === "string" ? l.replace(/\s+/g, " ").trim() : null));
+  if (positioned.length !== inputCount || positioned.some((l) => l === null)) return null;
+  const lines = positioned.filter((l): l is string => !!l);
   const question =
     typeof json.question === "string" && json.question.trim() ? json.question.trim() : null;
   return { lines, question };

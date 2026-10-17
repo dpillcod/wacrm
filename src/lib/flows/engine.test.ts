@@ -22,6 +22,7 @@ import {
   textFallbackOf,
   isBotAddressableNonText,
   isCallRequest,
+  hasProfileData,
   quantityCorrection,
   withQuantity,
   isFrustrated,
@@ -662,5 +663,15 @@ describe("quantity corrections", () => {
     expect(withQuantity("6 paquetes tortillas", "5")).toBe("5 paquetes tortillas");
     expect(withQuantity("leche entera", "2")).toBe("2 leche entera");
     expect(withQuantity("2 libras de arroz", "3 kilos")).toBe("3 kilos de arroz");
+  });
+});
+
+describe("registration data while ordering", () => {
+  it("recognises an ID number or an email, not a phone or a quantity", () => {
+    expect(hasProfileData("Pamela Gárate 0106507981", "593")).toBe(true);
+    expect(hasProfileData("pamela@gmail.com", "593")).toBe(true);
+    expect(hasProfileData("0987143251", "593")).toBe(false);
+    expect(hasProfileData("2 fundas de leche", "593")).toBe(false);
+    expect(hasProfileData("-2.907023191452,-79.042709350586", "593")).toBe(false);
   });
 });

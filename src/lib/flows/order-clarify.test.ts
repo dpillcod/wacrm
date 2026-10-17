@@ -91,3 +91,13 @@ describe("parseDuplicatesResponse", () => {
     expect(parseDuplicatesResponse('{"question": null}')).toBeNull();
   });
 });
+
+describe("lines that aren't products", () => {
+  it("drops the ones marked empty, keeps the rest", () => {
+    expect(parseReviewResponse('{"lines":["2 panes",""],"question":null}', 2)).toEqual({ lines: ["2 panes"], question: null });
+    expect(parseReviewResponse('{"lines":[""],"question":null}', 1)).toEqual({ lines: [], question: null });
+  });
+  it("still rejects a response that loses positions", () => {
+    expect(parseReviewResponse('{"lines":["2 panes"],"question":null}', 2)).toBeNull();
+  });
+});

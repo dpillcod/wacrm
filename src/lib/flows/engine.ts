@@ -91,6 +91,7 @@ import {
   looksLikePersonName,
   parseCustomerProfile,
   pickName,
+  validIdNumber,
   withoutCoordinates,
   profileProblemText,
   saveCustomerProfile,
@@ -2490,6 +2491,82 @@ async function alertNewConversation(db: AdminClient, input: DispatchInboundInput
   }
 }
 
+/** A valid ID number (cédula / RUC) or an email in the text. */
+export function hasProfileData(text: string, countryCode: string): boolean {
+  if (/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(text)) return true;
+  return (withoutCoordinates(text).match(/\d[\d .-]{8,20}\d/g) ?? []).some((m) =>
+    validIdNumber(m.replace(/[\s.-]/g, ""), countryCode),
+  );
+}
+
+/**
+ * The customer sent their ID number (or email) while writing the list:
+ * add it to the registration answer (the flow's save_customer_profile
+ * var) — taking back a name written just before, which went to the list —
+ * and save the profile once it's complete. Returns the reply to send, or
+ * null when the message isn't registration data.
+ */
+async function takeEarlyProfile(
+  db: AdminClient,
+  run: FlowRunRow,
+  nodes: Map<string, FlowNodeRow>,
+  listVar: string,
+  text: string,
+): Promise<string | null> {
+  const profileNode = [...nodes.values()].find((n) => (n.config as NodeSideEffectsConfig).save_customer_profile);
+  const cfg = profileNode?.config as NodeSideEffectsConfig | undefined;
+  const key = cfg?.save_customer_profile;
+  if (!key || key === listVar || !run.contact_id) return null;
+  // Already registered and sends only an email: it goes on their record.
+  const email = text.trim().match(/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/)?.[0];
+  if (run.vars.customer_registered) {
+    if (!email) return null;
+    await db.from("contacts").update({ email: email.toLowerCase(), updated_at: new Date().toISOString() }).eq("id", run.contact_id);
+    return "✅ Guardé su correo para la factura 🙂\n\n¿Algo más para su lista? Escríbalo, o toque *Ya terminé*.";
+  }
+  const biz = await bizOf(db, run.account_id);
+  if (!hasProfileData(text, biz.phoneCountryCode)) return null;
+
+  const vars: Record<string, unknown> = { ...run.vars };
+  let typed = text.trim();
+  // "Pamela Gárate" ⏎ "0106507981" in two messages: the name went to the list.
+  const list = typeof vars[listVar] === "string" ? (vars[listVar] as string).split("\n").filter((l) => l.trim()) : [];
+  if (!pickName(typed.split("\n")) && list.length && looksLikePersonName(list[list.length - 1])) {
+    typed = `${list.pop()}\n${typed}`;
+    const joined = list.join("\n");
+    vars[listVar] = joined;
+    vars[`${listVar}_numbered`] = numberLines(joined);
+  }
+  const draft = [typeof vars[key] === "string" ? (vars[key] as string) : "", typed].filter(Boolean).join("\n");
+  const emailRequired = !cfg?.profile_email_optional;
+  const parsed = parseCustomerProfile({ text: draft }, biz.phoneCountryCode, emailRequired);
+  let reply: string;
+  if (parsed.ok && parsed.profile.idNumber !== FINAL_CONSUMER) {
+    try {
+      await saveCustomerProfile(db, {
+        accountId: run.account_id,
+        userId: run.user_id,
+        contactId: run.contact_id,
+        idFieldName: biz.idNumberFieldName,
+        profile: parsed.profile,
+      });
+    } catch (err) {
+      console.error("[flows] saving the customer profile failed:", err);
+    }
+    Object.assign(vars, profileVars(parsed.profile, vars));
+    delete vars[key];
+    reply = `✅ Gracias ${greetingName(parsed.profile.name)}, guardé sus datos para la factura 🙂\n\n¿Algo más para su lista? Escríbalo, o toque *Ya terminé*.`;
+  } else {
+    vars[key] = draft;
+    reply = !parsed.ok && parsed.problem === "id"
+      ? profileProblemText(parsed, emailRequired)
+      : "Gracias 🙂 Guardé ese dato para su factura; al final le pido lo que falte. ¿Algo más para su lista?";
+  }
+  await saveVars(db, run, vars);
+  await logEvent(db, run.id, "node_entered", run.current_node_key, { reason: "profile_while_ordering", saved: parsed.ok });
+  return reply;
+}
+
 /** Where products typed during registration are written down (the order flow's list). */
 const PROFILE_ORDER_VAR = "order_text";
 
@@ -2931,6 +3008,18 @@ async function clarifyCapturedBatch(
   }
   const review = await reviewOrderLines(db, run.account_id, run.conversation_id, lines as string[]);
   if (!review) return false;
+  // Nothing in the batch was a product ("voy a pasar viendo", "no gafas"):
+  // take it out of the list and keep listening, without an "Anotado".
+  if (review.lines.length === 0) {
+    const cleared = withReplacedLines(run.vars, cfg.var_key, lines.length, []);
+    delete cleared.__capture_batch_var;
+    delete cleared.__capture_batch_lines;
+    const { error } = await db.from("flow_runs").update({ vars: cleared }).eq("id", run.id);
+    if (error) return false;
+    run.vars = cleared;
+    await sendEngineText(db, run, node.node_key, (await bizOf(db, run.account_id)).texts.orderAck, "not_an_order_line");
+    return true;
+  }
 
   let vars = withReplacedLines(run.vars, cfg.var_key, lines.length, review.lines);
   if (review.question) {
@@ -4805,6 +4894,14 @@ async function handleReplyForActiveRun(
         `📝 *Su lista hasta ahora:*\n\n${numbered}\n\nSi quiere agregar algo, escríbamelo; si ya está, escriba *listo* 🙂`,
         "list_read_back",
       );
+      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
+    // Registration data sent while the list is being written (the
+    // registration step only comes at the end): kept for the invoice,
+    // never written down as a product.
+    const early = await takeEarlyProfile(db, run, nodes, listVar, message.text);
+    if (early) {
+      await sendEngineText(db, run, currentNode.node_key, early, "profile_while_ordering");
       return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
     }
     // "Solo 5, perdón": fix the quantity of the last line instead of
