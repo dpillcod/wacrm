@@ -22,6 +22,12 @@ import {
   textFallbackOf,
   isBotAddressableNonText,
   isCallRequest,
+  isCorrectionRequest,
+  isFormalQuoteRequest,
+  isQuestionOpener,
+  isShowMeRequest,
+  isVendorPitch,
+  splitProfileText,
   hasProfileData,
   quantityCorrection,
   withQuantity,
@@ -673,5 +679,40 @@ describe("registration data while ordering", () => {
     expect(hasProfileData("0987143251", "593")).toBe(false);
     expect(hasProfileData("2 fundas de leche", "593")).toBe(false);
     expect(hasProfileData("-2.907023191452,-79.042709350586", "593")).toBe(false);
+  });
+});
+
+describe("real conversations 2026-10-15/18", () => {
+  it("'una consulta' opens a question", () => {
+    expect(isQuestionOpener("Una consulta")).toBe(true);
+    expect(isQuestionOpener("buenas tardes tengo una pregunta")).toBe(true);
+    expect(isQuestionOpener("una consulta de tubos de 2 pulgadas")).toBe(false);
+  });
+  it("a formal quote goes to a person", () => {
+    expect(isFormalQuoteRequest("Una cotización formal por favor")).toBe(true);
+    expect(isFormalQuoteRequest("me envía una proforma")).toBe(true);
+    expect(isFormalQuoteRequest("2 tubos")).toBe(false);
+  });
+  it("suppliers and sponsorships aren't orders", () => {
+    expect(isVendorPitch("Buenas tardes, saludos de MAQAMERICAS, Cuenca. Les compartimos nuestros equipos en venta")).toBe(true);
+    expect(isVendorPitch("Buenas noches, les escribo con una propuesta de auspicio para una campaña estudiantil")).toBe(true);
+    expect(isVendorPitch("quiero 2 libras de arroz y un aceite")).toBe(false);
+  });
+  it("'muéstreme' shows the catalog", () => {
+    expect(isShowMeRequest("Me muesta porfavor")).toBe(true);
+    expect(isShowMeRequest("Muetreme los q tiene")).toBe(true);
+    expect(isShowMeRequest("2 carritos")).toBe(false);
+  });
+  it("'corregir' typed goes to the correction step", () => {
+    expect(isCorrectionRequest("✏️ Corregir")).toBe(true);
+    expect(isCorrectionRequest("corregir")).toBe(true);
+    expect(isCorrectionRequest("corregir el 2 son 3 panes")).toBe(false);
+  });
+  it("splits products from the name and ID number", () => {
+    expect(splitProfileText("Buenas noches lo que le pedí el tubo y codo de 2 pulgadas Mi nombre es Gustavo Larriva Ci 1703750537", "593")).toEqual({
+      rest: "Buenas noches lo que le pedí el tubo y codo de 2 pulgadas",
+      profile: "Mi nombre es Gustavo Larriva Ci 1703750537",
+    });
+    expect(splitProfileText("2 panes\nPamela Gárate\n0106507981", "593")).toEqual({ rest: "2 panes", profile: "Pamela Gárate\n0106507981" });
   });
 });

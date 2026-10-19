@@ -56,7 +56,7 @@ const REVIEW_TASK = `Tarea: revisa las líneas del pedido. Si una línea es vaga
 Nombra siempre el producto en la pregunta (ej. "¿La Coca-Cola la desea de 1, 2 o 3 litros?").
 Si hay una sola línea vaga, haz una sola pregunta corta. Si hay varias, empieza con "Para anotar bien su pedido:" y pon una línea por producto con viñeta "•" (ej. "• Foco: ¿LED o ahorrador? ¿De cuántos watts?"), máximo 3 productos.
 
-Si una línea NO es un producto (un comentario como "voy a pasar por la tienda", una aclaración como "no, gafas no", un saludo, una pregunta, un nombre de persona o un número de cédula), ponla como "" en su posición: no se anota.
+Si una línea NO es un producto (un comentario como "voy a pasar por la tienda", una aclaración como "no, gafas no", un saludo, una pregunta, un nombre de persona, un número de cédula, un correo o una dirección como "Bartolomé Serrano 161 y Simón Bolívar"), ponla como "" en su posición: no se anota.
 
 Formato: {"lines": ["línea 1", "línea 2"], "question": "pregunta" o null}
 "lines" debe tener una entrada por cada línea recibida, en el mismo orden ("" para las que no son productos).`;

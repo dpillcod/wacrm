@@ -71,7 +71,7 @@ const NOT_ID = /-?\d{1,3}\.\d{3,}\s*,\s*-?\d{1,3}\.\d{3,}|https?:\/\/\S+/g;
 export function withoutCoordinates(text: string): string {
   return text.replace(NOT_ID, " ");
 }
-const LABELS = /(^|\s)(nombres?|apellidos?|c[eé]dula|ruc|correo|email|mail|completo)\s*:?/giu;
+const LABELS = /(^|\s)(mi nombre es|me llamo|soy|nombres?|apellidos?|c[eé]dula|ruc|correo|email|mail|completo|c\.?\s?i\.?|n[uú]mero de c[eé]dula)\s*:?(?=\s|$)/giu;
 
 function tidyName(raw: string): string {
   return raw
@@ -160,7 +160,14 @@ export function parseCustomerProfile(
     // a correction: the last email, the last ID number and the last line
     // that holds a full name win.
     email = text.match(EMAIL_ALL)?.at(-1) ?? "";
-    id = withoutCoordinates(text.replace(EMAIL_ALL, " ")).match(ID_ALL)?.at(-1)?.replace(/[\s.-]/g, "") ?? "";
+    // The last VALID ID number wins: "Ricardo Castrillon 0107281727
+    // 0987834585" also carries a phone number, which isn't an ID.
+    // ("0107281727 0987834585" matches as one run: try each number alone too.)
+    const ids = (withoutCoordinates(text.replace(EMAIL_ALL, " ")).match(ID_ALL) ?? [])
+      .flatMap((m) => [m, ...m.split(/\s+/)])
+      .map((m) => m.replace(/[\s.-]/g, ""))
+      .filter((m) => m.length >= 5);
+    id = [...ids].reverse().find((x) => validIdNumber(x, countryCode)) ?? ids.at(-1) ?? "";
     name = pickName(text.split("\n"));
   }
   name = tidyName(name);

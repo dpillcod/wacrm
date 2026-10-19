@@ -297,6 +297,9 @@ const ACK_ONLY = new Set([
   "si", "sii", "sip", "ok", "oki", "okey", "okay", "vale", "bueno", "bien", "perfecto", "dale",
   "claro", "gracias", "muchas gracias", "ok gracias", "si gracias", "listo gracias", "de acuerdo",
   "entendido", "ya", "aja", "mmm", "listo", "ya termine", "eso", "👍",
+  // A nudge's "▶️ Continuar" typed out, or "sigamos".
+  "continuar", "continuemos", "seguir", "sigamos", "siga", "sigo",
+  "si por favor", "si porfa", "si porfavor", "ok por favor", "claro que si", "si claro", "esta bien", "ok esta bien",
 ]);
 
 /** A bare acknowledgement ("sí", "ok", "gracias") — never an order line. */
@@ -310,7 +313,8 @@ export function isHumanRequest(text: string): boolean {
   const said = normalizeForMatch(text);
   return said.length <= 80 && (
     /\b(hablar|comunicar(me)?|atender?me|contactar|pasar(me)?)\b.*\b(asesor|asesora|persona|alguien|humano|agente|vendedor|vendedora|encargad[oa]|operador[a]?)\b/.test(said) ||
-    /\b(un|una) (asesor|asesora|persona|humano|agente)\b/.test(said) && said.split(" ").length <= 6
+    /\b(un|una) (asesor|asesora|persona|humano|agente)\b/.test(said) && said.split(" ").length <= 6 ||
+    /^(asesor|asesora|persona|humano|agente)$/.test(said)
   );
 }
 
@@ -348,11 +352,44 @@ export function withQuantity(line: string, quantity: string): string {
   return line.replace(/^\d+(?:[.,]\d+)?\s+\S+/, quantity);
 }
 
+/** "Una consulta", "tengo una pregunta": the question comes next — not a product. */
+export function isQuestionOpener(text: string): boolean {
+  return /^((hola|buenas|buenos dias|buenas tardes|buenas noches|disculpe)\s+)*((tengo|le hago|le tengo|hago)\s+)?(una|1)?\s*(consulta|pregunta|duda|inquietud)(\s+(por favor|porfa|rapida|rapidita))?$/.test(
+    normalizeForMatch(text),
+  );
+}
+
+/** "Una cotización formal", "una proforma": a person prepares it. */
+export function isFormalQuoteRequest(text: string): boolean {
+  return /\b(cotizacion formal|cotizacion por escrito|cotizacion en pdf|cotizacion membretada|proforma|pro forma)\b/.test(
+    normalizeForMatch(text),
+  );
+}
+
+/** A supplier, a salesperson or a sponsorship request — not a customer ordering. */
+export function isVendorPitch(text: string): boolean {
+  const t = normalizeForMatch(text);
+  return t.split(" ").length >= 6 &&
+    /\b(les compartimos|les ofrecemos|ofrecemos nuestros|ofrecerles|nuestros (equipos|productos|servicios) en venta|equipos en venta|propuesta (comercial|de auspicio|de patrocinio)|auspicio|patrocinio|somos (una )?(empresa|distribuidora|importadora)|soy (asesor|ejecutivo|ejecutiva|representante) (comercial|de ventas)|quisiera ofrecerles|quiero ofrecerles)\b/.test(t);
+}
+
+/** "Muéstreme los que tiene", "¿qué modelos hay?" without a question mark: show the catalog. */
+export function isShowMeRequest(text: string): boolean {
+  const t = normalizeForMatch(text);
+  return t.length <= 80 &&
+    /\b(muestreme|muestrame|muestre|muestreme|me muestra|me muesta|muetreme|mandeme fotos|envieme fotos|mande fotos|fotos de los|los que tiene|los q tiene|que opciones tiene|que modelos tiene|ver el catalogo|ver catalogo|ver los productos)\b/.test(t);
+}
+
+/** "Corregir", "✏️ Corregir" typed (or a stale button) while writing the list. */
+export function isCorrectionRequest(text: string): boolean {
+  return /^(quiero |deseo )?(corregir|corregir la lista|corregir lista|cambiar algo|editar|editar la lista)$/.test(normalizeForMatch(text));
+}
+
 /** "Quiero 2 sacos de cemento" → "2 sacos de cemento" (the words before the product). */
 export function stripOrderLeadIn(line: string): string {
   const stripped = line
     .replace(
-      /^((hola|buenas|buenos d[ií]as|por favor|porfa|disculpe|quiero|quisiera|necesito|d[eé]me|me da|me das|me puede dar|me pueden dar|me regala|me vende|me manda|me env[ií]a|env[ií]eme|m[aá]ndeme|adem[aá]s|tambi[eé]n|y tambi[eé]n)[\s,:]+)+/i,
+      /^((hola|buenas|buenos d[ií]as|por favor|porfa|disculpe|quiero|quisiera|quer[ií]a|deseo|deseaba|desear[ií]a|busco|buscaba|necesito|necesitaba|ocupo|me ayuda con|me ayudan con|me puede ayudar con|d[eé]me|me da|me das|me puede dar|me pueden dar|me regala|me vende|me manda|me env[ií]a|env[ií]eme|m[aá]ndeme|adem[aá]s|tambi[eé]n|y tambi[eé]n)[\s,:]+)+/i,
       "",
     )
     .trim();
@@ -1706,12 +1743,20 @@ async function startOrderFromFirstMessage(
   }
   if (route?.intent !== "order") return null;
   const nodes = await loadAllNodes(db, defaultFlow.id);
-  return startNewRun(
+  const started = await startNewRun(
     db,
     defaultFlow,
     { ...input, message: linesAsOrder(route.lines, input.message.meta_message_id) },
     nodes,
   );
+  // "…el tubo y codo de 2 pulgadas. Mi nombre es Gustavo Larriva, CI …":
+  // the products started the order; the name and ID number are kept too.
+  if (started.flow_run_id && hasProfileData(input.message.text, (await bizOf(db, input.accountId)).phoneCountryCode)) {
+    const run = await loadRun(db, started.flow_run_id);
+    const early = run ? await takeEarlyProfile(db, run, nodes, undefined, input.message) : null;
+    if (run && early) await sendEngineText(db, run, run.current_node_key, early.reply, "profile_outside_registration");
+  }
+  return started;
 }
 
 /**
@@ -2381,7 +2426,8 @@ export type TroubleReason =
   | "frustrated"
   | "invalid_options"
   | "human_request"
-  | "photo_question";
+  | "photo_question"
+  | "formal_quote";
 
 const TROUBLE_TEXT: Record<TroubleReason, string> = {
   edit_failed: "el bot no logra corregir la lista del cliente",
@@ -2391,6 +2437,7 @@ const TROUBLE_TEXT: Record<TroubleReason, string> = {
   invalid_options: "el cliente no logra elegir una opción del menú",
   human_request: "el cliente pide hablar con una persona",
   photo_question: "el cliente mandó una foto que el bot no puede responder",
+  formal_quote: "el cliente pide una cotización formal",
 };
 
 /**
@@ -2499,47 +2546,95 @@ export function hasProfileData(text: string, countryCode: string): boolean {
   );
 }
 
+const PROFILE_MARKER = /(mi nombre es|me llamo|nombre\s*:|c\.?\s?i\.?\s*:?\s*\d|c[eé]dula|\bruc\b|correo\s*:?)/i;
+
 /**
- * The customer sent their ID number (or email) while writing the list:
- * add it to the registration answer (the flow's save_customer_profile
- * var) — taking back a name written just before, which went to the list —
- * and save the profile once it's complete. Returns the reply to send, or
- * null when the message isn't registration data.
+ * Split the registration data out of a message: "el tubo y codo de 2
+ * pulgadas Mi nombre es Gustavo Larriva Ci 1703750537" → products "el tubo
+ * y codo de 2 pulgadas", profile "Mi nombre es Gustavo Larriva Ci …". A
+ * name written on its own line next to the ID number goes with it.
+ */
+export function splitProfileText(text: string, countryCode: string): { profile: string; rest: string } {
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  const isProfile = lines.map((l) => hasProfileData(l, countryCode));
+  const profile: string[] = [];
+  const rest: string[] = [];
+  lines.forEach((line, i) => {
+    if (isProfile[i]) {
+      const m = line.match(PROFILE_MARKER);
+      if (m?.index && m.index > 0 && hasProfileData(line.slice(m.index), countryCode)) {
+        rest.push(line.slice(0, m.index).trim());
+        profile.push(line.slice(m.index));
+      } else {
+        profile.push(line);
+      }
+    } else if (looksLikePersonName(line) && (isProfile[i - 1] || isProfile[i + 1])) {
+      profile.push(line);
+    } else {
+      rest.push(line);
+    }
+  });
+  return { profile: profile.join("\n"), rest: rest.filter(Boolean).join("\n") };
+}
+
+/**
+ * Registration data sent outside the registration step (while writing the
+ * list, with the products, at the confirmation, or with the form): added
+ * to the registration answer (the flow's save_customer_profile var) — a
+ * name written in the message before, which went to the list, is taken
+ * back — and the profile is saved once complete. Returns the reply and
+ * what's left of the message (the products), or null when the message
+ * carries no registration data.
  */
 async function takeEarlyProfile(
   db: AdminClient,
   run: FlowRunRow,
   nodes: Map<string, FlowNodeRow>,
-  listVar: string,
-  text: string,
-): Promise<string | null> {
+  currentVar: string | undefined,
+  message: ParsedInbound,
+): Promise<{ reply: string; rest: string } | null> {
   const profileNode = [...nodes.values()].find((n) => (n.config as NodeSideEffectsConfig).save_customer_profile);
   const cfg = profileNode?.config as NodeSideEffectsConfig | undefined;
   const key = cfg?.save_customer_profile;
-  if (!key || key === listVar || !run.contact_id) return null;
-  // Already registered and sends only an email: it goes on their record.
-  const email = text.trim().match(/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/)?.[0];
-  if (run.vars.customer_registered) {
-    if (!email) return null;
-    await db.from("contacts").update({ email: email.toLowerCase(), updated_at: new Date().toISOString() }).eq("id", run.contact_id);
-    return "✅ Guardé su correo para la factura 🙂\n\n¿Algo más para su lista? Escríbalo, o toque *Ya terminé*.";
-  }
+  if (!key || key === currentVar || !run.contact_id) return null;
   const biz = await bizOf(db, run.account_id);
-  if (!hasProfileData(text, biz.phoneCountryCode)) return null;
-
-  const vars: Record<string, unknown> = { ...run.vars };
-  let typed = text.trim();
-  // "Pamela Gárate" ⏎ "0106507981" in two messages: the name went to the list.
-  const list = typeof vars[listVar] === "string" ? (vars[listVar] as string).split("\n").filter((l) => l.trim()) : [];
-  if (!pickName(typed.split("\n")) && list.length && looksLikePersonName(list[list.length - 1])) {
-    typed = `${list.pop()}\n${typed}`;
-    const joined = list.join("\n");
-    vars[listVar] = joined;
-    vars[`${listVar}_numbered`] = numberLines(joined);
-  }
-  const draft = [typeof vars[key] === "string" ? (vars[key] as string) : "", typed].filter(Boolean).join("\n");
   const emailRequired = !cfg?.profile_email_optional;
-  const parsed = parseCustomerProfile({ text: draft }, biz.phoneCountryCode, emailRequired);
+  const listVar = PROFILE_ORDER_VAR;
+  const vars: Record<string, unknown> = { ...run.vars };
+
+  let parsed: ReturnType<typeof parseCustomerProfile>;
+  let rest = "";
+  let draft = "";
+  if (message.kind === "form_reply") {
+    // The registration form, answered at any point.
+    if (!["nombre", "cedula", "correo"].some((k) => k in message.data)) return null;
+    parsed = parseCustomerProfile({ fields: message.data }, biz.phoneCountryCode, emailRequired);
+  } else if (message.kind === "text") {
+    // Already registered and sends only an email: it goes on their record.
+    const email = message.text.trim().match(/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/)?.[0];
+    if (run.vars.customer_registered) {
+      if (!email) return null;
+      await db.from("contacts").update({ email: email.toLowerCase(), updated_at: new Date().toISOString() }).eq("id", run.contact_id);
+      return { reply: "✅ Guardé su correo para la factura 🙂", rest: "" };
+    }
+    if (!hasProfileData(message.text, biz.phoneCountryCode)) return null;
+    const split = splitProfileText(message.text, biz.phoneCountryCode);
+    rest = split.rest;
+    let typed = split.profile;
+    // "Pamela Gárate" ⏎ "0106507981" in two messages: the name went to the list.
+    const list = typeof vars[listVar] === "string" ? (vars[listVar] as string).split("\n").filter((l) => l.trim()) : [];
+    if (!pickName(typed.split("\n")) && list.length && looksLikePersonName(list[list.length - 1])) {
+      typed = `${list.pop()}\n${typed}`;
+      const joined = list.join("\n");
+      vars[listVar] = joined;
+      vars[`${listVar}_numbered`] = numberLines(joined);
+    }
+    draft = [typeof vars[key] === "string" ? (vars[key] as string) : "", typed].filter(Boolean).join("\n");
+    parsed = parseCustomerProfile({ text: draft }, biz.phoneCountryCode, emailRequired);
+  } else {
+    return null;
+  }
+
   let reply: string;
   if (parsed.ok && parsed.profile.idNumber !== FINAL_CONSUMER) {
     try {
@@ -2555,16 +2650,16 @@ async function takeEarlyProfile(
     }
     Object.assign(vars, profileVars(parsed.profile, vars));
     delete vars[key];
-    reply = `✅ Gracias ${greetingName(parsed.profile.name)}, guardé sus datos para la factura 🙂\n\n¿Algo más para su lista? Escríbalo, o toque *Ya terminé*.`;
+    reply = `✅ Gracias ${greetingName(parsed.profile.name)}, guardé sus datos para la factura 🙂`;
   } else {
     vars[key] = draft;
     reply = !parsed.ok && parsed.problem === "id"
       ? profileProblemText(parsed, emailRequired)
-      : "Gracias 🙂 Guardé ese dato para su factura; al final le pido lo que falte. ¿Algo más para su lista?";
+      : "Gracias 🙂 Guardé ese dato para su factura; al final le pido lo que falte.";
   }
   await saveVars(db, run, vars);
-  await logEvent(db, run.id, "node_entered", run.current_node_key, { reason: "profile_while_ordering", saved: parsed.ok });
-  return reply;
+  await logEvent(db, run.id, "node_entered", run.current_node_key, { reason: "profile_outside_registration", saved: parsed.ok });
+  return { reply, rest };
 }
 
 /** Where products typed during registration are written down (the order flow's list). */
@@ -2757,6 +2852,12 @@ async function dispatchInboundToFlowsInner(
     // order, as a catalog cart would — only while the bot owns the chat.
     if (input.message.kind === "image") {
       const biz = await bizOf(db, input.accountId);
+      const caption = input.message.caption;
+      // A supplier's offer sent as a picture with text, as the first message.
+      if (caption && isVendorPitch(caption) && (await botOwnsConversation(db, input.conversationId))) {
+        await engineSendText({ accountId: input.accountId, userId: input.userId, conversationId: input.conversationId, contactId: input.contactId, text: biz.texts.vendorReply });
+        return { consumed: true, outcome: "no_match" };
+      }
       if (biz.aiFeatures.readImages && (await botOwnsConversation(db, input.conversationId))) {
         const defaultFlow = await findDefaultEntryFlow(db, input.accountId);
         if (defaultFlow?.entry_node_id) {
@@ -2771,7 +2872,7 @@ async function dispatchInboundToFlowsInner(
             await acknowledgeReceipt(db, input, reading, null);
             return { consumed: true, outcome: "no_match" };
           }
-          if (reading && reading.kind !== "other") {
+          if (reading && reading.kind !== "other" && !(caption && looksLikeQuestion(caption))) {
             const nodes = await loadAllNodes(db, defaultFlow.id);
             return startNewRun(
               db,
@@ -2780,6 +2881,23 @@ async function dispatchInboundToFlowsInner(
               nodes,
             );
           }
+          // A photo the bot can't answer ("¿tienen este tipo de papel?", or
+          // no products in it): a person looks at it — not silence.
+          await engineSendText({
+            accountId: input.accountId,
+            userId: input.userId,
+            conversationId: input.conversationId,
+            contactId: input.contactId,
+            text: "📷 ¡Gracias por la foto! Se la paso a una persona de nuestro equipo para que le ayude; le escribirá por aquí en breve 🙂",
+          });
+          await notifyAccountInApp(db, {
+            accountId: input.accountId,
+            conversationId: input.conversationId,
+            contactId: input.contactId,
+            title: "📷 Foto de un cliente para revisar",
+            body: caption ? `"${caption.slice(0, 200)}"` : "El cliente envió una foto sin texto.",
+          });
+          return { consumed: true, outcome: "no_match" };
         }
       }
       return { consumed: false, outcome: "no_match" };
@@ -3998,6 +4116,23 @@ async function replyAfterHandoff(
     await sendEngineText(db, run, null, texts.thanksReply, "thanks_reply");
     return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
   }
+  // "El pollo tiene que ser descongelado": an indication for the order
+  // just sent. The advisor gets it (CRM + the order card's notes) and the
+  // customer knows it was passed on — instead of "your order is with us".
+  const said = input.message.text.trim();
+  if (!looksLikeQuestion(said) && normalizeForMatch(said).split(" ").length >= 3 && !(await humanHasTakenOver(db, run))) {
+    await notifyTeamInApp(db, run, null, {
+      title: orderTitle(run, "📝 Indicación del cliente"),
+      body: `${ref ? `Pedido ${ref}: ` : ""}"${said.slice(0, 300)}"`,
+    });
+    if (typeof run.vars.__deal_id === "string") {
+      const { data: deal } = await db.from("deals").select("notes").eq("id", run.vars.__deal_id).maybeSingle();
+      const notes = ((deal as { notes?: string | null } | null)?.notes ?? "").trim();
+      await db.from("deals").update({ notes: `${notes}\n📝 Cliente: ${said.slice(0, 300)}`.trim() }).eq("id", run.vars.__deal_id);
+    }
+    await sendEngineText(db, run, null, `✅ Le pasé su indicación al asesor de su pedido${ref ? ` ${ref}` : ""} 🙂`, "after_handoff_note");
+    return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+  }
   const lastAck = typeof run.vars.__after_handoff_ack_at === "string"
     ? new Date(run.vars.__after_handoff_ack_at).getTime()
     : 0;
@@ -4686,6 +4821,64 @@ async function handleReplyForActiveRun(
   // A service request that is really a purchase ("solo quiero comprar la
   // herramienta"): the product goes on the order and the run continues
   // there — instead of asking for a photo, an address and a time.
+  // A button from an older message tapped while writing the list
+  // ("✅ Confirmar pedido", "✏️ Corregir"): read it by its title —
+  // "confirmar" means "ya terminé" here.
+  const listStep = currentCollectCfg?.append === true || currentTextFallback?.append === true;
+  const tappedId = message.kind === "interactive_reply" ? message.reply_id : null;
+  if (
+    message.kind === "interactive_reply" &&
+    tappedId &&
+    listStep &&
+    !tappedId.includes(":") &&
+    !optionsOf(currentNode).some((o) => o.reply_id === tappedId)
+  ) {
+    const title = normalizeForMatch(message.reply_title ?? "");
+    const done = optionsOf(currentNode).find((o) => o.reply_id === "done" || normalizeForMatch(o.title) === "ya termine");
+    if (done && /^(confirmar|confirmar pedido|enviar pedido|enviar mi pedido|ya termine)$/.test(title)) {
+      message = { kind: "interactive_reply", reply_id: done.reply_id, reply_title: done.title, meta_message_id: message.meta_message_id };
+    } else if (message.reply_title) {
+      message = { kind: "text", text: message.reply_title, meta_message_id: message.meta_message_id };
+    }
+  }
+
+  // A button from the message before tapped at the correction step
+  // ("✅ Confirmar pedido" after "✏️ Corregir"): do what that button does.
+  if (message.kind === "interactive_reply" && (currentCollectCfg as { edit_list_var?: string } | undefined)?.edit_list_var) {
+    const tapped = message.reply_id;
+    for (const n of nodes.values()) {
+      if (n.node_type !== "send_buttons") continue;
+      const buttons = (n.config as unknown as SendButtonsNodeConfig).buttons ?? [];
+      const leadsHere = buttons.some((b) => b.next_node_key === currentNode.node_key);
+      const button = buttons.find((b) => b.reply_id === tapped);
+      if (leadsHere && button?.next_node_key && button.next_node_key !== currentNode.node_key) {
+        const rest = { ...run.vars };
+        delete rest.__pending_line_edit;
+        delete rest.__pending_list_answer;
+        delete rest.__edit_failures;
+        await saveVars(db, run, rest);
+        const outcome = await advanceFromNodeKey(db, run, button.next_node_key, nodes);
+        return { consumed: true, flow_run_id: run.id, outcome: outcome.outcome };
+      }
+    }
+  }
+
+  // Registration data sent outside the registration step — with the
+  // products, while writing the list, at the confirmation, or with the
+  // form: kept for the invoice, never written down as a product; the
+  // rest of the message (the products) carries on.
+  if ((message.kind === "text" || message.kind === "form_reply") && !run.vars.__pending_line_edit) {
+    const currentVar = (currentCollectCfg ?? currentTextFallback)?.var_key;
+    const early = await takeEarlyProfile(db, run, nodes, currentVar, message);
+    if (early) {
+      const listStage = currentCollectCfg?.append === true || currentTextFallback?.append === true;
+      const suffix = !early.rest && listStage ? "\n\n¿Algo más para su lista? Escríbalo, o toque *Ya terminé*." : "";
+      await sendEngineText(db, run, currentNode.node_key, early.reply + suffix, "profile_outside_registration");
+      if (!early.rest) return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+      message = { kind: "text", text: early.rest, meta_message_id: message.meta_message_id };
+    }
+  }
+
   // "No me entiende", "ya le dije": a person should look now.
   if (message.kind === "text" && isFrustrated(message.text)) {
     await alertTeamOfTrouble(db, run, "frustrated", message.text);
@@ -4803,6 +4996,11 @@ async function handleReplyForActiveRun(
     // "¿Tienen este tipo de papel?" with a photo, or a photo the bot
     // can't make out: a person looks at it (the bot can't tell products
     // apart by their picture).
+    // A supplier's offer sent as a picture with text.
+    if (message.caption && isVendorPitch(message.caption)) {
+      await sendEngineText(db, run, currentNode.node_key, bizForRules.texts.vendorReply, "vendor_pitch");
+      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
     const asks = !!message.caption && looksLikeQuestion(message.caption);
     if (!reading || reading.kind === "other" || asks) {
       await sendEngineText(
@@ -4879,6 +5077,54 @@ async function handleReplyForActiveRun(
     }
   }
 
+  // Anywhere in the order flow (also at the menu): an opener for a
+  // question, a formal quote, a supplier's pitch, "muéstreme lo que tiene".
+  // (Not at a service / bakery step: there a quote is what's being asked.)
+  if (
+    message.kind === "text" &&
+    !run.vars.__pending_clarification &&
+    !run.vars.__pending_line_edit &&
+    !run.vars.__pending_guide &&
+    !(currentCollectCfg as { ai_guide?: unknown } | undefined)?.ai_guide
+  ) {
+    // "Una consulta": the question comes next.
+    if (isQuestionOpener(message.text)) {
+      await sendEngineText(db, run, currentNode.node_key, "¡Claro! 🙂 Dígame su consulta.", "question_opener");
+      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
+    // "Una cotización formal / proforma": a person prepares it.
+    if (isFormalQuoteRequest(message.text)) {
+      await alertTeamOfTrouble(db, run, "formal_quote", message.text);
+      await sendEngineText(
+        db,
+        run,
+        currentNode.node_key,
+        "Con gusto 🙂 Le pido a una persona de nuestro equipo que le prepare la cotización formal; le escribirá por aquí en breve.",
+        "formal_quote",
+      );
+      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
+    // A supplier or a sponsorship request: point them to the right contact.
+    if (isVendorPitch(message.text)) {
+      await sendEngineText(db, run, currentNode.node_key, bizForRules.texts.vendorReply, "vendor_pitch");
+      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
+    // "Muéstreme los que tiene": the catalog with photos, and a person if they prefer.
+    if (isShowMeRequest(message.text) && run.contact_id && run.conversation_id) {
+      const link = await catalogLink(db, run.account_id, run.contact_id, run.conversation_id);
+      await sendEngineText(
+        db,
+        run,
+        currentNode.node_key,
+        link
+          ? `🛍️ Aquí puede ver nuestros productos con fotos y precios 👇\n${link}\n\nSi prefiere, escriba *asesor* y una persona le envía opciones por aquí 🙂`
+          : "Con gusto 🙂 Escriba *asesor* y una persona de nuestro equipo le envía opciones por aquí.",
+        "show_catalog",
+      );
+      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
+  }
+
   // "sí" / "ok" / "gracias" and "quiero hablar con un asesor" are not
   // products — answer them instead of adding them to the list.
   if (message.kind === "text" && capturesOrderList && !run.vars.__pending_clarification) {
@@ -4896,14 +5142,6 @@ async function handleReplyForActiveRun(
       );
       return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
     }
-    // Registration data sent while the list is being written (the
-    // registration step only comes at the end): kept for the invoice,
-    // never written down as a product.
-    const early = await takeEarlyProfile(db, run, nodes, listVar, message.text);
-    if (early) {
-      await sendEngineText(db, run, currentNode.node_key, early, "profile_while_ordering");
-      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
-    }
     // "Solo 5, perdón": fix the quantity of the last line instead of
     // writing "5" as a product.
     const fix = quantityCorrection(message.text);
@@ -4914,6 +5152,17 @@ async function handleReplyForActiveRun(
       const list = lines.join("\n");
       await saveVars(db, run, { ...run.vars, [listVar]: list, [`${listVar}_numbered`]: numberLines(list), [`${listVar}_last`]: lines.at(-1) });
       await sendEngineText(db, run, currentNode.node_key, `Corregido ✅ ${lines.at(-1)}\n\n¿Algo más? Escríbalo, o escriba *listo* 🙂`, "quantity_corrected");
+      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
+    // "Corregir" typed (or an old button): to the correction step.
+    if (isCorrectionRequest(message.text)) {
+      const editNode = [...nodes.values()].find((n) => n.node_type === "collect_input" && !!(n.config as { edit_list_var?: string }).edit_list_var);
+      const hasList = typeof run.vars[listVar] === "string" && (run.vars[listVar] as string).trim();
+      if (editNode && hasList) {
+        const outcome = await advanceFromNodeKey(db, run, editNode.node_key, nodes);
+        return { consumed: true, flow_run_id: run.id, outcome: outcome.outcome };
+      }
+      await sendEngineText(db, run, currentNode.node_key, "Aún no tiene productos anotados 🙂 Escríbame lo que necesita.", "nothing_to_correct");
       return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
     }
     // "Quiero hablar con alguien" while ordering or registering: a person
@@ -4929,8 +5178,10 @@ async function handleReplyForActiveRun(
       );
       return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
     }
+    // "Gracias" with nothing on the list is a goodbye, not "next product".
+    const nothingYet = !(typeof run.vars[listVar] === "string" && (run.vars[listVar] as string).trim());
     const reply = isAckOnly(message.text)
-        ? bizForRules.texts.orderAck
+        ? nothingYet && /gracias/.test(normalizeForMatch(message.text)) ? bizForRules.texts.thanksReply : bizForRules.texts.orderAck
         : null;
     if (reply) {
       await sendEngineText(db, run, currentNode.node_key, reply, "not_an_order_line");

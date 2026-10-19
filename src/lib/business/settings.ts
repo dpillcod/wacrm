@@ -123,6 +123,8 @@ export interface BusinessSettings {
     receiptReceived: string
     /** A file from the customer (PDF, Word…); {archivo} = " *name*" or "". The team is notified. */
     documentReceived: string
+    /** A supplier, salesperson or sponsorship request writing to the customer chat. */
+    vendorReply: string
     /** Customer went quiet in the middle of something that isn't an order list. */
     idleNudgeGeneral: string
     /** A voice note over 3 minutes. */
@@ -243,6 +245,8 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
     photoNotUnderstood:
       'Recibí su foto 🙂 pero no logré leer productos en ella. ¿Me escribe qué necesita, o me envía una foto más clara de su lista?',
     receiptReceived: '🧾 Recibimos su comprobante, ¡gracias! Nuestro equipo lo revisará y le confirmará por aquí 🙂',
+    vendorReply:
+      'Gracias por escribirnos 🙂 Por este chat atendemos pedidos de clientes. Las propuestas comerciales, proveedores y empleo las atiende nuestro equipo administrativo: un asesor le indicará a dónde escribir.',
     documentReceived:
       '📄 Recibimos su archivo{archivo}, ¡gracias! Una persona de nuestro equipo lo revisa y le responde por aquí 🙂',
     idleNudgeGeneral: '¿Sigue ahí? 🙂 Cuando pueda, respóndame y continuamos.',

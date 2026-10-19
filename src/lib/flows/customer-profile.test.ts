@@ -137,3 +137,10 @@ describe("email optional", () => {
     expect(!none.ok && profileProblemText(none, false)).toContain("nombre completo y su cédula");
   });
 });
+
+describe("an ID number next to a phone number", () => {
+  it("keeps the valid ID", () => {
+    const p = parseCustomerProfile({ text: "Ricardo Castrillon 0107281727 0987834585" }, "593", false);
+    expect(p.ok && p.profile.idNumber).toBe("0107281727");
+  });
+});
