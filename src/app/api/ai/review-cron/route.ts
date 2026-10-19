@@ -1,5 +1,5 @@
 import { timingSafeEqual } from 'node:crypto'
-import { NextResponse } from 'next/server'
+import { after, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { reviewDueConversations } from '@/lib/ai/conversation-review'
 
@@ -20,6 +20,23 @@ function cronAuthorized(request: Request): boolean {
 
 export async function GET(request: Request) {
   if (!cronAuthorized(request)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // Several AI reviews can take longer than external pingers wait: answer
+  // now, review after the response; one run at a time.
+  if (reviewRunning) return NextResponse.json({ started: false, reason: 'already running' }, { status: 202 })
+  reviewRunning = true
+  after(async () => {
+    try {
+      console.log('[review-cron] done:', JSON.stringify(await reviewAll()))
+    } finally {
+      reviewRunning = false
+    }
+  })
+  return NextResponse.json({ started: true }, { status: 202 })
+}
+
+let reviewRunning = false
+
+async function reviewAll() {
   const db = supabaseAdmin()
   const { data: accounts } = await db.from('business_settings').select('account_id')
   const results: Record<string, unknown> = {}
@@ -51,5 +68,5 @@ export async function GET(request: Request) {
       results[accountId] = { error: true }
     }
   }
-  return NextResponse.json({ results })
+  return results
 }

@@ -1,5 +1,5 @@
 import { timingSafeEqual } from 'node:crypto'
-import { NextResponse } from 'next/server'
+import { after, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { syncCatalogForAccount } from '@/lib/whatsapp/catalog-sync'
 
@@ -51,6 +51,29 @@ export async function GET(request: Request) {
   }
   if (!configs?.length) return NextResponse.json({ synced: 0, results: [] })
 
+  // A large catalog takes longer than external pingers wait (cron-job.org
+  // gives up at 30 s): answer right away and walk the catalog after the
+  // response. The sync is resumable (catalog_sync_cursor), so a pass cut
+  // short by a restart continues on the next run.
+  if (syncRunning) return NextResponse.json({ started: false, reason: 'already running' }, { status: 202 })
+  syncRunning = true
+  after(async () => {
+    try {
+      const results = await syncAll(admin, configs)
+      console.log('[catalog-cron] done:', JSON.stringify(results).slice(0, 500))
+    } finally {
+      syncRunning = false
+    }
+  })
+  return NextResponse.json({ started: true, accounts: configs.length }, { status: 202 })
+}
+
+let syncRunning = false
+
+async function syncAll(
+  admin: ReturnType<typeof supabaseAdmin>,
+  configs: Parameters<typeof syncCatalogForAccount>[2][] & { account_id: string }[],
+) {
   const results: { account_id: string; ok: boolean; detail: unknown }[] = []
   for (const config of configs) {
     try {
@@ -65,5 +88,5 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.json({ synced: results.length, results })
+  return results
 }
