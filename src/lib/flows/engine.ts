@@ -2358,6 +2358,13 @@ export function isCallRequest(text: string): boolean {
   );
 }
 
+/** "Ni aún no me responde", "sigo esperando", "¿hasta cuándo?" — waiting on the team. */
+export function isWaitingComplaint(text: string): boolean {
+  const t = normalizeForMatch(text);
+  return t.length <= 160 &&
+    /\b(no (me )?(responde|responden|contesta|contestan|atiende|atienden|escribe|escriben)|nadie (me )?(responde|contesta|atiende)|sigo esperando|estoy esperando|todavia espero|aun espero|hasta cuando|cuanto (mas|tiempo) (tengo que )?esperar|ya (paso|pasaron) (mucho|una hora|media hora)|me (dejaron|dejan) esperando|no hay respuesta)\b/.test(t);
+}
+
 /** "Está mal", "no está correcto", "la lista está mal" — a complaint, not an edit. */
 export function isListComplaint(text: string): boolean {
   const t = normalizeForMatch(text);
@@ -4114,6 +4121,32 @@ async function replyAfterHandoff(
     if (now - lastThanks < AFTER_HANDOFF_MIN_GAP_MS) return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
     await saveVars(db, run, { ...run.vars, __thanks_at: new Date(now).toISOString() });
     await sendEngineText(db, run, null, texts.thanksReply, "thanks_reply");
+    return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+  }
+  // "Ni aún no me responde", "sigo esperando": the order is waiting on
+  // the team — urgent alert (WhatsApp to staff on shift + CRM), at most
+  // once every 10 minutes per order.
+  if (isWaitingComplaint(input.message.text) || isFrustrated(input.message.text)) {
+    const lastAlert = typeof run.vars.__waiting_alert_at === "string" ? new Date(run.vars.__waiting_alert_at).getTime() : 0;
+    if (now - lastAlert > 10 * 60_000) {
+      await saveVars(db, run, { ...run.vars, __waiting_alert_at: new Date(now).toISOString() });
+      const { data: contact } = await db.from("contacts").select("name, phone").eq("id", input.contactId).maybeSingle();
+      const c = contact as { name?: string | null; phone?: string | null } | null;
+      const biz = await bizOf(db, input.accountId);
+      const phone = c?.phone ? localPhone(c.phone.replace(/^\+/, ""), biz.phoneCountryCode) : "";
+      const said = input.message.text.trim().slice(0, 160);
+      await notifyTeamInApp(db, run, null, {
+        title: `🚨 ${orderTitle(run, "Cliente")} SIGUE ESPERANDO`,
+        body: `El cliente dice: "${said}". Escríbale ya${ref ? ` (pedido ${ref})` : ""}.`,
+      });
+      await notifyStaffOfHandoff(db, {
+        accountId: input.accountId,
+        contactName: c?.name?.trim() || "Cliente",
+        summary: `🚨 CLIENTE ESPERANDO RESPUESTA${ref ? ` · pedido ${ref}` : ""}${phone ? ` · ${phone}` : ""}\n"${said}"`,
+        conversationId: input.conversationId,
+      }).catch(() => null);
+    }
+    await sendEngineText(db, run, null, "Disculpe la demora 🙏 Ya avisé otra vez a nuestro equipo, con prioridad; le escriben por aquí enseguida.", "waiting_complaint");
     return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
   }
   // "El pollo tiene que ser descongelado": an indication for the order

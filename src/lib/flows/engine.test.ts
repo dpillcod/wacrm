@@ -22,6 +22,7 @@ import {
   textFallbackOf,
   isBotAddressableNonText,
   isCallRequest,
+  isWaitingComplaint,
   isCorrectionRequest,
   isFormalQuoteRequest,
   isQuestionOpener,
@@ -714,5 +715,15 @@ describe("real conversations 2026-10-15/18", () => {
       profile: "Mi nombre es Gustavo Larriva Ci 1703750537",
     });
     expect(splitProfileText("2 panes\nPamela Gárate\n0106507981", "593")).toEqual({ rest: "2 panes", profile: "Pamela Gárate\n0106507981" });
+  });
+});
+
+describe("a customer waiting on the team", () => {
+  it("recognises the complaint (real case: Andrea, 19/10)", () => {
+    expect(isWaitingComplaint("Ni aún no me responde")).toBe(true);
+    expect(isWaitingComplaint("sigo esperando")).toBe(true);
+    expect(isWaitingComplaint("hasta cuándo tengo que esperar??")).toBe(true);
+    expect(isWaitingComplaint("me responde por favor el precio")).toBe(false);
+    expect(isWaitingComplaint("2 pelotas de espuma")).toBe(false);
   });
 });
