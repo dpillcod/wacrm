@@ -22,6 +22,7 @@ import {
   textFallbackOf,
   isBotAddressableNonText,
   isCallRequest,
+  isMenuCommand,
   isWaitingComplaint,
   isCorrectionRequest,
   isFormalQuoteRequest,
@@ -725,5 +726,23 @@ describe("a customer waiting on the team", () => {
     expect(isWaitingComplaint("hasta cuándo tengo que esperar??")).toBe(true);
     expect(isWaitingComplaint("me responde por favor el precio")).toBe(false);
     expect(isWaitingComplaint("2 pelotas de espuma")).toBe(false);
+  });
+});
+
+describe("real conversations 2026-10-21", () => {
+  it("asking for a person (Lorena)", () => {
+    expect(isHumanRequest("Si hay alguna persona que me atienda?")).toBe(true);
+    expect(isHumanRequest("que me atienda alguien por favor")).toBe(true);
+    expect(isHumanRequest("2 cables usb")).toBe(false);
+  });
+  it("only 'menú' restarts the bot while the team is talking", () => {
+    expect(isMenuCommand("Menú")).toBe(true);
+    expect(isMenuCommand("📋 Menú")).toBe(true);
+    expect(isMenuCommand("Buenas tardes, que precio tiene")).toBe(false);
+  });
+  it("greetings with typos (Ximena)", () => {
+    expect(isPlainGreeting("Buenas tarded")).toBe(true);
+    expect(isPlainGreeting("hola veci")).toBe(true);
+    expect(isPlainGreeting("buenas tardes quiero 2 panes")).toBe(false);
   });
 });

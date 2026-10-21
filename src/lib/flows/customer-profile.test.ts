@@ -144,3 +144,16 @@ describe("an ID number next to a phone number", () => {
     expect(p.ok && p.profile.idNumber).toBe("0107281727");
   });
 });
+
+describe("real names that look like words (2026-10-21)", () => {
+  it("Cuesta is a surname; 'a nombre de' is a label", () => {
+    const a = parseCustomerProfile({ text: "Cristina cuesta\n0105902308" }, "593", false);
+    expect(a.ok && a.profile.name).toBe("Cristina Cuesta");
+    const b = parseCustomerProfile({ text: "A nombre de Héctor Enrique Piedra Alvarado\nRuc0100058163001" }, "593", false);
+    expect(b.ok && b.profile).toEqual({ name: "Héctor Enrique Piedra Alvarado", idNumber: "0100058163001", email: "" });
+  });
+  it("nothing written: asks for name and ID only when email is optional", () => {
+    const p = parseCustomerProfile({ text: "" }, "593", false);
+    expect(!p.ok && profileProblemText(p, false)).toContain("nombre completo y su cédula");
+  });
+});

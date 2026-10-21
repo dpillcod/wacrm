@@ -71,7 +71,7 @@ const NOT_ID = /-?\d{1,3}\.\d{3,}\s*,\s*-?\d{1,3}\.\d{3,}|https?:\/\/\S+/g;
 export function withoutCoordinates(text: string): string {
   return text.replace(NOT_ID, " ");
 }
-const LABELS = /(^|\s)(mi nombre es|me llamo|soy|nombres?|apellidos?|c[eé]dula|ruc|correo|email|mail|completo|c\.?\s?i\.?|n[uú]mero de c[eé]dula)\s*:?(?=\s|$)/giu;
+const LABELS = /(^|\s)(a nombre de|a nombre|mi nombre es|me llamo|soy|nombres?|apellidos?|c[eé]dula|ruc|correo|email|mail|completo|c\.?\s?i\.?|n[uú]mero de c[eé]dula)\s*:?(?=\s|$)/giu;
 
 function tidyName(raw: string): string {
   return raw
@@ -100,10 +100,11 @@ export function isRefusal(text: string): boolean {
 // tienda", "Solo 5 paquetes perdón", "Cuánto sale" are not names.
 const NOT_NAME_WORDS = new Set(
   ("a al con de del el en la las lo los y o u e por para que su sus mi mis me te se le les un una unos unas " +
-    "es esta este esto estoy voy va vamos ir pasar paso viendo ver tienda tiene tienen tengo hay quiero quisiera " +
+    "es esta este esto estoy voy va vamos ir pasar viendo ver tienda tiene tienen tengo hay quiero quisiera " +
     "necesito deseo puede pueden podria favor gracias perdon disculpe hola buenos buenas dias tardes noches " +
-    "cuanto cuanta cuesta sale precio solo nomas mas menos paquete paquetes funda fundas litro litros kilo libra " +
-    "no si ok listo bueno perfecto claro").split(" "),
+    "cuanto cuanta sale precio solo nomas menos paquete paquetes funda fundas litro litros kilo libra " +
+    "no si ok listo perfecto").split(" "),
+  // ("Cuesta", "Paso", "Bueno", "Claro", "Mas" are also surnames: not here.)
 );
 // Particles that are fine INSIDE a name ("María de los Ángeles", "Juan del Pozo").
 const NAME_PARTICLES = new Set(["de", "del", "la", "las", "los", "y"]);
@@ -111,7 +112,9 @@ const NAME_PARTICLES = new Set(["de", "del", "la", "las", "los", "y"]);
 /** "Pamela Gárate" yes; "Voy a pasar viendo de su tienda" no. */
 export function looksLikePersonName(line: string): boolean {
   if (/[?¿!¡\d@]/.test(line)) return false;
-  const words = plain(line).replace(/[^a-zñ\s'-]/g, " ").split(/\s+/).filter(Boolean);
+  // "A nombre de Héctor Piedra", "Mi nombre es …", "Soy …": the name after it.
+  const bare = plain(line).replace(/^(a nombre de|a nombre|mi nombre es|me llamo|soy|nombre)\s*:?\s+/, "");
+  const words = bare.replace(/[^a-zñ\s'-]/g, " ").split(/\s+/).filter(Boolean);
   if (words.length < 2 || words.length > 6) return false;
   return words.every((w, i) => {
     if (NAME_PARTICLES.has(w)) return i > 0 && i < words.length - 1;
@@ -152,7 +155,7 @@ export function parseCustomerProfile(
   let email = field("correo") || field("email");
   const text = (input.text ?? "").trim();
   if (!name && !id && !email) {
-    if (!text) return { ok: false, problem: "missing", missing: ["name", "id", "email"] };
+    if (!text) return { ok: false, problem: "missing", missing: emailRequired ? ["name", "id", "email"] : ["name", "id"] };
     if (isFinalConsumer(text)) {
       return { ok: true, profile: { name: "", idNumber: FINAL_CONSUMER, email: "" } };
     }

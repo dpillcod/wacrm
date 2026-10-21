@@ -284,6 +284,7 @@ export function outOfRangeOption(
 const GREETING_WORDS = new Set([
   "hola", "ola", "holi", "buenas", "buenos", "buena", "buen", "dia", "dias", "tardes", "noches",
   "saludos", "hello", "hi", "que", "tal", "como", "esta", "estas", "señorita", "senorita", "amigo",
+  "amiga", "tarde", "tarded", "noche", "estan", "veci", "vecino", "vecina", "joven",
 ]);
 
 /** "hola", "buenas tardes", "hola que tal" — a greeting and nothing else. */
@@ -314,7 +315,10 @@ export function isHumanRequest(text: string): boolean {
   return said.length <= 80 && (
     /\b(hablar|comunicar(me)?|atender?me|contactar|pasar(me)?)\b.*\b(asesor|asesora|persona|alguien|humano|agente|vendedor|vendedora|encargad[oa]|operador[a]?)\b/.test(said) ||
     /\b(un|una) (asesor|asesora|persona|humano|agente)\b/.test(said) && said.split(" ").length <= 6 ||
-    /^(asesor|asesora|persona|humano|agente)$/.test(said)
+    /^(asesor|asesora|persona|humano|agente)$/.test(said) ||
+    // "¿Hay alguna persona que me atienda?", "que me atienda alguien"
+    /\b(alguna persona|alguien|una persona|un asesor|una asesora|un humano)\b.*\b(atienda|atiende|ayude|responda|conteste)\b/.test(said) ||
+    /\b(me atiende|me atienda|atiendame|me ayude|me responda)\b.*\b(persona|alguien|asesor|asesora|humano)\b/.test(said)
   );
 }
 
@@ -2358,6 +2362,65 @@ export function isCallRequest(text: string): boolean {
   );
 }
 
+/** "menú", "inicio": the customer asks for the bot's menu explicitly. */
+export function isMenuCommand(text: string): boolean {
+  return /^(menu|el menu|ver menu|ver el menu|volver al menu|inicio|empezar|comenzar|📋 menu)$/.test(normalizeForMatch(text));
+}
+
+/** The customer asked "¿tiene este producto?" (about a photo) in the last few minutes. */
+async function askedAboutThisJustBefore(db: AdminClient, conversationId: string): Promise<boolean> {
+  const { data } = await db
+    .from("messages")
+    .select("content_text")
+    .eq("conversation_id", conversationId)
+    .eq("sender_type", "customer")
+    .eq("content_type", "text")
+    .gte("created_at", new Date(Date.now() - 5 * 60_000).toISOString())
+    .order("created_at", { ascending: false })
+    .limit(3);
+  return ((data ?? []) as { content_text: string | null }[]).some((m) => {
+    const t = normalizeForMatch(m.content_text ?? "");
+    return /\b(este|esta|esto|estos|estas|ese|esa|eso|asi|igual|parecido|similar)\b/.test(t) && looksLikeQuestion(m.content_text ?? "");
+  });
+}
+
+/** A team member wrote in this conversation in the last 3 hours. */
+async function teamRecentlyActive(db: AdminClient, conversationId: string): Promise<boolean> {
+  const { data } = await db
+    .from("messages")
+    .select("id")
+    .eq("conversation_id", conversationId)
+    .eq("sender_type", "agent")
+    .gte("created_at", new Date(Date.now() - 3 * 3_600_000).toISOString())
+    .limit(1);
+  return (data ?? []).length > 0;
+}
+
+/** "Buenas tardes" right after placing an order: its status instead of the menu. */
+async function greetAfterRecentOrder(db: AdminClient, input: DispatchInboundInput): Promise<DispatchInboundResult | null> {
+  const { data } = await db
+    .from("flow_runs")
+    .select("*")
+    .eq("account_id", input.accountId)
+    .eq("contact_id", input.contactId)
+    .eq("status", "handed_off")
+    .gte("ended_at", new Date(Date.now() - 3 * 3_600_000).toISOString())
+    .order("ended_at", { ascending: false })
+    .limit(1);
+  const run = ((data as FlowRunRow[] | null) ?? [])[0];
+  const ref = run?.vars.order_number ?? run?.vars.service_number;
+  if (!run || !ref) return null;
+  const name = typeof run.vars.contact_name === "string" ? run.vars.contact_name : "";
+  await sendEngineText(
+    db,
+    run,
+    null,
+    `¡Hola${name}! 👋 Su pedido N° ${ref} ya está con nuestro asesor; le escribirá por aquí en breve 🙂\n\nSi necesita algo más, escriba *menú*.`,
+    "greeting_after_order",
+  );
+  return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+}
+
 /** "Ni aún no me responde", "sigo esperando", "¿hasta cuándo?" — waiting on the team. */
 export function isWaitingComplaint(text: string): boolean {
   const t = normalizeForMatch(text);
@@ -2434,7 +2497,8 @@ export type TroubleReason =
   | "invalid_options"
   | "human_request"
   | "photo_question"
-  | "formal_quote";
+  | "formal_quote"
+  | "price_request";
 
 const TROUBLE_TEXT: Record<TroubleReason, string> = {
   edit_failed: "el bot no logra corregir la lista del cliente",
@@ -2445,6 +2509,7 @@ const TROUBLE_TEXT: Record<TroubleReason, string> = {
   human_request: "el cliente pide hablar con una persona",
   photo_question: "el cliente mandó una foto que el bot no puede responder",
   formal_quote: "el cliente pide una cotización formal",
+  price_request: "el cliente pide el precio",
 };
 
 /**
@@ -2952,6 +3017,23 @@ async function dispatchInboundToFlowsInner(
         }
       }
       return { consumed: false, outcome: "no_match" };
+    }
+
+    // A person from the team is talking with this customer (wrote in the
+    // last 3 h): "Buenas tardes, ¿qué precio tiene?" is for them — never
+    // the menu on top of their conversation. "menú" still restarts the bot.
+    if (
+      input.message.kind === "text" &&
+      !isMenuCommand(input.message.text) &&
+      (await teamRecentlyActive(db, input.conversationId))
+    ) {
+      return { consumed: false, outcome: "no_match" };
+    }
+    // An order just placed and not attended yet: "buenas tardes" gets its
+    // status, not the whole menu again.
+    if (input.message.kind === "text" && isPlainGreeting(input.message.text)) {
+      const status = await greetAfterRecentOrder(db, input);
+      if (status) return status;
     }
 
     // No active run → look for a flow whose entry trigger matches.
@@ -5034,14 +5116,17 @@ async function handleReplyForActiveRun(
       await sendEngineText(db, run, currentNode.node_key, bizForRules.texts.vendorReply, "vendor_pitch");
       return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
     }
-    const asks = !!message.caption && looksLikeQuestion(message.caption);
+    // "¿Tiene este producto?" written just before the photo counts too.
+    const asks = (!!message.caption && looksLikeQuestion(message.caption)) ||
+      (!!run.conversation_id && (await askedAboutThisJustBefore(db, run.conversation_id)));
     if (!reading || reading.kind === "other" || asks) {
+      const guess = reading && reading.kind !== "other" && reading.lines[0] ? reading.lines[0] : "";
       await sendEngineText(
         db,
         run,
         currentNode.node_key,
         asks
-          ? "📷 ¡Gracias por la foto! Se la paso a una persona de nuestro equipo para que le confirme; le escribirá por aquí en breve 🙂"
+          ? `📷 ¡Gracias por la foto!${guess ? ` Parece ser: *${guess}*.` : ""} Se la paso a una persona de nuestro equipo para que le confirme si lo tenemos; le escribirá por aquí en breve 🙂`
           : bizForRules.texts.photoNotUnderstood,
         asks ? "photo_question" : "photo_not_understood",
       );
@@ -5085,6 +5170,49 @@ async function handleReplyForActiveRun(
       ? acceptOfferedProduct(message.text, offered) ?? acceptOfferedProduct(stripOrderLeadIn(message.text), offered)
       : null;
     if (line) message = { ...message, text: line };
+  }
+
+  // "." or "?" alone (often sent to get attention): not a product, not a
+  // question — no reply, nothing written down.
+  if (message.kind === "text" && !/[\p{L}\p{N}]/u.test(message.text) && !/\p{Extended_Pictographic}/u.test(message.text)) {
+    return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+  }
+
+  // Before the question answerer: "¿hay alguna persona que me atienda?"
+  // and "¿cuál es el precio?" while ordering go to a person — the bot
+  // can't do either (no prices by design), the team can.
+  const serviceStep =
+    !!(currentCollectCfg as { ai_guide?: unknown } | undefined)?.ai_guide ||
+    !!(currentNode.config as NodeSideEffectsConfig).purchase_redirect;
+  if (
+    message.kind === "text" &&
+    !serviceStep &&
+    !run.vars.__pending_clarification &&
+    !run.vars.__pending_line_edit &&
+    !run.vars.__pending_guide
+  ) {
+    if (isHumanRequest(message.text)) {
+      await alertTeamOfTrouble(db, run, "human_request", message.text);
+      await sendEngineText(
+        db,
+        run,
+        currentNode.node_key,
+        "Con gusto 🙂 Ya le aviso a una persona de nuestro equipo; le escribirá por aquí en breve. Lo que lleva anotado queda guardado.",
+        "human_request_alerted",
+      );
+      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
+    if (isPriceQuestion(message.text)) {
+      await alertTeamOfTrouble(db, run, "price_request", message.text);
+      await sendEngineText(
+        db,
+        run,
+        currentNode.node_key,
+        "💲 Le pido a una persona de nuestro equipo que le confirme el precio por aquí en breve 🙂",
+        "price_request_alerted",
+      );
+      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
   }
 
   // A question is answered, never written down as a product ("¿Dispone

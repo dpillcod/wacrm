@@ -444,6 +444,18 @@ export function MessageComposer({
     [stageUpload],
   );
 
+  // A file pasted (Ctrl+V of a screenshot or a copied picture) or dropped
+  // on the composer is staged like one picked from the attach menu.
+  const stageDroppedFile = useCallback(
+    (file: File | undefined | null): boolean => {
+      if (!file || readOnly || sessionExpired) return false;
+      const kind = file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : "document";
+      handlePicked(kind, file);
+      return true;
+    },
+    [handlePicked, readOnly, sessionExpired],
+  );
+
   // ---- Voice recording (client-side Ogg/Opus, no server transcode) ---
 
   // The encoded Ogg/Opus file from opus-recorder → upload as an audio
@@ -765,6 +777,17 @@ export function MessageComposer({
             value={text}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
+            onPaste={(e) => {
+              const file = Array.from(e.clipboardData?.files ?? [])[0];
+              if (stageDroppedFile(file)) e.preventDefault();
+            }}
+            onDragOver={(e) => {
+              if (e.dataTransfer?.types?.includes("Files")) e.preventDefault();
+            }}
+            onDrop={(e) => {
+              const file = Array.from(e.dataTransfer?.files ?? [])[0];
+              if (stageDroppedFile(file)) e.preventDefault();
+            }}
             placeholder={
               readOnly
                 ? t("readOnlyPlaceholder")
