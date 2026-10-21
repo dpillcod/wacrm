@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/card";
 import type { BusinessSettings, CrossSellRule } from "@/lib/business/settings";
 import { SettingsPanelHead } from "./settings-panel-head";
+import { StaffShifts } from "./staff-shifts";
 
 /**
  * Settings → My business: everything about the business the bot works
@@ -376,6 +377,7 @@ export function BusinessSettingsPanel() {
         <Field label={t("staff.phones")} hint={t("staff.phonesHint")}>
           {area(draft.staffPhones, (v) => edit({ staffPhones: v }), 3)}
         </Field>
+        <StaffShifts countryCode={s.phoneCountryCode} />
         <Field label={t("staff.checkInWords")} hint={t("staff.checkInWordsHint")}>
           {area(draft.checkInWords, (v) => edit({ checkInWords: v }), 1)}
         </Field>

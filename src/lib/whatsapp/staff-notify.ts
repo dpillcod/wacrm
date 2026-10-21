@@ -46,27 +46,73 @@ export function sanitizeForTemplateParam(text: string): string {
     .trim()
 }
 
+export interface StaffMember {
+  /** What's written next to the number ("Diego", "Caja 2"), or "". */
+  name: string
+  /** International digits. */
+  phone: string
+}
+
 /**
- * Staff numbers as international digits: the business settings' list,
- * or (older deployments) ORDER_NOTIFICATION_PHONES. Local numbers
- * ("0981…") are accepted — staff lists get typed the way people say them.
+ * One line of the staff list: "Diego 0981414182", "0981414182 - Caja",
+ * or just the number. Local numbers ("0981…") are accepted — staff
+ * lists get typed the way people say them.
  */
-export function getStaffPhones(biz: BusinessSettings): string[] {
+export function parseStaffLine(line: string, countryCode: string): StaffMember | null {
+  const m = line.match(/\+?\d[\d\s-]{5,}\d/)
+  if (!m) return null
+  // "Caja 2 0998999384": the number is the shortest run of groups, from
+  // the right, with at least 9 digits — the "2" belongs to the name.
+  const groups = m[0].split(/[\s-]+/)
+  let number = m[0]
+  for (let i = groups.length - 1; i >= 0; i--) {
+    const candidate = groups.slice(i).join(' ')
+    if (candidate.replace(/\D/g, '').length >= 9) {
+      number = candidate
+      break
+    }
+  }
+  const phone = toInternational(number, countryCode)
+  if (!phone) return null
+  const name = line
+    .replace(number, ' ')
+    // A country code left in front of the number ("+593 96 949 6301").
+    .replace(new RegExp(`\\+${countryCode}\\b|\\b${countryCode}(?=\\s*$)`), ' ')
+    .replace(/[-–:·|,()+]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return { name, phone }
+}
+
+/**
+ * The staff list: the business settings' lines, or (older deployments)
+ * ORDER_NOTIFICATION_PHONES. One entry per number.
+ */
+export function getStaffList(biz: BusinessSettings): StaffMember[] {
   const configured = biz.staffPhones.length
     ? biz.staffPhones
     : (process.env.ORDER_NOTIFICATION_PHONES ?? '').split(',')
-  return configured
-    .map((p) => toInternational(p.trim(), biz.phoneCountryCode))
-    .filter(Boolean)
+  const seen = new Set<string>()
+  const out: StaffMember[] = []
+  for (const line of configured) {
+    const member = parseStaffLine(line.trim(), biz.phoneCountryCode)
+    if (member && !seen.has(member.phone)) {
+      seen.add(member.phone)
+      out.push(member)
+    }
+  }
+  return out
+}
+
+/** Staff numbers as international digits (see getStaffList). */
+export function getStaffPhones(biz: BusinessSettings): string[] {
+  return getStaffList(biz).map((s) => s.phone)
 }
 
 const WINDOW_MS = 24 * 3_600_000
 
-/**
- * When this phone last wrote to the bot, if within the last 24h (its
- * WhatsApp customer-service window is open); null otherwise.
- */
-export async function lastInboundWithinWindow(
+/** When this phone last wrote to the bot (any time), or null if never. */
+export async function lastInboundAt(
   db: SupabaseClient,
   accountId: string,
   phone: string,
@@ -89,12 +135,112 @@ export async function lastInboundWithinWindow(
     .select('created_at')
     .in('conversation_id', convIds)
     .eq('sender_type', 'customer')
-    .gte('created_at', new Date(Date.now() - WINDOW_MS).toISOString())
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
   const createdAt = (msg as { created_at?: string } | null)?.created_at
   return createdAt ? new Date(createdAt) : null
+}
+
+/**
+ * When this phone last wrote to the bot, if within the last 24h (its
+ * WhatsApp customer-service window is open); null otherwise.
+ */
+export async function lastInboundWithinWindow(
+  db: SupabaseClient,
+  accountId: string,
+  phone: string,
+): Promise<Date | null> {
+  const last = await lastInboundAt(db, accountId, phone)
+  return last && Date.now() - last.getTime() < WINDOW_MS ? last : null
+}
+
+export interface StaffShift extends StaffMember {
+  /** Last message to the bot, ISO, or null (never wrote). */
+  lastInbound: string | null
+  /** When the free 24h window closes, ISO, or null when it's closed. */
+  activeUntil: string | null
+}
+
+/** Each staff member and whether their alerts window is open (see lastInboundWithinWindow). */
+export async function staffShifts(db: SupabaseClient, accountId: string): Promise<StaffShift[]> {
+  const biz = await loadBusinessSettings(db, accountId)
+  return Promise.all(
+    getStaffList(biz).map(async (member) => {
+      const last = await lastInboundAt(db, accountId, member.phone).catch(() => null)
+      const until = last ? last.getTime() + WINDOW_MS : 0
+      return {
+        ...member,
+        lastInbound: last ? last.toISOString() : null,
+        activeUntil: until > Date.now() ? new Date(until).toISOString() : null,
+      }
+    }),
+  )
+}
+
+/** Reminded / reported windows, by phone → the last message that opened it. In-memory. */
+const shiftReminded = new Map<string, string>()
+const shiftExpiredReported = new Map<string, string>()
+/** How long before the window closes the staff member is reminded (free while it's open). */
+const SHIFT_REMINDER_MS = 45 * 60_000
+
+/**
+ * For the cron: remind each staff member whose window closes within 45
+ * minutes (a WhatsApp message they can renew with one tap — free, the
+ * window is still open), and report to the admins the ones whose window
+ * just closed (they won't get order alerts until they write *turno*).
+ */
+export async function sweepStaffShifts(
+  db: SupabaseClient,
+  accountId: string,
+  reportExpired: (member: StaffShift) => Promise<void>,
+): Promise<{ reminded: number; expired: number }> {
+  const shifts = await staffShifts(db, accountId)
+  if (!shifts.length) return { reminded: 0, expired: 0 }
+  let reminded = 0
+  let expired = 0
+  const now = Date.now()
+  const due = shifts.filter(
+    (s) => s.activeUntil && new Date(s.activeUntil).getTime() - now < SHIFT_REMINDER_MS && shiftReminded.get(s.phone) !== s.lastInbound,
+  )
+  if (due.length) {
+    const { data: config } = await db
+      .from('whatsapp_config')
+      .select('phone_number_id, access_token')
+      .eq('account_id', accountId)
+      .maybeSingle()
+    if (config) {
+      const accessToken = decrypt((config as { access_token: string }).access_token)
+      const biz = await loadBusinessSettings(db, accountId)
+      for (const s of due) {
+        const at = new Date(s.activeUntil!).getTime() + biz.utcOffsetHours * 3_600_000
+        const hhmm = new Date(at).toISOString().slice(11, 16)
+        try {
+          await sendInteractiveButtons({
+            phoneNumberId: (config as { phone_number_id: string }).phone_number_id,
+            accessToken,
+            to: s.phone,
+            bodyText: `⏰ ${s.name ? `${s.name}, s` : 'S'}u turno de avisos de pedidos vence a las ${hhmm}. Toque *Recibido* (o escriba *turno*) para seguir recibiéndolos 24 h más 🙂`,
+            buttons: ACK_BUTTON,
+          })
+          shiftReminded.set(s.phone, s.lastInbound!)
+          reminded++
+        } catch (err) {
+          console.error('[staff-notify] shift reminder failed for', s.phone, err instanceof Error ? err.message : err)
+        }
+      }
+    }
+  }
+  for (const s of shifts) {
+    if (s.activeUntil || !s.lastInbound) continue
+    // Closed within the last 2 hours, not reported yet.
+    const closedAt = new Date(s.lastInbound).getTime() + WINDOW_MS
+    if (now - closedAt > 2 * 3_600_000 || shiftExpiredReported.get(s.phone) === s.lastInbound) continue
+    shiftExpiredReported.set(s.phone, s.lastInbound)
+    await reportExpired(s).catch(() => null)
+    expired++
+  }
+  return { reminded, expired }
 }
 
 /** Reply id of the "✅ Recibido" button on staff alerts — tapping it renews that person's 24h window. */

@@ -1796,14 +1796,25 @@
         "title": "Staff alerts",
         "desc": "Numbers that get a WhatsApp alert for each new order. Free only if that person wrote to the bot in the last 24h, so staff write the check-in word each day.",
         "phones": "Staff numbers (one per line)",
-        "phonesHint": "Local or international format.",
+        "phonesHint": "One number per line, with the name if you like: *Diego 0981414182*. Local or international format.",
         "checkInWords": "Check-in words",
         "checkInWordsHint": "Comma-separated, e.g. turno, avisos.",
         "newConversation": "New conversation alert",
         "newConversationHint": "Tells the team when a customer starts writing (first message after 3 hours of silence), so someone can follow the conversation in time.",
         "newConversationOff": "Off",
         "newConversationApp": "CRM notification only",
-        "newConversationWhatsapp": "CRM and WhatsApp to staff on shift"
+        "newConversationWhatsapp": "CRM and WhatsApp to staff on shift",
+        "shifts": {
+          "title": "Who gets alerts now?",
+          "refresh": "Refresh",
+          "loading": "Loading…",
+          "empty": "No numbers saved.",
+          "noName": "(no name)",
+          "activeUntil": "Gets alerts until {time}",
+          "expired": "No alerts (last message: {time})",
+          "never": "Never wrote to the bot: no alerts",
+          "hint": "Meta only lets you alert for free someone who wrote to the bot in the last 24 h. Each person writes *turno* when starting the day (or taps Received on an alert). The bot reminds them 45 min before it ends and you get a notification when it does."
+        }
       },
       "rules": {
         "title": "Order rules",

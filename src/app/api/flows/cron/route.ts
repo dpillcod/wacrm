@@ -3,6 +3,9 @@ import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { resolveFallbackPolicy } from '@/lib/flows/fallback'
 import { sweepCartReminders } from '@/lib/flows/engine'
+import { sweepStaffShifts } from '@/lib/whatsapp/staff-notify'
+import { localPhone } from '@/lib/whatsapp/phone-utils'
+import { loadBusinessSettings } from '@/lib/business/settings'
 
 /**
  * Sweep abandoned active flow runs.
@@ -56,6 +59,14 @@ export async function GET(request: Request) {
     return 0
   })
 
+  // Staff alerts only reach numbers that wrote to the bot in the last
+  // 24 h: remind each one before their window closes (free while open)
+  // and tell the admins when one has closed.
+  const staffShifts = await sweepAllStaffShifts(admin).catch((err) => {
+    console.error('[flows/cron] staff shifts failed:', err)
+    return null
+  })
+
   // Pull all currently-active runs along with their parent flow's
   // fallback_policy. Joined in one query — the small set of active
   // runs per tenant keeps this cheap.
@@ -70,7 +81,7 @@ export async function GET(request: Request) {
     console.error('[flows-cron] active-run scan failed:', error.message)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
-  if (!runs?.length) return NextResponse.json({ swept: 0, cartReminders })
+  if (!runs?.length) return NextResponse.json({ swept: 0, cartReminders, staffShifts })
 
   type Row = {
     id: string
@@ -116,5 +127,33 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.json({ swept, cartReminders })
+  return NextResponse.json({ swept, cartReminders, staffShifts })
+}
+
+async function sweepAllStaffShifts(admin: ReturnType<typeof supabaseAdmin>) {
+  const { data: accounts } = await admin.from('business_settings').select('account_id')
+  const out: Record<string, unknown> = {}
+  for (const { account_id: accountId } of (accounts ?? []) as { account_id: string }[]) {
+    const biz = await loadBusinessSettings(admin, accountId)
+    const { data: admins } = await admin
+      .from('profiles')
+      .select('user_id')
+      .eq('account_id', accountId)
+      .in('account_role', ['owner', 'admin'])
+    const userIds = ((admins ?? []) as { user_id: string | null }[]).map((a) => a.user_id).filter((u): u is string => !!u)
+    out[accountId] = await sweepStaffShifts(admin, accountId, async (member) => {
+      if (!userIds.length) return
+      const who = `${member.name || 'Personal'} (${localPhone(member.phone, biz.phoneCountryCode)})`
+      await admin.from('notifications').insert(
+        userIds.map((user_id) => ({
+          account_id: accountId,
+          user_id,
+          type: 'conversation_assigned',
+          title: `⚠️ Turno vencido: ${who}`,
+          body: 'Ya no recibe los avisos de pedidos por WhatsApp hasta que escriba *turno* al bot (o toque Recibido en un aviso).',
+        })),
+      )
+    })
+  }
+  return out
 }

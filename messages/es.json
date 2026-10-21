@@ -1796,14 +1796,25 @@
         "title": "Avisos al personal",
         "desc": "Números que reciben un aviso por WhatsApp con cada pedido nuevo. Solo es gratis si esa persona escribió al bot en las últimas 24 h, por eso el personal escribe la palabra de turno cada día.",
         "phones": "Números del personal (uno por línea)",
-        "phonesHint": "Formato local o internacional.",
+        "phonesHint": "Un número por línea, con el nombre si quiere: *Diego 0981414182*. Formato local o internacional.",
         "checkInWords": "Palabras de turno",
         "checkInWordsHint": "Separadas por comas, por ejemplo turno, avisos.",
         "newConversation": "Aviso de conversación nueva",
         "newConversationHint": "Avisa al equipo cuando un cliente empieza a escribir (primer mensaje tras 3 horas sin hablar), para seguir la conversación a tiempo.",
         "newConversationOff": "Apagado",
         "newConversationApp": "Solo notificación en el CRM",
-        "newConversationWhatsapp": "CRM y WhatsApp al personal de turno"
+        "newConversationWhatsapp": "CRM y WhatsApp al personal de turno",
+        "shifts": {
+          "title": "¿Quién recibe avisos ahora?",
+          "refresh": "Actualizar",
+          "loading": "Cargando…",
+          "empty": "No hay números guardados.",
+          "noName": "(sin nombre)",
+          "activeUntil": "Recibe avisos hasta {time}",
+          "expired": "No recibe avisos (último mensaje: {time})",
+          "never": "Nunca escribió al bot: no recibe avisos",
+          "hint": "Meta solo deja avisar gratis a quien escribió al bot en las últimas 24 h. Cada persona escribe *turno* al empezar el día (o toca Recibido en un aviso). El bot le recuerda 45 min antes de que venza y a usted le llega una notificación cuando vence."
+        }
       },
       "rules": {
         "title": "Reglas de pedidos",
