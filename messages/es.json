@@ -287,7 +287,8 @@
       "location": "[Ubicación]",
       "template": "[Plantilla]",
       "message": "[Mensaje]",
-      "cancelReply": "Cancelar respuesta"
+      "cancelReply": "Cancelar respuesta",
+      "jumpToOriginal": "Ir al mensaje original"
     },
     "templatePicker": {
       "sendTemplate": "Enviar plantilla",

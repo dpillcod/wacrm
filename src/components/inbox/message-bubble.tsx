@@ -26,7 +26,7 @@ import { useTranslations } from "next-intl";
 interface MessageBubbleProps {
   message: Message;
   /** Pre-computed quote info for messages that reply to another. */
-  reply?: { authorLabel: string; preview: string } | null;
+  reply?: { authorLabel: string; preview: string; onJump?: () => void } | null;
   reactions?: MessageReaction[];
   currentUserId?: string;
   onToggleReaction?: (emoji: string) => void;

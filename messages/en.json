@@ -287,7 +287,8 @@
       "location": "[Location]",
       "template": "[Template]",
       "message": "[Message]",
-      "cancelReply": "Cancel reply"
+      "cancelReply": "Cancel reply",
+      "jumpToOriginal": "Go to the original message"
     },
     "templatePicker": {
       "sendTemplate": "Send template",

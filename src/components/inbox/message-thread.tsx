@@ -725,6 +725,18 @@ export function MessageThread({
     return map;
   }, [messages]);
 
+  // Tapping a reply quote scrolls to the quoted message and rings it for a
+  // moment, like WhatsApp does.
+  const jumpToMessage = useCallback((id: string) => {
+    const el = document.getElementById(`msg-${id}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("ring-2", "ring-primary", "ring-offset-2", "ring-offset-background");
+    window.setTimeout(() => {
+      el.classList.remove("ring-2", "ring-primary", "ring-offset-2", "ring-offset-background");
+    }, 1600);
+  }, []);
+
   // Bucket reactions by their target message_id for O(1) per-bubble lookup.
   const reactionsByMessageId = useMemo(() => {
     const map = new Map<string, MessageReaction[]>();
@@ -1100,6 +1112,7 @@ export function MessageThread({
                               ? t("me") 
                               : contact?.name || contact?.phone || "Unknown",
                           preview: buildReplyPreview(parent, tQuote),
+                          onJump: () => jumpToMessage(parent.id),
                         }
                       : null;
                     const msgReactions = reactionsByMessageId.get(msg.id);
@@ -1115,8 +1128,8 @@ export function MessageThread({
                       void postReaction(msg.id, next);
                     };
                     return (
+                      <div key={msg.id} id={`msg-${msg.id}`} className="rounded-2xl transition-shadow duration-500">
                       <MessageActions
-                        key={msg.id}
                         message={msg}
                         onReply={() => handleStartReply(msg)}
                         onReact={(emoji) => {
@@ -1131,6 +1144,7 @@ export function MessageThread({
                           onToggleReaction={handlePillToggle}
                         />
                       </MessageActions>
+                      </div>
                     );
                   })}
                 </div>
