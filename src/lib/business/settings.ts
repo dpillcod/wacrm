@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { sanitizeAdLinks, type AdLink } from '@/lib/marketing/ad-links'
 
 // ============================================================
 // Per-account business settings — everything about the business the
@@ -75,6 +76,8 @@ export interface BusinessSettings {
    * notification) or 'whatsapp' (CRM + WhatsApp to staff on shift).
    */
   newConversationAlert: 'off' | 'app' | 'whatsapp'
+  /** Advertising links (Advertising page); changed only through /api/marketing/links. */
+  adLinks: AdLink[]
 
   /** AI help with what customers send (uses the account's AI key). */
   aiFeatures: {
@@ -220,6 +223,7 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
   shopFeedUrl: '',
   whatsappNumber: '',
   newConversationAlert: 'off',
+  adLinks: [],
   aiFeatures: { readImages: true, transcribeAudio: true, entryRouter: true, audioDailyLimit: 200, answerQuestions: true, reviewConversations: false },
   bakery: { entryNode: '' },
   texts: {
@@ -362,6 +366,7 @@ export function sanitizeSettings(stored: unknown): BusinessSettings {
     // Seven days or none (= always open); a partial week is padded closed.
     openingHours: hours.length ? [...hours, ...Array(7 - hours.length).fill(null)] : [],
     staffPhones: strings(s.staffPhones, 20),
+    adLinks: sanitizeAdLinks(s.adLinks),
     checkInWords: strings(s.checkInWords, 20).map((w) => w.toLowerCase()),
     blockedProducts: {
       terms: strings(s.blockedProducts.terms, 300).map((w) => w.toLowerCase()),

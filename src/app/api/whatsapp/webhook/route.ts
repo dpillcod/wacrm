@@ -18,7 +18,9 @@ import {
 } from '@/lib/whatsapp/catalog-order'
 import type { OrderItem, ParsedInbound } from '@/lib/flows/types'
 import { formatFormReply, parseFormReply } from '@/lib/whatsapp/flow-form'
-import { recordReferralOrigin, type MetaReferral } from '@/lib/contacts/origin'
+import { recordReferralOrigin, tagContact, type MetaReferral } from '@/lib/contacts/origin'
+import { adOriginNote, adOriginTag, findAdLink, stripAdCode } from '@/lib/marketing/ad-links'
+import { loadBusinessSettings } from '@/lib/business/settings'
 import {
   handleTemplateWebhookChange,
   isTemplateWebhookField,
@@ -773,6 +775,30 @@ async function processMessage(
     })
   }
 
+  // Wrote through an advertising link ("… #TORTAS")? Tag where from and
+  // hand the bot the message without the code.
+  let flowText = contentText
+  if (message.type === 'text' && message.text?.body?.includes('#')) {
+    const ad = findAdLink(message.text.body, (await loadBusinessSettings(supabaseAdmin(), accountId)).adLinks)
+    if (ad) {
+      flowText = stripAdCode(contentText ?? message.text.body, ad)
+      await tagContact(supabaseAdmin(), {
+        accountId,
+        userId: configOwnerUserId,
+        contactId: contactRecord.id,
+        tagName: adOriginTag(ad),
+        color: '#f59e0b',
+      })
+      const { error: noteErr } = await supabaseAdmin().from('contact_notes').insert({
+        account_id: accountId,
+        user_id: configOwnerUserId,
+        contact_id: contactRecord.id,
+        note_text: adOriginNote(ad),
+      })
+      if (noteErr) console.error('[ads] note insert failed:', noteErr.message)
+    }
+  }
+
   // If this contact was a recent broadcast recipient, flag the reply
   // so the broadcast's `replied_count` advances (via the aggregate
   // trigger installed in migration 003).
@@ -802,7 +828,7 @@ async function processMessage(
     userId: configOwnerUserId,
     contactId: contactRecord.id,
     conversationId: conversation.id,
-    message: toFlowInbound(message, contentText, mediaUrl, interactiveReplyId, orderItems, formData),
+    message: toFlowInbound(message, flowText, mediaUrl, interactiveReplyId, orderItems, formData),
     isFirstInboundMessage,
   })
   const flowConsumed = flowResult.consumed

@@ -55,8 +55,16 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: 'Missing settings object' }, { status: 400 })
   }
 
-  const settings = sanitizeSettings(input)
   const db = supabaseAdmin()
+  // Advertising links are managed on their own page: keep the saved ones,
+  // so a "My business" form opened earlier can't wipe a link made since.
+  const { data: current } = await db
+    .from('business_settings')
+    .select('settings')
+    .eq('account_id', ctx.accountId)
+    .maybeSingle()
+  const savedLinks = ((current as { settings?: { adLinks?: unknown } } | null)?.settings?.adLinks) ?? []
+  const settings = sanitizeSettings({ ...(input as Record<string, unknown>), adLinks: savedLinks })
   const { error } = await db
     .from('business_settings')
     .upsert(

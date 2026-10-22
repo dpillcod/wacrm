@@ -38,7 +38,8 @@
     "defaultAvatar": "Avatar",
     "menuProfile": "Profile",
     "menuSettings": "Settings",
-    "menuSignOut": "Sign out"
+    "menuSignOut": "Sign out",
+    "marketing": "Advertising"
   },
   "Header": {
     "dashboard": "Dashboard",
@@ -55,7 +56,8 @@
     "defaultAvatar": "Avatar",
     "menuProfile": "Profile",
     "menuSettings": "Settings",
-    "menuSignOut": "Sign out"
+    "menuSignOut": "Sign out",
+    "marketing": "Advertising"
   },
   "ModeToggle": {
     "switchMode": "Switch to {mode} mode"
@@ -2099,5 +2101,69 @@
     "checkEmail": "Check your email",
     "resetSent": "We've sent a password reset link to {email}. Please check your inbox.",
     "backToSignIn": "Back to sign in"
+  },
+  "Marketing": {
+    "title": "Advertising",
+    "desc": "Links for your posts (WhatsApp Status, Facebook, flyers…) and images ready to publish. Every customer who writes through a link is tagged with that ad.",
+    "loadFailed": "Couldn't load the advertising page.",
+    "links": {
+      "title": "Advertising links",
+      "desc": "Create one link per post. Tapping it opens WhatsApp with a pre-written message ending in a code (#CAKES). The bot answers as usual and the customer gets an «Origen: …» tag, so you can see which ad works.",
+      "noNumber": "The business WhatsApp number is missing in Settings → My business.",
+      "name": "What is the ad about?",
+      "namePlaceholder": "Birthday cakes",
+      "channel": "Where is it published?",
+      "message": "Message the customer arrives with",
+      "messageHint": "The customer can change it before sending; the code is added at the end.",
+      "defaultMessage": "Hi 👋 I saw your ad for {name}",
+      "code": "Code (optional)",
+      "codePlaceholder": "Made automatically",
+      "create": "Create link",
+      "created": "Link created",
+      "codeTaken": "That code already exists, pick another one.",
+      "saveFailed": "Couldn't save.",
+      "empty": "No links yet.",
+      "stats": "{contacts} customers · {orders} orders or requests",
+      "copy": "Copy link",
+      "test": "Try it",
+      "delete": "Delete",
+      "confirmDelete": "Delete the link «{name}»? Customers who already wrote keep their tag.",
+      "copied": "Copied",
+      "copyFailed": "Couldn't copy"
+    },
+    "image": {
+      "title": "Status image",
+      "desc": "Search a product of the web shop (photo and price) or upload a photo, adjust the texts and download the vertical image for your WhatsApp Status or stories.",
+      "searchPlaceholder": "Search a product…",
+      "upload": "Upload photo",
+      "noResults": "No results.",
+      "noPhotoShort": "No photo",
+      "noPhoto": "Search a product or upload a photo",
+      "photoFailed": "Couldn't load the photo.",
+      "productName": "Product name",
+      "productNameHint": "Shop names are sometimes abbreviated: write it the way you'd say it to a customer.",
+      "price": "Price",
+      "oldPrice": "Previous price (optional, struck through)",
+      "badge": "Label",
+      "badgeDefault": "Offer",
+      "theme": "Colors",
+      "themes": {
+        "yellow": "Black and yellow",
+        "red": "Red",
+        "green": "Green",
+        "white": "Black and white"
+      },
+      "footer": "Bottom text",
+      "footerDefault": "Order on WhatsApp",
+      "captionLink": "Link for the Status text",
+      "noLink": "No link",
+      "captionEmpty": "Pick a product to build the text.",
+      "copyCaption": "Copy text",
+      "orderHere": "Order here:",
+      "download": "Download image",
+      "howTo": "Move the image to your phone, post it to your Status and paste the text with the link.",
+      "copied": "Copied",
+      "copyFailed": "Couldn't copy"
+    }
   }
 }

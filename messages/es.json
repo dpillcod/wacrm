@@ -38,7 +38,8 @@
     "defaultAvatar": "Foto",
     "menuProfile": "Perfil",
     "menuSettings": "Ajustes",
-    "menuSignOut": "Cerrar sesión"
+    "menuSignOut": "Cerrar sesión",
+    "marketing": "Publicidad"
   },
   "Header": {
     "dashboard": "Panel",
@@ -55,7 +56,8 @@
     "defaultAvatar": "Foto",
     "menuProfile": "Perfil",
     "menuSettings": "Ajustes",
-    "menuSignOut": "Cerrar sesión"
+    "menuSignOut": "Cerrar sesión",
+    "marketing": "Publicidad"
   },
   "ModeToggle": {
     "switchMode": "Cambiar a modo {mode}"
@@ -2099,5 +2101,69 @@
     "checkEmail": "Revise su correo",
     "resetSent": "Enviamos un enlace para cambiar la contraseña a {email}. Revise su bandeja de entrada.",
     "backToSignIn": "Volver a ingresar"
+  },
+  "Marketing": {
+    "title": "Publicidad",
+    "desc": "Enlaces para sus publicaciones (Estado de WhatsApp, Facebook, volantes…) e imágenes listas para publicar. Cada cliente que escribe por un enlace queda marcado con esa publicidad.",
+    "loadFailed": "No se pudo cargar la página de publicidad.",
+    "links": {
+      "title": "Enlaces de publicidad",
+      "desc": "Cree un enlace por publicación. Al tocarlo, el cliente abre WhatsApp con un mensaje ya escrito que termina en un código (#TORTAS). El bot lo atiende normal y el cliente queda con la etiqueta «Origen: …» para saber qué publicidad funciona.",
+      "noNumber": "Falta el número de WhatsApp del negocio en Ajustes → Mi negocio.",
+      "name": "¿De qué es la publicidad?",
+      "namePlaceholder": "Tortas de cumpleaños",
+      "channel": "¿Dónde se publica?",
+      "message": "Mensaje con el que llega el cliente",
+      "messageHint": "El cliente lo puede cambiar antes de enviarlo; el código se agrega al final.",
+      "defaultMessage": "Hola 👋 Vi su publicidad de {name}",
+      "code": "Código (opcional)",
+      "codePlaceholder": "Se arma solo",
+      "create": "Crear enlace",
+      "created": "Enlace creado",
+      "codeTaken": "Ese código ya existe, elija otro.",
+      "saveFailed": "No se pudo guardar.",
+      "empty": "Todavía no hay enlaces.",
+      "stats": "{contacts} clientes · {orders} pedidos o solicitudes",
+      "copy": "Copiar enlace",
+      "test": "Probar",
+      "delete": "Eliminar",
+      "confirmDelete": "¿Eliminar el enlace «{name}»? Los clientes que ya escribieron conservan su etiqueta.",
+      "copied": "Copiado",
+      "copyFailed": "No se pudo copiar"
+    },
+    "image": {
+      "title": "Imagen para el Estado",
+      "desc": "Busque un producto de la web (foto y precio) o suba una foto, ajuste los textos y descargue la imagen vertical para su Estado de WhatsApp o historias.",
+      "searchPlaceholder": "Buscar producto: torta, pintura, arroz…",
+      "upload": "Subir foto",
+      "noResults": "Sin resultados.",
+      "noPhotoShort": "Sin foto",
+      "noPhoto": "Busque un producto o suba una foto",
+      "photoFailed": "No se pudo cargar la foto.",
+      "productName": "Nombre del producto",
+      "productNameHint": "Los nombres de la web a veces vienen abreviados: escríbalo como lo diría a un cliente.",
+      "price": "Precio",
+      "oldPrice": "Precio anterior (opcional, sale tachado)",
+      "badge": "Etiqueta",
+      "badgeDefault": "Oferta",
+      "theme": "Colores",
+      "themes": {
+        "yellow": "Negro y amarillo",
+        "red": "Rojo",
+        "green": "Verde",
+        "white": "Blanco y negro"
+      },
+      "footer": "Texto de abajo",
+      "footerDefault": "Pídalo por WhatsApp",
+      "captionLink": "Enlace para el texto del Estado",
+      "noLink": "Sin enlace",
+      "captionEmpty": "Elija un producto para armar el texto.",
+      "copyCaption": "Copiar texto",
+      "orderHere": "Pídalo aquí:",
+      "download": "Descargar imagen",
+      "howTo": "Pase la imagen a su celular, publíquela en el Estado y pegue el texto con el enlace.",
+      "copied": "Copiado",
+      "copyFailed": "No se pudo copiar"
+    }
   }
 }
