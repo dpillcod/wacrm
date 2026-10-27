@@ -39,6 +39,7 @@ import {
 } from '@/lib/whatsapp/interactive';
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption';
 import { supabaseAdmin } from '@/lib/flows/admin-client';
+import { TEMPLATES_DISABLED_MESSAGE, templatesAllowed } from '@/lib/business/settings';
 import {
   sanitizePhoneForMeta,
   isValidE164,
@@ -309,6 +310,10 @@ export async function sendMessageToConversation(
     } else {
       contextMessageId = parent.message_id;
     }
+  }
+
+  if (messageType === 'template' && !(await templatesAllowed(db, accountId))) {
+    throw new SendMessageError('templates_disabled', TEMPLATES_DISABLED_MESSAGE, 403);
   }
 
   // Template row (for header + button components). isMessageTemplate

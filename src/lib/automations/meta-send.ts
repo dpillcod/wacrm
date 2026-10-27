@@ -13,6 +13,7 @@ import {
   isRecipientNotAllowedError,
 } from '@/lib/whatsapp/phone-utils'
 import { supabaseAdmin } from './admin-client'
+import { TEMPLATES_DISABLED_MESSAGE, templatesAllowed } from '@/lib/business/settings'
 
 // ------------------------------------------------------------
 // Automation-side Meta sender.
@@ -122,6 +123,9 @@ type SendInput =
 
 async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: string }> {
   const db = supabaseAdmin()
+  if (input.kind === 'template' && !(await templatesAllowed(db, input.accountId))) {
+    throw new Error(TEMPLATES_DISABLED_MESSAGE)
+  }
 
   // Scope the contact + config lookups by account_id, not user_id.
   // The engine uses the service-role client (bypassing RLS); without

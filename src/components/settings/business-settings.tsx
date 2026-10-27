@@ -408,6 +408,19 @@ export function BusinessSettingsPanel() {
       </Section>
 
       <Section title={t("ai.title")} description={t("ai.desc")}>
+        <label className="flex items-start gap-2 text-sm text-foreground">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={s.allowPaidTemplates}
+            disabled={readOnly}
+            onChange={(e) => set({ allowPaidTemplates: e.target.checked })}
+          />
+          <span>
+            {t("templates.allow")}
+            <span className="block text-xs text-muted-foreground">{t("templates.allowHint")}</span>
+          </span>
+        </label>
         {AI_FEATURE_KEYS.map((key) => (
           <label key={key} className="flex items-start gap-2 text-sm text-foreground">
             <input

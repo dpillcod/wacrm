@@ -22,6 +22,7 @@ import {
   isRecipientNotAllowedError,
 } from '@/lib/whatsapp/phone-utils'
 import { supabaseAdmin } from './admin-client'
+import { TEMPLATES_DISABLED_MESSAGE, templatesAllowed } from '@/lib/business/settings'
 
 // ------------------------------------------------------------
 // Flows-side Meta sender (interactive variants).
@@ -181,6 +182,7 @@ export async function engineSendTemplate(
   args: SendTemplateEngineArgs,
 ): Promise<{ whatsapp_message_id: string }> {
   const db = supabaseAdmin()
+  if (!(await templatesAllowed(db, args.accountId))) throw new Error(TEMPLATES_DISABLED_MESSAGE)
 
   const { data: contact, error: contactErr } = await db
     .from('contacts')

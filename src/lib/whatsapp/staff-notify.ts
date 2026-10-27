@@ -283,7 +283,7 @@ export async function notifyStaffOfHandoff(
   const biz = await loadBusinessSettings(db, args.accountId)
   const phones = getStaffPhones(biz)
   if (phones.length === 0) return { sent: [], failed: [], skipped: [] }
-  const asTemplate = process.env.ORDER_NOTIFICATION_MODE === 'template'
+  const asTemplate = process.env.ORDER_NOTIFICATION_MODE === 'template' && biz.allowPaidTemplates
 
   const templateName = process.env.ORDER_NOTIFICATION_TEMPLATE ?? 'aviso_pedido_nuevo'
   const templateLanguage = process.env.ORDER_NOTIFICATION_TEMPLATE_LANG ?? 'es'

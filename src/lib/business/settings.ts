@@ -76,6 +76,12 @@ export interface BusinessSettings {
    * notification) or 'whatsapp' (CRM + WhatsApp to staff on shift).
    */
   newConversationAlert: 'off' | 'app' | 'whatsapp'
+  /**
+   * Allow sending WhatsApp message templates (Inbox, broadcasts, flows,
+   * automations). Meta charges for templates, so they're off until the
+   * business turns them on; replies within 24 h are free and unaffected.
+   */
+  allowPaidTemplates: boolean
   /** Advertising links (Advertising page); changed only through /api/marketing/links. */
   adLinks: AdLink[]
 
@@ -223,6 +229,7 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
   shopFeedUrl: '',
   whatsappNumber: '',
   newConversationAlert: 'off',
+  allowPaidTemplates: false,
   adLinks: [],
   aiFeatures: { readImages: true, transcribeAudio: true, entryRouter: true, audioDailyLimit: 200, answerQuestions: true, reviewConversations: false },
   bakery: { entryNode: '' },
@@ -384,6 +391,14 @@ export function sanitizeSettings(stored: unknown): BusinessSettings {
       .map((r) => ({ keyword: r.keyword.trim().toLowerCase(), suggestion: r.suggestion.trim() }))
       .slice(0, 200),
   }
+}
+
+export const TEMPLATES_DISABLED_MESSAGE =
+  'Message templates are turned off in Settings → My business (Meta charges for them).'
+
+/** Whether this business allows sending (paid) message templates. */
+export async function templatesAllowed(db: SupabaseClient, accountId: string): Promise<boolean> {
+  return (await loadBusinessSettings(db, accountId)).allowPaidTemplates
 }
 
 const CACHE_MS = 60_000

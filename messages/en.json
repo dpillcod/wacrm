@@ -207,7 +207,8 @@
       "templateSendFailed": "Failed to send template: {reason}",
       "waitForSend": "Wait for the message to finish sending",
       "reactionFailed": "Reaction failed: {reason}",
-      "assignFailed": "Failed to update assignment"
+      "assignFailed": "Failed to update assignment",
+      "templatesDisabled": "templates are turned off in Settings → My business (Meta charges for them)"
     },
     "sessionTimer": {
       "expired": "Expired",
@@ -1918,6 +1919,10 @@
           "cancelled": "Order was cancelled",
           "none": "No recent order"
         }
+      },
+      "templates": {
+        "allow": "Allow message templates (paid)",
+        "allowHint": "Templates are the only messages Meta charges for (writing to someone silent for 24 h, broadcasts, marketing). Off = nobody can send them from the Inbox, broadcasts, flows or automations. Replies to customers stay free."
       }
     },
     "deals": {

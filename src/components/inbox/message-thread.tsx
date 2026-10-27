@@ -699,7 +699,10 @@ export function MessageThread({
         const payload = await res.json().catch(() => ({}));
 
         if (!res.ok) {
-          const reason = payload?.error || `HTTP ${res.status}`;
+          const reason =
+            payload?.code === "templates_disabled"
+              ? t("templatesDisabled")
+              : payload?.error || `HTTP ${res.status}`;
           console.error("Failed to send template:", reason);
           toast.error(t("templateSendFailed", { reason }));
           onUpdateMessage(tempId, { status: "failed" });

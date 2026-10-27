@@ -19,6 +19,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { sendTemplateMessage } from '@/lib/whatsapp/meta-api';
+import { TEMPLATES_DISABLED_MESSAGE, templatesAllowed } from '@/lib/business/settings';
 import { decrypt } from '@/lib/whatsapp/encryption';
 import {
   sanitizePhoneForMeta,
@@ -107,6 +108,10 @@ export async function createBroadcast(
       `A broadcast is capped at ${MAX_RECIPIENTS} recipients per request; split larger sends`,
       400
     );
+  }
+
+  if (!(await templatesAllowed(db, accountId))) {
+    throw new BroadcastError('templates_disabled', TEMPLATES_DISABLED_MESSAGE, 403);
   }
 
   // Config (fail fast + provides the audit trail owner already resolved

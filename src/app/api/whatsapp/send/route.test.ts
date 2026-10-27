@@ -137,6 +137,12 @@ vi.mock('@/lib/flows/admin-client', () => ({
   }),
 }))
 
+// This account allows (paid) templates — the switch in My business.
+vi.mock('@/lib/business/settings', () => ({
+  TEMPLATES_DISABLED_MESSAGE: 'templates off',
+  templatesAllowed: vi.fn(async () => true),
+}))
+
 vi.mock('@/lib/whatsapp/encryption', () => ({
   decrypt: vi.fn(() => 'plaintext-token'),
   encrypt: vi.fn(() => 'enc-token'),

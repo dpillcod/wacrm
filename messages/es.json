@@ -207,7 +207,8 @@
       "templateSendFailed": "No se pudo enviar la plantilla: {reason}",
       "waitForSend": "Espere a que el mensaje termine de enviarse",
       "reactionFailed": "No se pudo reaccionar: {reason}",
-      "assignFailed": "No se pudo cambiar la asignación"
+      "assignFailed": "No se pudo cambiar la asignación",
+      "templatesDisabled": "las plantillas están apagadas en Ajustes → Mi negocio (Meta las cobra)"
     },
     "sessionTimer": {
       "expired": "Vencida",
@@ -1918,6 +1919,10 @@
           "cancelled": "El pedido fue cancelado",
           "none": "No hay pedido reciente"
         }
+      },
+      "templates": {
+        "allow": "Permitir plantillas (con costo)",
+        "allowHint": "Las plantillas son los únicos mensajes que Meta cobra (escribir a quien no habló en 24 h, difusiones, publicidad). Apagado = nadie puede enviarlas desde el Inbox, difusiones, flujos ni automatizaciones. Las respuestas a clientes siguen siendo gratis."
       }
     },
     "deals": {
