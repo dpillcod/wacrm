@@ -1827,7 +1827,9 @@
         "blockedTermsHint": "Palabras separadas por comas. El alcohol ya viene incluido (política de comercio de Meta).",
         "blockedReply": "Respuesta cuando piden un producto bloqueado",
         "crossSell": "Sugerencias (una por línea: palabra = sugerencia)",
-        "crossSellHint": "Por ejemplo \"pan = Por cierto, ¿le gustaría también queso? 🙂\". Máximo una por conversación."
+        "crossSellHint": "Por ejemplo \"pan = Por cierto, ¿le gustaría también queso? 🙂\". Máximo una por conversación.",
+        "seasonal": "Respuestas de temporada",
+        "seasonalHint": "Cuando el cliente nombra una de estas palabras, el bot responde con el texto (una vez al día por cliente). Primera línea: palabras separadas por coma y, después de \"|\", el último día (AAAA-MM-DD). Luego el texto. Separe cada respuesta con una línea \"---\"."
       },
       "texts": {
         "title": "Textos del bot",

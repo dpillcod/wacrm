@@ -1827,7 +1827,9 @@
         "blockedTermsHint": "Comma-separated words. Alcohol is included by default (Meta's Commerce Policy).",
         "blockedReply": "Reply when a blocked product is ordered",
         "crossSell": "Suggestions (one per line: word = suggestion)",
-        "crossSellHint": "E.g. \"bread = By the way, would you like some cheese? 🙂\". At most one per conversation."
+        "crossSellHint": "E.g. \"bread = By the way, would you like some cheese? 🙂\". At most one per conversation.",
+        "seasonal": "Seasonal replies",
+        "seasonalHint": "When a customer mentions one of these words, the bot answers with the text (once a day per customer). First line: comma-separated words and, after \"|\", the last day (YYYY-MM-DD). Then the text. Separate replies with a \"---\" line."
       },
       "texts": {
         "title": "Bot texts",

@@ -37,14 +37,14 @@ function normalize(text: string): string {
 
 /** Greetings and courtesy words customers put before a question. */
 const LEAD_IN =
-  /^((hola|buenas|buenos|buen|dias|dia|tardes|noches|como esta|como estan|que tal|disculpe|disculpa|perdon|por favor|porfa|una pregunta|una consulta|consulta|pregunta|estimado|estimada|amigo|amiga|señorita|senorita|joven|oiga|oye)[\s,]*)+/;
+  /^((hola|buenas|buenos|buen|dias|dia|tardes|noches|como esta|como estan|que tal|disculpe|disculpa|perdon|por favor|porfa|una pregunta|una consulta|consulta|pregunta|estimado|estimada|amigo|amiga|señorita|senorita|joven|oiga|oye|veci|vecino|vecina|vecinito|vecinita|talvez|tal vez|de pronto)[\s,]*)+/;
 
 // "Perfecto, ¿saben venir en paquetes?": an acknowledgement before the
 // question. Whole words only ("y" must not eat the start of "yogur").
 const ACK_LEAD_IN = /^((perfecto|ok|okey|listo|bueno|claro|gracias|muchas gracias|dale|ya|y)([\s,.!]+|$))+/;
 
 const QUESTION_START =
-  /^(tiene|tienen|tendra|tendran|tendras|hay|habra|dispone|disponen|venden|vende|manejan|maneja|hacen|hace|realizan|aceptan|acepta|reciben|puedo|puede|pueden|se puede|como|donde|cuando|a que hora|hasta que hora|desde que hora|que|cual|cuales|cuanto|cuantos|cuanta|envian|entregan|llevan|trabajan|atienden|abren|cierran|facturan|me pueden|me puede|quisiera saber|queria saber|sabe si|saben si|sabe|saben|suelen|viene|vienen|existe|consiguen|traen|tenian|tenia|habia|habian|vendian|vendia|en que|de que|con que|que colores?|cuales colores|que tamanos?|que medidas?|que modelos?|que marcas?|esta funcionando|funciona)\b/;
+  /^(tiene|tienen|tendra|tendran|tendras|hay|habra|dispone|disponen|venden|vende|manejan|maneja|hacen|hace|realizan|aceptan|acepta|reciben|puedo|puede|pueden|se puede|como|donde|cuando|a que hora|hasta que hora|desde que hora|que|cual|cuales|cuanto|cuantos|cuanta|envian|entregan|llevan|trabajan|atienden|abren|cierran|facturan|me pueden|me puede|quisiera saber|queria saber|sabe si|saben si|sabe|saben|suelen|viene|vienen|existe|consiguen|traen|tenian|tenia|habia|habian|vendian|vendia|dispongan|disponga|tengan|tenga|vendan|me pueda|me puedan|me podria|me podrian|podria|podrian|me confirma|me confirman|confirmeme|en que|de que|con que|que colores?|cuales colores|que tamanos?|que medidas?|que modelos?|que marcas?|esta funcionando|funciona)\b/;
 
 /**
  * Whether a message is a question rather than an order line: it has a
@@ -91,7 +91,8 @@ export function productSearchText(text: string): string {
     .trim();
 }
 
-const AFFIRMATIVE = /^(si|ok|okey|dale|claro|bueno|ya|por favor|porfa|anotelo|agreguelo|apuntelo|de una|perfecto)(?=$|[\s,.!])[\s,.!]*/i;
+// "Sí, por favor", "me confirma" after the offer: one or more of these.
+const AFFIRMATIVE = /^((si|ok|okey|dale|claro|bueno|ya|por favor|porfavor|porfa|anotelo|agreguelo|apuntelo|de una|perfecto|me confirma|me confirman|confirmeme|me lo anota|me anota)(?=$|[\s,.!])[\s,.!]*)+/i;
 
 /**
  * After the bot offered to add `product`: "sí" → "1 product", "sí, 10

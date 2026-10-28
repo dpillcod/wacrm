@@ -14,6 +14,8 @@ import { sanitizeAdLinks, type AdLink } from '@/lib/marketing/ad-links'
 // Texts may carry {placeholders}; see renderText.
 // ============================================================
 
+import { sanitizeSeasonalReplies, type SeasonalReply } from './seasonal-replies'
+
 export interface CrossSellRule {
   keyword: string
   suggestion: string
@@ -53,6 +55,8 @@ export interface BusinessSettings {
   customerInfo: string
   /** "If they order X, suggest Y" — one aside per conversation. */
   crossSell: CrossSellRule[]
+  /** Campaign answers for words like "canasta" — see seasonal-replies.ts. */
+  seasonalReplies: SeasonalReply[]
   /** Contact custom field holding the birthday (MM-DD) for the birthday flow. */
   birthdayFieldName: string
   /** One line about delivery shown in the product picker's cart ('' = none). */
@@ -221,6 +225,7 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
   aiBusinessDescription: 'una tienda',
   customerInfo: '',
   crossSell: [],
+  seasonalReplies: [],
   birthdayFieldName: 'Fecha de nacimiento',
   idNumberFieldName: 'Cédula',
   shopDeliveryNote: '',
@@ -374,6 +379,7 @@ export function sanitizeSettings(stored: unknown): BusinessSettings {
     openingHours: hours.length ? [...hours, ...Array(7 - hours.length).fill(null)] : [],
     staffPhones: strings(s.staffPhones, 20),
     adLinks: sanitizeAdLinks(s.adLinks),
+    seasonalReplies: sanitizeSeasonalReplies(s.seasonalReplies),
     checkInWords: strings(s.checkInWords, 20).map((w) => w.toLowerCase()),
     blockedProducts: {
       terms: strings(s.blockedProducts.terms, 300).map((w) => w.toLowerCase()),

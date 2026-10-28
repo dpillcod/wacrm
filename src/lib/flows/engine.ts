@@ -115,6 +115,7 @@ import {
   outOfHoursNotice,
 } from "./store-policy";
 import { loadBusinessSettings, renderText, type BusinessSettings } from "../business/settings";
+import { findSeasonalReply, localDate } from "../business/seasonal-replies";
 import {
   type CollectInputNodeConfig,
   type ConditionNodeConfig,
@@ -365,16 +366,46 @@ export function isQuestionOpener(text: string): boolean {
 
 /** "Una cotización formal", "una proforma": a person prepares it. */
 export function isFormalQuoteRequest(text: string): boolean {
-  return /\b(cotizacion formal|cotizacion por escrito|cotizacion en pdf|cotizacion membretada|proforma|pro forma)\b/.test(
+  return /\b(cotizacion formal|cotizacion por escrito|cotizacion en pdf|cotizacion membretada|proforma|pro forma|cotizar (un|el|mi|este|unos|los) (pedido|material|materiales|lista|listado)|cotizacion (de|del|para) (un|el|mi|una) (pedido|obra|material|materiales|lista)|cotizar [a-z0-9ñ ]{0,40}para (mi|nuestra|la|una) (empresa|institucion|oficina|compania|negocio))\b/.test(
     normalizeForMatch(text),
   );
+}
+
+/** "Gracias, ya no necesito", "olvídelo": the customer drops the order. */
+export function isOrderCancel(text: string): boolean {
+  const t = normalizeForMatch(text);
+  return t.length <= 80 &&
+    /\b(ya no (necesito|quiero|deseo|hace falta|es necesario|gracias)|ya no lo (necesito|quiero)|ya no nada|olvidelo|olvidalo|cancel(ar|e|o)( (el|mi))? pedido|ya (lo )?compre|ya (lo )?consegui|ya me fui a comprar)\b/.test(t);
+}
+
+/** The website chat button's default text, about the site itself (no real question in it). */
+export function isWebsiteChatGreeting(text: string): boolean {
+  const m = normalizeForMatch(text).match(/necesito mas informacion sobre (.*)$/);
+  if (!m) return false;
+  // What's left is only web addresses: "ferrotiendaec com https ferrotiendaec com".
+  const words = m[1].split(" ").filter(Boolean);
+  const tld = /^(com|ec|net|org|es)$/;
+  return words.length > 0 && words.some((w) => tld.test(w)) &&
+    words.every((w, i) => /^(https?|www)$/.test(w) || tld.test(w) || (!!words[i + 1] && tld.test(words[i + 1])));
+}
+
+/** "¿Me puede ayudar?", "¿hola?", "¿alguien?": still waiting for someone. */
+export function isHelpNudge(text: string): boolean {
+  return /^(hola |veci |disculpe )?(me (puede|pueden|podria|podrian) (ayudar|atender)|alguien (me )?(atiende|ayuda|responde)|alguien|ayuda|ayudeme|hola|me atienden|me ayudan)( por favor| porfa)?$/.test(
+    normalizeForMatch(text),
+  ) && /\?|ayud|alguien|atien/.test(text.toLowerCase());
+}
+
+/** A location shared from WhatsApp (the webhook writes it as a Google Maps link). */
+export function isSharedLocation(text: string): boolean {
+  return /https:\/\/maps\.google\.com\/\?q=-?\d/.test(text) && text.length <= 300;
 }
 
 /** A supplier, a salesperson or a sponsorship request — not a customer ordering. */
 export function isVendorPitch(text: string): boolean {
   const t = normalizeForMatch(text);
   return t.split(" ").length >= 6 &&
-    /\b(les compartimos|les ofrecemos|ofrecemos nuestros|ofrecerles|nuestros (equipos|productos|servicios) en venta|equipos en venta|propuesta (comercial|de auspicio|de patrocinio)|auspicio|patrocinio|somos (una )?(empresa|distribuidora|importadora)|soy (asesor|ejecutivo|ejecutiva|representante) (comercial|de ventas)|quisiera ofrecerles|quiero ofrecerles)\b/.test(t);
+    /\b(les compartimos|les ofrecemos|ofrecemos nuestros|ofrecerles|nuestros (equipos|productos|servicios) en venta|equipos en venta|propuesta (comercial|de auspicio|de patrocinio)|auspicio|patrocinio|nuestros servicios de|somos (una )?(empresa|distribuidora|importadora|agencia)|soy (asesor|ejecutivo|ejecutiva|representante) (comercial|de ventas)|quisiera ofrecerles|quiero ofrecerles|(queria|quisiera|quiero|queremos) (contarles|presentarles|comentarles)|les (presento|presentamos|escribo de parte)|estamos (probando|ofreciendo|lanzando)|asistente (virtual|de ia|con ia)|chatbot|agendar una (demo|reunion|llamada)|una demo)\b/.test(t);
 }
 
 /** "Muéstreme los que tiene", "¿qué modelos hay?" without a question mark: show the catalog. */
@@ -1818,28 +1849,120 @@ export function documentName(mediaUrl: string | null | undefined): string {
   }
 }
 
-/** A file from the customer (a PDF to print, a list): say so, tell the team. */
-async function acknowledgeDocument(
+/** Seasonal replies already sent, by conversation and rule — once a day each. */
+const seasonalSent = new Map<string, number>();
+
+/**
+ * The seasonal reply for this message, if one applies and wasn't sent to
+ * this conversation in the last day. `continues`: the message is also an
+ * order line ("2 canastas") and should still be written down.
+ */
+async function seasonalReplyFor(
   db: AdminClient,
-  input: Pick<DispatchInboundInput, "accountId" | "userId" | "conversationId" | "contactId" | "message">,
-  run: FlowRunRow | null,
-): Promise<void> {
-  const biz = await bizOf(db, input.accountId);
-  const url = input.message.kind === "other" ? input.message.media_url : null;
-  const name = documentName(url);
-  try {
-    await engineSendText({
-      accountId: input.accountId,
-      userId: input.userId,
-      conversationId: input.conversationId,
-      contactId: input.contactId,
-      text: renderText(biz.texts.documentReceived, { archivo: name ? ` *${name}*` : "" }),
+  accountId: string,
+  conversationId: string,
+  text: string,
+): Promise<{ reply: string; continues: boolean } | null> {
+  const biz = await bizOf(db, accountId);
+  if (biz.seasonalReplies.length === 0) return null;
+  const hit = findSeasonalReply(biz.seasonalReplies, text, localDate(biz.utcOffsetHours));
+  if (!hit) return null;
+  const key = `${conversationId}:${hit.index}`;
+  if (Date.now() - (seasonalSent.get(key) ?? 0) < 24 * 3_600_000) return null;
+  seasonalSent.set(key, Date.now());
+  // "Quiero reservar la Canasta Reyes Magos" (the campaign page's button)
+  // is an order too: answered AND written down.
+  const ordering = /^\s*\d/.test(text) ||
+    /\b(quiero|quisiera|deseo|necesito|reservar|reservo|reserveme|separar|separeme|apartar|pedir|encargar)\b/.test(normalizeForMatch(text));
+  return { reply: hit.rule.reply, continues: ordering };
+}
+
+/** A shared location: on the run (for the order), the contact's notes and the order's card. */
+async function saveDeliveryLocation(db: AdminClient, run: FlowRunRow, text: string): Promise<void> {
+  const link = text.match(/https:\/\/maps\.google\.com\/\?q=\S+/)?.[0] ?? text.trim();
+  await saveVars(db, run, { ...run.vars, delivery_location: link });
+  if (run.contact_id) {
+    const { error } = await db.from("contact_notes").insert({
+      account_id: run.account_id,
+      user_id: run.user_id,
+      contact_id: run.contact_id,
+      note_text: `📍 Ubicación para el envío: ${text.trim()}`,
     });
+    if (error) console.error("[flows] location note failed:", error.message);
+  }
+  if (typeof run.vars.__deal_id === "string") {
+    const { data: deal } = await db.from("deals").select("notes").eq("id", run.vars.__deal_id).maybeSingle();
+    const notes = ((deal as { notes?: string | null } | null)?.notes ?? "").trim();
+    await db.from("deals").update({ notes: `${notes}\n📍 Ubicación: ${link}`.trim() }).eq("id", run.vars.__deal_id);
+  }
+}
+
+/**
+ * Files sent together (three PDFs and a photo to print) get ONE
+ * acknowledgement and one alert, a few seconds after the last one.
+ * In memory, like the reply debounce (one long-lived container).
+ */
+const DOCUMENT_BATCH_MS = 4_000;
+/** A photo this soon after a file is part of the same batch (to print), not a list to read. */
+const DOCUMENT_COMPANION_MS = 3 * 60_000;
+const pendingDocuments = new Map<string, {
+  names: string[];
+  urls: string[];
+  timer: ReturnType<typeof setTimeout>;
+  input: Pick<DispatchInboundInput, "accountId" | "userId" | "conversationId" | "contactId">;
+  run: FlowRunRow | null;
+}>();
+const lastDocumentAt = new Map<string, number>();
+
+/** Whether a file arrived in this conversation in the last few minutes. */
+function documentJustReceived(conversationId: string | null): boolean {
+  if (!conversationId) return false;
+  return pendingDocuments.has(conversationId) ||
+    Date.now() - (lastDocumentAt.get(conversationId) ?? 0) < DOCUMENT_COMPANION_MS;
+}
+
+/** One more file (or a photo that goes with them) for this conversation's batch. */
+function queueDocument(
+  db: AdminClient,
+  input: Pick<DispatchInboundInput, "accountId" | "userId" | "conversationId" | "contactId">,
+  run: FlowRunRow | null,
+  name: string,
+  url: string | null,
+): void {
+  const key = input.conversationId;
+  lastDocumentAt.set(key, Date.now());
+  const batch = pendingDocuments.get(key);
+  if (batch) clearTimeout(batch.timer);
+  const next = {
+    names: [...(batch?.names ?? []), name],
+    urls: [...(batch?.urls ?? []), ...(url ? [url] : [])],
+    input,
+    run: run ?? batch?.run ?? null,
+    timer: setTimeout(() => {
+      pendingDocuments.delete(key);
+      flushDocuments(db, next).catch((err) => console.error("[flows] document acknowledgement failed:", err));
+    }, DOCUMENT_BATCH_MS),
+  };
+  pendingDocuments.set(key, next);
+}
+
+async function flushDocuments(
+  db: AdminClient,
+  batch: { names: string[]; urls: string[]; input: Pick<DispatchInboundInput, "accountId" | "userId" | "conversationId" | "contactId">; run: FlowRunRow | null },
+): Promise<void> {
+  const { input, run, names, urls } = batch;
+  const biz = await bizOf(db, input.accountId);
+  const first = names.find(Boolean) ?? "";
+  const archivo = names.length > 1
+    ? `${first ? ` *${first}*` : ""} y ${names.length - 1} más`
+    : first ? ` *${first}*` : "";
+  try {
+    await engineSendText({ ...input, text: renderText(biz.texts.documentReceived, { archivo }) });
   } catch (err) {
     console.error("[flows] document acknowledgement failed:", err);
   }
-  const body = `El cliente envió un archivo${name ? `: ${name}` : ""}. Revíselo en la conversación.${url ? `
-${url}` : ""}`;
+  const listed = names.map((n) => n || "foto").join(", ");
+  const body = `El cliente envió ${names.length > 1 ? `${names.length} archivos` : "un archivo"}${listed ? `: ${listed}` : ""}. Revíselo en la conversación.${urls.length ? `\n${urls.join("\n")}` : ""}`;
   if (run) {
     await notifyTeamInApp(db, run, run.current_node_key, { title: orderTitle(run, "📄 Archivo del cliente"), body });
   } else {
@@ -1851,6 +1974,23 @@ ${url}` : ""}`;
       body,
     });
   }
+}
+
+/** A file from the customer (a PDF to print, a list): say so, tell the team. */
+async function acknowledgeDocument(
+  db: AdminClient,
+  input: Pick<DispatchInboundInput, "accountId" | "userId" | "conversationId" | "contactId" | "message">,
+  run: FlowRunRow | null,
+): Promise<void> {
+  const url = input.message.kind === "other" || input.message.kind === "image" ? input.message.media_url : null;
+  const name = input.message.kind === "image" ? "" : documentName(url);
+  queueDocument(
+    db,
+    { accountId: input.accountId, userId: input.userId, conversationId: input.conversationId, contactId: input.contactId },
+    run,
+    name,
+    url,
+  );
 }
 
 /** The service advisor's open question (see CollectInputNodeConfig.ai_guide). */
@@ -1963,6 +2103,7 @@ async function sendRecovery(db: AdminClient, runId: string, nodeKey: string): Pr
   if (!run || run.status !== "active" || run.current_node_key !== nodeKey || run.vars.__recovered) return;
   const biz = await bizOf(db, run.account_id);
   if (!isWithinBusinessHours(biz) || !runHoldsList(run)) return;
+  if (await personIsOnIt(db, run)) return;
   const list = Object.entries(run.vars).find(([k, v]) => k.endsWith("_numbered") && typeof v === "string" && v.trim());
   const lines = String(list?.[1] ?? "").split("\n").filter(Boolean);
   const preview = lines.slice(0, 5).join("\n") + (lines.length > 5 ? `\n… (+${lines.length - 5})` : "");
@@ -2394,6 +2535,12 @@ async function teamRecentlyActive(db: AdminClient, conversationId: string): Prom
     .gte("created_at", new Date(Date.now() - 3 * 3_600_000).toISOString())
     .limit(1);
   return (data ?? []).length > 0;
+}
+
+/** The team was alerted about this run, or someone from it wrote in the chat lately. */
+async function personIsOnIt(db: AdminClient, run: FlowRunRow): Promise<boolean> {
+  if (Array.isArray(run.vars.__trouble_alerts) && run.vars.__trouble_alerts.length > 0) return true;
+  return !!run.conversation_id && (await teamRecentlyActive(db, run.conversation_id));
 }
 
 /** "Buenas tardes" right after placing an order: its status instead of the menu. */
@@ -2839,6 +2986,20 @@ async function dispatchInboundToFlowsInner(
       if (claimed) return claimed;
     }
 
+    // The order summary the web store has the buyer send ("🛒 Nuevo
+    // Pedido … N°: 54376") before the store's own webhook started its
+    // run: the web order's run picks it up when it starts (see
+    // catchUpWaitingRun). Never written down as a WhatsApp list.
+    if (input.message.kind === "text") {
+      const ref = await webOrderReference(db, input.accountId, input.message.text);
+      if (ref) {
+        const own = await loadActiveRunForContact(db, input.accountId, input.contactId);
+        if (own) await endRun(db, own.id, "timed_out", "superseded_by_web_order");
+        scheduleWebOrderCheck(db, input, ref);
+        return { consumed: true, outcome: "no_match" };
+      }
+    }
+
     // "¿Dónde está mi pedido?" — answered from the order board.
     if (input.message.kind === "text" && isOrderStatusQuestion(input.message.text)) {
       const answered = await answerOrderStatusQuestion(db, input);
@@ -2908,6 +3069,18 @@ async function dispatchInboundToFlowsInner(
         );
         return { consumed: true, flow_run_id: activeRun.id, outcome: "no_match" };
       }
+      // "Hola" and "Buenos días" sent one after the other: the menu was
+      // just shown — once is enough.
+      if (
+        restartFlow?.entry_node_id &&
+        input.message.kind === "text" &&
+        isPlainGreeting(input.message.text) &&
+        activeRun.flow_id === restartFlow.id &&
+        activeRun.current_node_key === restartFlow.entry_node_id &&
+        Date.now() - new Date(activeRun.started_at).getTime() < 5 * 60_000
+      ) {
+        return { consumed: true, flow_run_id: activeRun.id, outcome: "no_match" };
+      }
       if (restartFlow?.entry_node_id && !isWaitingForCustomer) {
         await endRun(db, activeRun.id, "timed_out", "restarted_by_keyword");
         const restartNodes = await loadAllNodes(db, restartFlow.id);
@@ -2925,6 +3098,10 @@ async function dispatchInboundToFlowsInner(
     if (input.message.kind === "image") {
       const biz = await bizOf(db, input.accountId);
       const caption = input.message.caption;
+      if (documentJustReceived(input.conversationId) && (await botOwnsConversation(db, input.conversationId))) {
+        await acknowledgeDocument(db, input, null);
+        return { consumed: true, outcome: "no_match" };
+      }
       // A supplier's offer sent as a picture with text, as the first message.
       if (caption && isVendorPitch(caption) && (await botOwnsConversation(db, input.conversationId))) {
         await engineSendText({ accountId: input.accountId, userId: input.userId, conversationId: input.conversationId, contactId: input.contactId, text: biz.texts.vendorReply });
@@ -3028,6 +3205,115 @@ async function dispatchInboundToFlowsInner(
       (await teamRecentlyActive(db, input.conversationId))
     ) {
       return { consumed: false, outcome: "no_match" };
+    }
+    // A shared location with no bot conversation open: kept for the
+    // order just sent, or for the one they're about to place.
+    if (
+      input.message.kind === "text" &&
+      isSharedLocation(input.message.text) &&
+      (await botOwnsConversation(db, input.conversationId))
+    ) {
+      const { data } = await db
+        .from("flow_runs")
+        .select("*")
+        .eq("account_id", input.accountId)
+        .eq("contact_id", input.contactId)
+        .eq("status", "handed_off")
+        .gte("ended_at", new Date(Date.now() - 24 * 3_600_000).toISOString())
+        .order("ended_at", { ascending: false })
+        .limit(1);
+      const order = ((data as FlowRunRow[] | null) ?? [])[0];
+      if (order) {
+        await saveDeliveryLocation(db, order, input.message.text);
+        const ref = order.vars.order_number ?? order.vars.order_id;
+        await notifyTeamInApp(db, order, null, {
+          title: orderTitle(order, "📍 Ubicación del cliente"),
+          body: `${ref ? `Pedido N° ${ref}: ` : ""}${input.message.text.trim()}`,
+        });
+      } else {
+        const { error } = await db.from("contact_notes").insert({
+          account_id: input.accountId,
+          user_id: input.userId,
+          contact_id: input.contactId,
+          note_text: `📍 Ubicación para el envío: ${input.message.text.trim()}`,
+        });
+        if (error) console.error("[flows] location note failed:", error.message);
+      }
+      const ref = order?.vars.order_number ?? order?.vars.order_id;
+      await engineSendText({
+        accountId: input.accountId,
+        userId: input.userId,
+        conversationId: input.conversationId,
+        contactId: input.contactId,
+        text: order
+          ? `📍 ¡Gracias! Le pasé su ubicación al asesor de su pedido${ref ? ` N° ${ref}` : ""} 🙂`
+          : "📍 ¡Gracias! Guardé su ubicación para el envío. ¿Qué productos necesita? Escríbamelos 🙂",
+      });
+      return { consumed: true, outcome: "no_match" };
+    }
+    // A salesperson's pitch as the first message: where to write, not the menu.
+    if (
+      input.message.kind === "text" &&
+      isVendorPitch(input.message.text) &&
+      (await botOwnsConversation(db, input.conversationId))
+    ) {
+      await engineSendText({
+        accountId: input.accountId,
+        userId: input.userId,
+        conversationId: input.conversationId,
+        contactId: input.contactId,
+        text: (await bizOf(db, input.accountId)).texts.vendorReply,
+      });
+      return { consumed: true, outcome: "no_match" };
+    }
+    // "Quiero cotizar canastas para mi empresa", "una proforma" as the
+    // first message: a person prepares it.
+    if (
+      input.message.kind === "text" &&
+      isFormalQuoteRequest(input.message.text) &&
+      (await botOwnsConversation(db, input.conversationId))
+    ) {
+      const seasonal = await seasonalReplyFor(db, input.accountId, input.conversationId, input.message.text);
+      await engineSendText({
+        accountId: input.accountId,
+        userId: input.userId,
+        conversationId: input.conversationId,
+        contactId: input.contactId,
+        text: `${seasonal ? `${seasonal.reply}\n\n` : ""}Con gusto 🙂 Le pido a una persona de nuestro equipo que le prepare la cotización; le escribirá por aquí en breve. Si ya tiene la lista o las cantidades, puede enviárnosla por aquí.`,
+      });
+      const { data: contact } = await db.from("contacts").select("name, phone").eq("id", input.contactId).maybeSingle();
+      const c = contact as { name?: string | null; phone?: string | null } | null;
+      const biz = await bizOf(db, input.accountId);
+      const phone = c?.phone ? localPhone(c.phone.replace(/^\+/, ""), biz.phoneCountryCode) : "";
+      const said = input.message.text.trim().slice(0, 160);
+      await notifyAccountInApp(db, {
+        accountId: input.accountId,
+        conversationId: input.conversationId,
+        contactId: input.contactId,
+        title: `📄 Pide cotización: ${c?.name?.trim() || "Cliente"}${phone ? ` (${phone})` : ""}`,
+        body: `"${said}". Prepárele la cotización y escríbale.`,
+      }).catch(() => null);
+      await notifyStaffOfHandoff(db, {
+        accountId: input.accountId,
+        contactName: c?.name?.trim() || "Cliente",
+        summary: `📄 PIDE COTIZACIÓN${phone ? ` · ${phone}` : ""}\n"${said}"`,
+        conversationId: input.conversationId,
+      }).catch(() => null);
+      return { consumed: true, outcome: "no_match" };
+    }
+    // A campaign word ("canasta") as the first message: the campaign's answer.
+    if (input.message.kind === "text" && (await botOwnsConversation(db, input.conversationId))) {
+      const seasonal = await seasonalReplyFor(db, input.accountId, input.conversationId, input.message.text);
+      if (seasonal) {
+        await engineSendText({
+          accountId: input.accountId,
+          userId: input.userId,
+          conversationId: input.conversationId,
+          contactId: input.contactId,
+          text: seasonal.reply,
+        });
+        if (!seasonal.continues) return { consumed: true, outcome: "no_match" };
+      }
     }
     // An order just placed and not attended yet: "buenas tardes" gets its
     // status, not the whole menu again.
@@ -3813,6 +4099,36 @@ async function answerOrderStatusQuestion(
     // incompleto" there is a complaint, not a status question.
     if (!status.found || node?.node_type === "collect_input") return null;
   }
+  // Asking again and nobody from the team wrote since the last answer:
+  // the same automatic reply would only make them wait more.
+  if (status.found && input.message.kind === "text") {
+    const { data } = await db
+      .from("flow_runs")
+      .select("*")
+      .eq("account_id", input.accountId)
+      .eq("contact_id", input.contactId)
+      .eq("status", "handed_off")
+      .order("ended_at", { ascending: false })
+      .limit(1);
+    const order = ((data as FlowRunRow[] | null) ?? [])[0];
+    if (order) {
+      const askedAt = typeof order.vars.__status_asked_at === "string" ? order.vars.__status_asked_at : null;
+      if (askedAt && Date.now() - Date.parse(askedAt) < 2 * 3_600_000) {
+        const { data: replies } = await db
+          .from("messages")
+          .select("id")
+          .eq("conversation_id", input.conversationId)
+          .eq("sender_type", "agent")
+          .gt("created_at", askedAt)
+          .limit(1);
+        if ((replies ?? []).length === 0) {
+          await alertCustomerWaiting(db, order, input, input.message.text);
+          return { consumed: true, flow_run_id: order.id, outcome: "no_match" };
+        }
+      }
+      await saveVars(db, order, { ...order.vars, __status_asked_at: new Date().toISOString() });
+    }
+  }
   try {
     await engineSendText({
       accountId: input.accountId,
@@ -4161,6 +4477,41 @@ const AFTER_HANDOFF_MIN_GAP_MS = 30 * 60_000;
  * quiet). Until staff actually reply, answer with the handoff node's
  * `after_handoff_reply` — at most every 30 minutes, for 12 hours.
  */
+/**
+ * The customer is waiting on the team after their order: urgent alert
+ * (WhatsApp to staff on shift + CRM), at most once every 10 minutes per
+ * order, and the customer told it was escalated.
+ */
+async function alertCustomerWaiting(
+  db: AdminClient,
+  run: FlowRunRow,
+  input: DispatchInboundInput,
+  said: string,
+): Promise<void> {
+  const now = Date.now();
+  const ref = run.vars.order_number ? `N° ${run.vars.order_number}` : run.vars.order_id ? `N° ${run.vars.order_id}` : "";
+  const lastAlert = typeof run.vars.__waiting_alert_at === "string" ? new Date(run.vars.__waiting_alert_at).getTime() : 0;
+  if (now - lastAlert > 10 * 60_000) {
+    await saveVars(db, run, { ...run.vars, __waiting_alert_at: new Date(now).toISOString() });
+    const { data: contact } = await db.from("contacts").select("name, phone").eq("id", input.contactId).maybeSingle();
+    const c = contact as { name?: string | null; phone?: string | null } | null;
+    const biz = await bizOf(db, input.accountId);
+    const phone = c?.phone ? localPhone(c.phone.replace(/^\+/, ""), biz.phoneCountryCode) : "";
+    const quote = said.trim().slice(0, 160);
+    await notifyTeamInApp(db, run, null, {
+      title: `🚨 ${orderTitle(run, "Cliente")} SIGUE ESPERANDO`,
+      body: `El cliente dice: "${quote}". Escríbale ya${ref ? ` (pedido ${ref})` : ""}.`,
+    });
+    await notifyStaffOfHandoff(db, {
+      accountId: input.accountId,
+      contactName: c?.name?.trim() || "Cliente",
+      summary: `🚨 CLIENTE ESPERANDO RESPUESTA${ref ? ` · pedido ${ref}` : ""}${phone ? ` · ${phone}` : ""}\n"${quote}"`,
+      conversationId: input.conversationId,
+    }).catch(() => null);
+  }
+  await sendEngineText(db, run, null, "Disculpe la demora 🙏 Ya avisé otra vez a nuestro equipo, con prioridad; le escriben por aquí enseguida.", "waiting_complaint");
+}
+
 async function replyAfterHandoff(
   db: AdminClient,
   input: DispatchInboundInput,
@@ -4209,26 +4560,7 @@ async function replyAfterHandoff(
   // the team — urgent alert (WhatsApp to staff on shift + CRM), at most
   // once every 10 minutes per order.
   if (isWaitingComplaint(input.message.text) || isFrustrated(input.message.text)) {
-    const lastAlert = typeof run.vars.__waiting_alert_at === "string" ? new Date(run.vars.__waiting_alert_at).getTime() : 0;
-    if (now - lastAlert > 10 * 60_000) {
-      await saveVars(db, run, { ...run.vars, __waiting_alert_at: new Date(now).toISOString() });
-      const { data: contact } = await db.from("contacts").select("name, phone").eq("id", input.contactId).maybeSingle();
-      const c = contact as { name?: string | null; phone?: string | null } | null;
-      const biz = await bizOf(db, input.accountId);
-      const phone = c?.phone ? localPhone(c.phone.replace(/^\+/, ""), biz.phoneCountryCode) : "";
-      const said = input.message.text.trim().slice(0, 160);
-      await notifyTeamInApp(db, run, null, {
-        title: `🚨 ${orderTitle(run, "Cliente")} SIGUE ESPERANDO`,
-        body: `El cliente dice: "${said}". Escríbale ya${ref ? ` (pedido ${ref})` : ""}.`,
-      });
-      await notifyStaffOfHandoff(db, {
-        accountId: input.accountId,
-        contactName: c?.name?.trim() || "Cliente",
-        summary: `🚨 CLIENTE ESPERANDO RESPUESTA${ref ? ` · pedido ${ref}` : ""}${phone ? ` · ${phone}` : ""}\n"${said}"`,
-        conversationId: input.conversationId,
-      }).catch(() => null);
-    }
-    await sendEngineText(db, run, null, "Disculpe la demora 🙏 Ya avisé otra vez a nuestro equipo, con prioridad; le escriben por aquí enseguida.", "waiting_complaint");
+    await alertCustomerWaiting(db, run, input, input.message.text);
     return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
   }
   // "El pollo tiene que ser descongelado": an indication for the order
@@ -4413,6 +4745,78 @@ async function claimWaitingRun(
   return null;
 }
 
+const claimPatternCache = new Map<string, { at: number; patterns: RegExp[] }>();
+
+/**
+ * The web order number in a pasted order summary, by the claim patterns
+ * of the account's waiting steps — only for a summary (several lines),
+ * so "¿y mi pedido N° 25?" stays a question.
+ */
+async function webOrderReference(db: AdminClient, accountId: string, text: string): Promise<string | null> {
+  if (text.split("\n").filter((l) => l.trim()).length < 3) return null;
+  let cached = claimPatternCache.get(accountId);
+  if (!cached || Date.now() - cached.at > 60_000) {
+    const { data: flows } = await db.from("flows").select("id").eq("account_id", accountId);
+    const ids = ((flows ?? []) as { id: string }[]).map((f) => f.id);
+    const { data: rows } = ids.length
+      ? await db.from("flow_nodes").select("config").in("flow_id", ids).not("config->>claim_pattern", "is", null)
+      : { data: [] };
+    const patterns: RegExp[] = [];
+    for (const r of (rows ?? []) as { config: { claim_pattern?: string; silent?: boolean } }[]) {
+      if (!r.config.silent || !r.config.claim_pattern) continue;
+      try {
+        patterns.push(new RegExp(r.config.claim_pattern, "i"));
+      } catch {
+        // an invalid pattern never matches
+      }
+    }
+    cached = { at: Date.now(), patterns };
+    claimPatternCache.set(accountId, cached);
+  }
+  for (const p of cached.patterns) {
+    const ref = text.match(p)?.[1];
+    if (ref) return ref;
+  }
+  return null;
+}
+
+/** How long a web order's run has to show up before the team is told by hand. */
+const WEB_ORDER_GRACE_MS = 2 * 60_000;
+
+/** If no run took the web order summary in a couple of minutes: acknowledge it and tell the team. */
+function scheduleWebOrderCheck(db: AdminClient, input: DispatchInboundInput, ref: string): void {
+  const since = new Date().toISOString();
+  setTimeout(() => {
+    void (async () => {
+      const { data } = await db
+        .from("flow_runs")
+        .select("vars")
+        .eq("account_id", input.accountId)
+        .eq("contact_id", input.contactId)
+        .gte("started_at", new Date(Date.parse(since) - CATCH_UP_WINDOW_MS).toISOString())
+        .limit(20);
+      const taken = ((data ?? []) as { vars: Record<string, unknown> }[]).some((r) =>
+        Object.values(r.vars ?? {}).some((v) => String(v) === ref),
+      );
+      if (taken) return;
+      await engineSendText({
+        accountId: input.accountId,
+        userId: input.userId,
+        conversationId: input.conversationId,
+        contactId: input.contactId,
+        text: `🛒 Recibimos su pedido web N° ${ref}, ¡gracias! Nuestro equipo lo revisa y le confirma por aquí en breve 🙂`,
+      });
+      await notifyAccountInApp(db, {
+        accountId: input.accountId,
+        conversationId: input.conversationId,
+        contactId: input.contactId,
+        title: `🛒 Pedido web N° ${ref}`,
+        body: "El cliente envió el resumen de su pedido web por WhatsApp. Revíselo en la conversación.",
+      });
+    })().catch((err) => console.error("[flows] web order check failed:", err));
+  }, WEB_ORDER_GRACE_MS);
+}
+
 const CATCH_UP_WINDOW_MS = 30 * 60_000;
 
 /**
@@ -4550,12 +4954,13 @@ async function sendIdleNudge(
   // "¿sigue ahí?" there. Elsewhere, only mention the order when there is one.
   const holdsList = runHoldsList(freshRun);
   const flow = await loadFlow(db, freshRun.flow_id);
-  const { data: entryNode } = flow?.entry_node_id
-    ? await db.from("flow_nodes").select("node_key").eq("id", flow.entry_node_id).maybeSingle()
-    : { data: null };
-  if (!holdsList && (entryNode as { node_key?: string } | null)?.node_key === expectedNodeKey) return;
+  // entry_node_id holds the entry node's key (see startNewRun).
+  if (!holdsList && flow?.entry_node_id === expectedNodeKey) return;
   // Once per conversation is a reminder; twice is nagging.
   if (freshRun.vars.__idle_nudged) return;
+  // A person was already called in (or is talking with them): the bot
+  // asking "¿seguimos?" on top of that only confuses.
+  if (await personIsOnIt(db, freshRun)) return;
   // Picking products in the catalog (a cart in progress): not idle — the
   // cart has its own reminder.
   if (freshRun.contact_id && (await loadCart(db, freshRun.account_id, freshRun.contact_id).catch(() => null))) return;
@@ -5087,6 +5492,17 @@ async function handleReplyForActiveRun(
     return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
   }
 
+  // A photo right after files (pages to print): one more file for the
+  // person who prints them, not a shopping list to read.
+  if (message.kind === "image" && currentCollectCfg?.accept !== "image" && documentJustReceived(run.conversation_id)) {
+    await acknowledgeDocument(
+      db,
+      { accountId: run.account_id, userId: run.user_id, conversationId: run.conversation_id!, contactId: run.contact_id!, message },
+      run,
+    );
+    return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+  }
+
   // Liquor can't be sold over WhatsApp (Meta Commerce Policy) — decline
   // it on any node that accumulates an order list, before it's captured.
   const capturesOrderList =
@@ -5178,6 +5594,46 @@ async function handleReplyForActiveRun(
     return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
   }
 
+  // A shared location: kept for the delivery, never a product.
+  if (message.kind === "text" && isSharedLocation(message.text)) {
+    await saveDeliveryLocation(db, run, message.text);
+    const listed = capturesOrderList && runHoldsList(run);
+    await sendEngineText(
+      db,
+      run,
+      currentNode.node_key,
+      capturesOrderList
+        ? `📍 ¡Gracias! Guardé su ubicación para el envío.\n\n${listed ? "¿Algo más para su lista? Escríbalo, o toque *Ya terminé*." : "¿Qué productos necesita? Escríbamelos 🙂"}`
+        : "📍 ¡Gracias! Guardé su ubicación para el envío 🙂",
+      "location_saved",
+    );
+    return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+  }
+
+  // "¿Tienen canastas navideñas?": the campaign's own answer (Settings →
+  // My business → Seasonal replies). "2 canastas" still goes on the list.
+  if (message.kind === "text" && !run.vars.__pending_line_edit && run.conversation_id) {
+    const seasonal = await seasonalReplyFor(db, run.account_id, run.conversation_id, message.text);
+    if (seasonal) {
+      await sendEngineText(db, run, currentNode.node_key, seasonal.reply, "seasonal_reply");
+      if (!seasonal.continues) return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
+  }
+
+  // "Gracias, ya no necesito": close the order politely instead of
+  // asking for the next product.
+  if (message.kind === "text" && capturesOrderList && isOrderCancel(message.text)) {
+    await sendEngineText(
+      db,
+      run,
+      currentNode.node_key,
+      "Entendido 🙂 Su lista quedó sin enviar. Cuando necesite algo, escríbanos; aquí estamos.",
+      "order_cancelled_by_customer",
+    );
+    await endRun(db, run.id, "completed", "customer_cancelled");
+    return { consumed: true, flow_run_id: run.id, outcome: "completed" };
+  }
+
   // Before the question answerer: "¿hay alguna persona que me atienda?"
   // and "¿cuál es el precio?" while ordering go to a person — the bot
   // can't do either (no prices by design), the team can.
@@ -5199,6 +5655,24 @@ async function handleReplyForActiveRun(
         currentNode.node_key,
         "Con gusto 🙂 Ya le aviso a una persona de nuestro equipo; le escribirá por aquí en breve. Lo que lleva anotado queda guardado.",
         "human_request_alerted",
+      );
+      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
+    // A person was already called in ("cuánto sería") and the customer
+    // asks again for help: that person hasn't written yet — escalate.
+    if (
+      Array.isArray(run.vars.__trouble_alerts) &&
+      run.vars.__trouble_alerts.length > 0 &&
+      run.conversation_id &&
+      run.contact_id &&
+      (isHelpNudge(message.text) || isWaitingComplaint(message.text)) &&
+      !(await teamRecentlyActive(db, run.conversation_id))
+    ) {
+      await alertCustomerWaiting(
+        db,
+        run,
+        { accountId: run.account_id, userId: run.user_id, contactId: run.contact_id, conversationId: run.conversation_id, message },
+        message.text,
       );
       return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
     }
@@ -5229,7 +5703,7 @@ async function handleReplyForActiveRun(
     looksLikeQuestion(message.text)
   ) {
     const flow = await loadFlow(db, run.flow_id);
-    const situation = flow?.entry_node_id === currentNode.id ? "menu" : "order";
+    const situation = flow?.entry_node_id === currentNode.node_key ? "menu" : "order";
     const answer = await answerInFlow(db, run.account_id, run.conversation_id, message.text, situation);
     if (answer) {
       if (answer.product) await saveVars(db, run, { ...run.vars, __offered_product: answer.product });
@@ -5460,6 +5934,24 @@ async function handleReplyForActiveRun(
       await sendEngineText(db, run, currentNode.node_key, `📸 ¡Gracias por la foto! ${pendingGuide.question}`, "service_guide_photo");
       return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
     }
+  }
+
+  // "Gracias" / "ok" in front of the list to confirm isn't a correction.
+  if (
+    message.kind === "text" &&
+    currentTextFallback?.edit_list_var &&
+    !run.vars.__pending_line_edit &&
+    !run.vars.__pending_list_answer &&
+    isAckOnly(message.text)
+  ) {
+    await sendEngineText(db, run, currentNode.node_key, "🙂 Si su lista está bien, toque *✅ Confirmar pedido* para enviarla. Si quiere cambiar algo, escríbamelo.", "list_ack_hint");
+    return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+  }
+  // The website's chat button sends "Necesito más información sobre
+  // ferrotiendaec.com": a greeting, not a product.
+  if (message.kind === "text" && isWebsiteChatGreeting(message.text)) {
+    await sendEngineText(db, run, currentNode.node_key, "¡Hola! 👋 Con gusto le ayudo. ¿Qué producto busca o qué información necesita?", "website_greeting");
+    return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
   }
 
   const listResult = await handleListEditing(db, run, currentNode, message, nodes);
