@@ -17,6 +17,7 @@ import {
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { useTranslations } from 'next-intl';
+import { CoexistenceSignup } from './coexistence-signup';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -560,6 +561,13 @@ export function WhatsAppConfig() {
             )}
           </Alert>
         )}
+
+        <CoexistenceSignup
+          hasNumber={Boolean(config)}
+          onConnected={() => {
+            if (accountId) void fetchConfig(accountId);
+          }}
+        />
 
         {/* API Credentials */}
         <Card>

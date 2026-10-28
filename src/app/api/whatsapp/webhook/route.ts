@@ -6,6 +6,13 @@ import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { hasRealName } from '@/lib/contacts/real-name'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
+import {
+  COEXISTENCE_FIELDS,
+  parseHistory,
+  parseMessageEchoes,
+  parseStateSync,
+  type CoexMessage,
+} from '@/lib/whatsapp/coexistence'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows, recordDeliveryFailure } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
@@ -253,6 +260,13 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
         continue
       }
 
+      // Coexistence: messages written from the WhatsApp Business app on
+      // the phone, the synced chat history and the phone's contacts.
+      if (COEXISTENCE_FIELDS.has(change.field)) {
+        await handleCoexistenceChange(change.field, change.value as unknown as CoexValue)
+        continue
+      }
+
       const value = change.value
 
       // Handle status updates
@@ -324,6 +338,97 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
           phoneNumberId
         )
       }
+    }
+  }
+}
+
+type CoexValue = Parameters<typeof parseHistory>[0] &
+  Parameters<typeof parseMessageEchoes>[0] &
+  Parameters<typeof parseStateSync>[0] & { metadata?: { phone_number_id?: string } }
+
+/**
+ * Store what the WhatsApp Business app on the phone reports. Echoes are
+ * saved as agent messages, so the bot treats them like a teammate who
+ * answered (it stays quiet — see teamRecentlyActive in the flow engine).
+ * Nothing here triggers flows, automations or the AI.
+ */
+async function handleCoexistenceChange(field: string, value: CoexValue) {
+  const phoneNumberId = value.metadata?.phone_number_id
+  if (!phoneNumberId) return
+  const { data: configRows } = await supabaseAdmin()
+    .from('whatsapp_config')
+    .select('account_id, user_id')
+    .eq('phone_number_id', phoneNumberId)
+  if (!configRows || configRows.length !== 1) {
+    console.error(`[webhook] ${field}: no single config for phone_number_id`, phoneNumberId)
+    return
+  }
+  const { account_id: accountId, user_id: ownerId } = configRows[0] as { account_id: string; user_id: string }
+
+  if (field === 'smb_app_state_sync') {
+    for (const c of parseStateSync(value)) {
+      // Removing a contact on the phone never deletes CRM data.
+      if (c.action === 'add') await findOrCreateContact(accountId, ownerId, normalizePhone(c.phone), c.name)
+    }
+    return
+  }
+
+  let messages: CoexMessage[]
+  if (field === 'history') {
+    const chunk = parseHistory(value)
+    if (chunk.error) console.warn('[webhook] history sync:', chunk.error)
+    if (chunk.progress != null) console.log(`[webhook] history sync progress ${chunk.progress}%`)
+    messages = chunk.messages
+  } else {
+    messages = parseMessageEchoes(value)
+  }
+
+  const byCustomer = new Map<string, CoexMessage[]>()
+  for (const m of messages) byCustomer.set(m.customerPhone, [...(byCustomer.get(m.customerPhone) ?? []), m])
+
+  for (const [phone, list] of byCustomer) {
+    const contactOutcome = await findOrCreateContact(accountId, ownerId, normalizePhone(phone), '')
+    if (!contactOutcome) continue
+    const convResult = await findOrCreateConversation(accountId, ownerId, contactOutcome.contact.id)
+    if (!convResult) continue
+    const conversation = convResult.conversation
+
+    // Meta retries and history overlaps: skip ids already stored.
+    const ids = list.map((m) => m.id)
+    const { data: existing } = await supabaseAdmin()
+      .from('messages')
+      .select('message_id')
+      .eq('conversation_id', conversation.id)
+      .in('message_id', ids)
+    const seen = new Set(((existing ?? []) as Array<{ message_id: string }>).map((r) => r.message_id))
+    const fresh = list.filter((m) => !seen.has(m.id))
+    if (fresh.length === 0) continue
+
+    const rows = fresh.map((m) => ({
+      conversation_id: conversation.id,
+      sender_type: m.direction === 'outbound' ? 'agent' : 'customer',
+      content_type: m.contentType,
+      content_text: m.text,
+      message_id: m.id,
+      status: m.direction === 'outbound' ? 'sent' : 'read',
+      created_at: m.createdAt,
+    }))
+    for (let i = 0; i < rows.length; i += 500) {
+      const { error } = await supabaseAdmin().from('messages').insert(rows.slice(i, i + 500))
+      if (error) console.error(`[webhook] ${field}: message insert failed`, error)
+    }
+
+    const newest = fresh.reduce((a, b) => (a.createdAt > b.createdAt ? a : b))
+    const update: Record<string, unknown> = {}
+    if (!conversation.last_message_at || newest.createdAt > conversation.last_message_at) {
+      update.last_message_text = newest.text
+      update.last_message_at = newest.createdAt
+      update.updated_at = new Date().toISOString()
+    }
+    // A teammate answered from the phone: the chat is no longer unread.
+    if (field === 'smb_message_echoes') update.unread_count = 0
+    if (Object.keys(update).length > 0) {
+      await supabaseAdmin().from('conversations').update(update).eq('id', conversation.id)
     }
   }
 }

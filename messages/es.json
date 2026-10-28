@@ -1608,7 +1608,22 @@
       "step4_3": "Pegue la <strong class=\"text-foreground\">URL de devolución del webhook</strong> de arriba",
       "step4_4": "Escriba el mismo <strong class=\"text-foreground\">token de verificación</strong> que puso aquí",
       "step4_5": "Suscríbase al campo \"messages\" del webhook",
-      "metaDocs": "Documentación de la API de WhatsApp de Meta"
+      "metaDocs": "Documentación de la API de WhatsApp de Meta",
+      "coexistence": {
+        "title": "Conectar WhatsApp Business (coexistencia)",
+        "description": "Para un número que se sigue usando en la app WhatsApp Business del celular: el bot y el CRM responden en el mismo número y los chats se sincronizan.",
+        "button": "Conectar WhatsApp Business",
+        "connecting": "Conectando… siga los pasos en la ventana de Meta",
+        "replaceConfirm": "Este CRM ya tiene un número conectado. Si sigue, el número nuevo lo REEMPLAZA y el bot pasa a responder en el nuevo. ¿Continuar?",
+        "cancelled": "Conexión cancelada.",
+        "noSession": "Meta no indicó qué cuenta de WhatsApp se conectó. Intente otra vez.",
+        "sdkFailed": "No se pudo abrir la ventana de Meta (¿bloqueador de anuncios o ventanas emergentes?).",
+        "failed": "No se pudo conectar: {error}",
+        "connected": "✅ {number} conectado. Los contactos y el historial de chats van llegando en los próximos minutos; mantenga la app del celular abierta.",
+        "connectedSyncFailed": "{number} conectado, pero Meta no aceptó la sincronización de contactos o historial. Hay que reintentarla dentro de 24 h.",
+        "notConfigured": "Falta configurar en el servidor: {vars}.",
+        "note": "Lo que el equipo escriba desde el celular aparece en el Inbox y el bot no contesta encima. Abra la app del celular al menos cada 14 días o Meta desconecta la coexistencia."
+      }
     },
     "sections": {
       "overview": "Resumen",

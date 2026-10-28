@@ -1608,7 +1608,22 @@
       "step4_3": "Paste the <strong class=\"text-foreground\">Webhook Callback URL</strong> from above",
       "step4_4": "Enter the same <strong class=\"text-foreground\">Verify Token</strong> you set here",
       "step4_5": "Subscribe to \"messages\" webhook field",
-      "metaDocs": "Meta WhatsApp API Documentation"
+      "metaDocs": "Meta WhatsApp API Documentation",
+      "coexistence": {
+        "title": "Connect WhatsApp Business (coexistence)",
+        "description": "For a number that keeps using the WhatsApp Business app on the phone: the bot and the CRM answer on the same number and chats stay in sync.",
+        "button": "Connect WhatsApp Business",
+        "connecting": "Connecting… follow the steps in the Meta window",
+        "replaceConfirm": "This CRM already has a number connected. If you continue, the new number REPLACES it and the bot moves to the new one. Continue?",
+        "cancelled": "Connection cancelled.",
+        "noSession": "Meta did not say which WhatsApp account was connected. Please try again.",
+        "sdkFailed": "Could not open the Meta window (ad or popup blocker?).",
+        "failed": "Could not connect: {error}",
+        "connected": "✅ {number} connected. Contacts and chat history will arrive over the next minutes; keep the phone app open.",
+        "connectedSyncFailed": "{number} connected, but Meta did not accept the contacts or history sync. It must be retried within 24 h.",
+        "notConfigured": "Missing on the server: {vars}.",
+        "note": "What the team writes from the phone shows in the Inbox and the bot does not talk over it. Open the phone app at least every 14 days or Meta disconnects coexistence."
+      }
     },
     "sections": {
       "overview": "Overview",
