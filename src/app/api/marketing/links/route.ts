@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/automations/admin-client'
-import { clearBusinessSettingsCache, loadBusinessSettings, sanitizeSettings } from '@/lib/business/settings'
-import { adLinkUrl, adOriginTag, normalizeAdCode, type AdLink } from '@/lib/marketing/ad-links'
+import { clearBusinessSettingsCache, loadBusinessSettings } from '@/lib/business/settings'
+import { saveSettingsPatch } from '@/lib/marketing/settings-store'
+import { adLinkUrl, adOriginTag, normalizeAdCode, pickAdCode, type AdLink } from '@/lib/marketing/ad-links'
 
 // GET /api/marketing/links → { links, whatsappNumber }
 //   Each advertising link with its wa.me URL, how many contacts wrote
@@ -13,21 +14,8 @@ import { adLinkUrl, adOriginTag, normalizeAdCode, type AdLink } from '@/lib/mark
 
 type Db = ReturnType<typeof supabaseAdmin>
 
-async function storedSettings(db: Db, accountId: string): Promise<Record<string, unknown>> {
-  const { data } = await db.from('business_settings').select('settings').eq('account_id', accountId).maybeSingle()
-  const s = (data as { settings?: unknown } | null)?.settings
-  return s && typeof s === 'object' && !Array.isArray(s) ? (s as Record<string, unknown>) : {}
-}
-
 async function saveLinks(db: Db, accountId: string, links: AdLink[]): Promise<boolean> {
-  const stored = await storedSettings(db, accountId)
-  const settings = sanitizeSettings({ ...stored, adLinks: links })
-  const { error } = await db
-    .from('business_settings')
-    .upsert({ account_id: accountId, settings, updated_at: new Date().toISOString() }, { onConflict: 'account_id' })
-  if (error) console.error('[marketing] save failed:', error.message)
-  clearBusinessSettingsCache(accountId)
-  return !error
+  return saveSettingsPatch(db, accountId, { adLinks: links })
 }
 
 async function linkStats(db: Db, accountId: string, link: AdLink): Promise<{ contacts: number; orders: number }> {
@@ -64,7 +52,7 @@ export async function GET() {
   clearBusinessSettingsCache(ctx.accountId)
   const biz = await loadBusinessSettings(db, ctx.accountId)
   const links = await Promise.all(
-    biz.adLinks.map(async (l) => ({
+    biz.adLinks.filter((l) => !l.host).map(async (l) => ({
       ...l,
       url: biz.whatsappNumber ? adLinkUrl(biz.whatsappNumber, l) : '',
       ...(await linkStats(db, ctx.accountId, l)),
@@ -92,17 +80,12 @@ export async function POST(request: Request) {
   const db = supabaseAdmin()
   clearBusinessSettingsCache(ctx.accountId)
   const biz = await loadBusinessSettings(db, ctx.accountId)
-  const taken = new Set(biz.adLinks.map((l) => l.code))
-  let code = normalizeAdCode(typeof body?.code === 'string' && body.code ? body.code : name.split(/\s+/)[0] ?? '')
-  if (!code) code = 'AD'
-  if (taken.has(code)) {
-    if (typeof body?.code === 'string' && body.code) {
-      return NextResponse.json({ error: 'code_taken' }, { status: 409 })
-    }
-    let n = 2
-    while (taken.has(`${code.slice(0, 18)}${n}`)) n++
-    code = `${code.slice(0, 18)}${n}`
-  }
+  const code = pickAdCode(
+    typeof body?.code === 'string' ? body.code : '',
+    name,
+    biz.adLinks.map((l) => l.code),
+  )
+  if (!code) return NextResponse.json({ error: 'code_taken' }, { status: 409 })
   const link: AdLink = {
     code,
     name,

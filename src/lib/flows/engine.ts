@@ -116,6 +116,7 @@ import {
 } from "./store-policy";
 import { loadBusinessSettings, renderText, type BusinessSettings } from "../business/settings";
 import { findSeasonalReply, localDate } from "../business/seasonal-replies";
+import { activeHostFor, hostGuestLine } from "../marketing/hosts";
 import {
   type CollectInputNodeConfig,
   type ConditionNodeConfig,
@@ -896,7 +897,14 @@ async function executeHandoff(
       .update(convUpdate)
       .eq("id", run.conversation_id);
   }
-  const resolvedNote = cfg.note ? interpolateVars(cfg.note, run.vars) : null;
+  let resolvedNote = cfg.note ? interpolateVars(cfg.note, run.vars) : null;
+  // A partner's guest (an Airbnb host's QR): the card and the staff alert
+  // say which discount to apply when charging.
+  if (cfg.create_order_card && cfg.card_board !== "services" && run.contact_id) {
+    const biz = await bizOf(db, run.account_id);
+    const host = await activeHostFor(db, biz, { accountId: run.account_id, contactId: run.contact_id });
+    if (host) resolvedNote = `${resolvedNote ?? ""}\n${hostGuestLine(biz, host)}`.trim();
+  }
   await logEvent(db, run.id, "handoff", node.node_key, {
     // Same gap as send_buttons/send_list (see comments there) — a note
     // like "Pedido: {{vars.order_text}}" needs the captured var resolved

@@ -28,6 +28,8 @@ import { formatFormReply, parseFormReply } from '@/lib/whatsapp/flow-form'
 import { recordReferralOrigin, tagContact, type MetaReferral } from '@/lib/contacts/origin'
 import { adOriginNote, adOriginTag, findAdLink, stripAdCode } from '@/lib/marketing/ad-links'
 import { loadBusinessSettings } from '@/lib/business/settings'
+import { hostWelcomeText, rememberAdContact } from '@/lib/marketing/hosts'
+import { engineSendText } from '@/lib/flows/meta-send'
 import {
   handleTemplateWebhookChange,
   isTemplateWebhookField,
@@ -884,7 +886,8 @@ async function processMessage(
   // hand the bot the message without the code.
   let flowText = contentText
   if (message.type === 'text' && message.text?.body?.includes('#')) {
-    const ad = findAdLink(message.text.body, (await loadBusinessSettings(supabaseAdmin(), accountId)).adLinks)
+    const biz = await loadBusinessSettings(supabaseAdmin(), accountId)
+    const ad = findAdLink(message.text.body, biz.adLinks)
     if (ad) {
       flowText = stripAdCode(contentText ?? message.text.body, ad)
       await tagContact(supabaseAdmin(), {
@@ -901,6 +904,22 @@ async function processMessage(
         note_text: adOriginNote(ad),
       })
       if (noteErr) console.error('[ads] note insert failed:', noteErr.message)
+      const firstTime = await rememberAdContact(supabaseAdmin(), {
+        accountId,
+        code: ad.code,
+        contactId: contactRecord.id,
+      })
+      // A host's guest: tell them about the discount before the menu.
+      const welcome = firstTime ? hostWelcomeText(biz, ad) : null
+      if (welcome) {
+        await engineSendText({
+          accountId,
+          userId: configOwnerUserId,
+          conversationId: conversation.id,
+          contactId: contactRecord.id,
+          text: welcome,
+        }).catch((err) => console.error('[hosts] welcome failed:', err))
+      }
     }
   }
 

@@ -56,15 +56,19 @@ export async function PUT(request: Request) {
   }
 
   const db = supabaseAdmin()
-  // Advertising links are managed on their own page: keep the saved ones,
-  // so a "My business" form opened earlier can't wipe a link made since.
+  // Advertising links and the host program are managed on their own page:
+  // keep the saved ones, so a "My business" form opened earlier can't wipe them.
   const { data: current } = await db
     .from('business_settings')
     .select('settings')
     .eq('account_id', ctx.accountId)
     .maybeSingle()
-  const savedLinks = ((current as { settings?: { adLinks?: unknown } } | null)?.settings?.adLinks) ?? []
-  const settings = sanitizeSettings({ ...(input as Record<string, unknown>), adLinks: savedLinks })
+  const saved = (current as { settings?: { adLinks?: unknown; hostProgram?: unknown } } | null)?.settings
+  const settings = sanitizeSettings({
+    ...(input as Record<string, unknown>),
+    adLinks: saved?.adLinks ?? [],
+    hostProgram: saved?.hostProgram,
+  })
   const { error } = await db
     .from('business_settings')
     .upsert(

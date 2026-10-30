@@ -19,6 +19,18 @@ export interface AdLink {
   /** The message the customer's WhatsApp opens with (without the code). */
   message: string
   createdAt: string
+  /** Set on a partner link (an Airbnb host): its QR goes through /r/… and its guests get the partner discount. */
+  host?: HostPartner
+}
+
+/** The partner behind a host link. The reward is free text — agreed one by one. */
+export interface HostPartner {
+  /** The apartment or listing name the guest sees: "Departamento El Vergel". */
+  lodging: string
+  /** The host's WhatsApp, for sending them their monthly summary. */
+  phone: string
+  /** What the host gets: "3 % en crédito", "$1 por pedido", "nada por ahora"… */
+  reward: string
 }
 
 export const AD_CHANNELS = [
@@ -27,8 +39,11 @@ export const AD_CHANNELS = [
   'Instagram',
   'TikTok',
   'Volante impreso',
+  'Anfitrión Airbnb',
   'Otro',
 ] as const
+
+export const HOST_CHANNEL = 'Anfitrión Airbnb'
 
 const MAX_LINKS = 100
 
@@ -41,6 +56,21 @@ export function normalizeAdCode(raw: string): string {
     .replace(/[^A-Z0-9]/g, '')
     .slice(0, 20)
   return code.length >= 2 ? code : ''
+}
+
+/**
+ * The code for a new link: the one asked for (null when it's taken), or
+ * one made from the name's first word, numbered until free.
+ */
+export function pickAdCode(requested: string, name: string, taken: string[]): string | null {
+  const used = new Set(taken)
+  const asked = normalizeAdCode(requested)
+  if (requested.trim()) return asked && !used.has(asked) ? asked : null
+  const base = normalizeAdCode(name.split(/\s+/)[0] ?? '') || 'AD'
+  if (!used.has(base)) return base
+  let n = 2
+  while (used.has(`${base.slice(0, 18)}${n}`)) n++
+  return `${base.slice(0, 18)}${n}`
 }
 
 /** The link to publish: opens WhatsApp with the message and the code. */
@@ -90,14 +120,27 @@ export function sanitizeAdLinks(value: unknown): AdLink[] {
     const name = typeof r.name === 'string' ? r.name.trim().slice(0, 80) : ''
     if (!code || !name || seen.has(code)) continue
     seen.add(code)
+    const host = sanitizeHost(r.host)
     out.push({
       code,
       name,
       channel: typeof r.channel === 'string' && r.channel.trim() ? r.channel.trim().slice(0, 40) : 'Otro',
       message: typeof r.message === 'string' ? r.message.trim().slice(0, 300) : '',
       createdAt: typeof r.createdAt === 'string' ? r.createdAt : new Date(0).toISOString(),
+      ...(host ? { host } : {}),
     })
     if (out.length >= MAX_LINKS) break
   }
   return out
+}
+
+function sanitizeHost(value: unknown): HostPartner | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+  const h = value as Record<string, unknown>
+  const text = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '')
+  return {
+    lodging: text(h.lodging, 80),
+    phone: text(h.phone, 20).replace(/\D/g, ''),
+    reward: text(h.reward, 120),
+  }
 }

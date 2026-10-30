@@ -88,6 +88,21 @@ export interface BusinessSettings {
   allowPaidTemplates: boolean
   /** Advertising links (Advertising page); changed only through /api/marketing/links. */
   adLinks: AdLink[]
+  /**
+   * Partner program for Airbnb hosts (Advertising page → Hosts): guests
+   * who write through a host's QR get the discount while their stay
+   * lasts. Changed only through /api/marketing/hosts.
+   */
+  hostProgram: {
+    /** Discount for the host's guests, in percent (0 = none). */
+    discountPct: number
+    /** Free delivery from this order amount, in the shop's currency (0 = not offered). */
+    freeDeliveryFrom: number
+    /** Days after the guest's last message with the code that the discount still applies. */
+    validDays: number
+    /** Sent the first time a guest writes. {anfitrion} {alojamiento} {descuento} {envio} {dias} {negocio} */
+    welcomeText: string
+  }
 
   /** AI help with what customers send (uses the account's AI key). */
   aiFeatures: {
@@ -236,6 +251,14 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
   newConversationAlert: 'off',
   allowPaidTemplates: false,
   adLinks: [],
+  hostProgram: {
+    discountPct: 5,
+    freeDeliveryFrom: 0,
+    validDays: 15,
+    welcomeText:
+      '🏠 ¡Bienvenido/a! Por hospedarse en *{alojamiento}*, tiene *{descuento} de descuento* en sus compras en {negocio} durante su estadía{envio}.\n\n' +
+      '🇬🇧 Welcome! As a guest of {alojamiento} you get *{descuento} off* your purchases at {negocio} during your stay.',
+  },
   aiFeatures: { readImages: true, transcribeAudio: true, entryRouter: true, audioDailyLimit: 200, answerQuestions: true, reviewConversations: false },
   bakery: { entryNode: '' },
   texts: {
@@ -346,6 +369,9 @@ export function renderText(template: string, values: Record<string, string>): st
     .replace(/ ([,.!?])/g, '$1')
 }
 
+const clampNumber = (n: number, min: number, max: number): number =>
+  Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : min
+
 const strings = (v: unknown[], max: number): string[] =>
   v
     .filter((x): x is string => typeof x === 'string')
@@ -379,6 +405,12 @@ export function sanitizeSettings(stored: unknown): BusinessSettings {
     openingHours: hours.length ? [...hours, ...Array(7 - hours.length).fill(null)] : [],
     staffPhones: strings(s.staffPhones, 20),
     adLinks: sanitizeAdLinks(s.adLinks),
+    hostProgram: {
+      discountPct: clampNumber(s.hostProgram.discountPct, 0, 50),
+      freeDeliveryFrom: clampNumber(s.hostProgram.freeDeliveryFrom, 0, 10000),
+      validDays: Math.round(clampNumber(s.hostProgram.validDays, 1, 90)),
+      welcomeText: s.hostProgram.welcomeText.slice(0, 1000),
+    },
     seasonalReplies: sanitizeSeasonalReplies(s.seasonalReplies),
     checkInWords: strings(s.checkInWords, 20).map((w) => w.toLowerCase()),
     blockedProducts: {

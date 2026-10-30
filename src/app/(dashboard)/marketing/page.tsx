@@ -5,6 +5,7 @@ import { Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { AdLinksPanel, type AdLinkRow } from "@/components/marketing/ad-links-panel";
 import { StatusImageMaker } from "@/components/marketing/status-image-maker";
+import { HostsPanel, type HostProgram, type HostRow } from "@/components/marketing/hosts-panel";
 
 interface MarketingData {
   links: AdLinkRow[];
@@ -13,16 +14,30 @@ interface MarketingData {
   countryCode: string;
 }
 
+interface HostsData {
+  program: HostProgram;
+  hosts: HostRow[];
+  hasNumber: boolean;
+  businessName: string;
+  month: string;
+}
+
 export default function MarketingPage() {
   const t = useTranslations("Marketing");
   const [data, setData] = useState<MarketingData | null>(null);
+  const [hosts, setHosts] = useState<HostsData | null>(null);
   const [failed, setFailed] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/marketing/links", { cache: "no-store" });
+      const [res, hostsRes] = await Promise.all([
+        fetch("/api/marketing/links", { cache: "no-store" }),
+        fetch("/api/marketing/hosts", { cache: "no-store" }),
+      ]);
       if (!res.ok) throw new Error(String(res.status));
       setData((await res.json()) as MarketingData);
+      // The host panel is optional: without migration 051 it just stays hidden.
+      setHosts(hostsRes.ok ? ((await hostsRes.json()) as HostsData) : null);
     } catch {
       setFailed(true);
     }
@@ -49,6 +64,16 @@ export default function MarketingPage() {
         <p className="text-sm text-muted-foreground">{t("desc")}</p>
       </div>
       <AdLinksPanel links={data.links} whatsappNumber={data.whatsappNumber} onChanged={() => void load()} />
+      {hosts && (
+        <HostsPanel
+          program={hosts.program}
+          hosts={hosts.hosts}
+          hasNumber={hosts.hasNumber}
+          businessName={hosts.businessName}
+          month={hosts.month}
+          onChanged={() => void load()}
+        />
+      )}
       <StatusImageMaker
         links={data.links}
         businessName={data.businessName}
