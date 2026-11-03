@@ -46,6 +46,12 @@ interface BroadcastPayload {
    * falls back to the template's stored URL only when this is empty.
    */
   headerMediaUrl?: string;
+  /**
+   * Sending a saved draft: that row becomes the broadcast (draft →
+   * sending → sent) instead of a new one, so whoever left the draft
+   * (e.g. a marketing app through the API) can read the result.
+   */
+  draftId?: string;
 }
 
 interface UseBroadcastSendingReturn {
@@ -353,31 +359,36 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
 
       // ── Step 2: Create broadcast row ──────────────────────────────
       setProgress(10);
-      const { data: broadcast, error: broadcastError } = await supabase
-        .from('broadcasts')
-        .insert({
-          user_id: user.id,
-          account_id: accountId,
-          name: payload.name,
-          template_name: payload.template.name,
-          template_language: payload.template.language ?? 'en_US',
-          template_variables: payload.variables,
-          audience_filter: {
-            type: payload.audience.type,
-            tagIds: payload.audience.tagIds,
-            customField: payload.audience.customField,
-            excludeTagIds: payload.audience.excludeTagIds,
-          },
-          status: 'sending',
-          total_recipients: contacts.length,
-          sent_count: 0,
-          delivered_count: 0,
-          read_count: 0,
-          replied_count: 0,
-          failed_count: 0,
-        })
-        .select()
-        .single();
+      const row = {
+        user_id: user.id,
+        account_id: accountId,
+        name: payload.name,
+        template_name: payload.template.name,
+        template_language: payload.template.language ?? 'en_US',
+        template_variables: payload.variables,
+        audience_filter: {
+          type: payload.audience.type,
+          tagIds: payload.audience.tagIds,
+          customField: payload.audience.customField,
+          excludeTagIds: payload.audience.excludeTagIds,
+        },
+        status: 'sending',
+        total_recipients: contacts.length,
+        sent_count: 0,
+        delivered_count: 0,
+        read_count: 0,
+        replied_count: 0,
+        failed_count: 0,
+      };
+      const { data: broadcast, error: broadcastError } = payload.draftId
+        ? await supabase
+            .from('broadcasts')
+            .update({ ...row, updated_at: new Date().toISOString() })
+            .eq('id', payload.draftId)
+            .eq('status', 'draft')
+            .select()
+            .single()
+        : await supabase.from('broadcasts').insert(row).select().single();
 
       if (broadcastError || !broadcast) {
         throw new Error(

@@ -1,9 +1,12 @@
-import { NextResponse } from 'next/server'
+import { after, NextResponse } from 'next/server'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/automations/admin-client'
 import { clearBusinessSettingsCache, loadBusinessSettings } from '@/lib/business/settings'
 import { saveSettingsPatch } from '@/lib/marketing/settings-store'
 import { adLinkUrl, adOriginTag, normalizeAdCode, pickAdCode, type AdLink } from '@/lib/marketing/ad-links'
+import { appBaseUrl, hostPublicView } from '@/lib/marketing/host-stats'
+import { hostScanPath } from '@/lib/marketing/hosts'
+import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 
 // GET /api/marketing/links → { links, whatsappNumber }
 //   Each advertising link with its wa.me URL, how many contacts wrote
@@ -112,6 +115,12 @@ export async function DELETE(request: Request) {
   const biz = await loadBusinessSettings(db, ctx.accountId)
   if (!(await saveLinks(db, ctx.accountId, biz.adLinks.filter((l) => l.code !== code)))) {
     return NextResponse.json({ error: 'save_failed' }, { status: 500 })
+  }
+  const removed = biz.adLinks.find((l) => l.code === code && l.host)
+  if (removed) {
+    const accountId = ctx.accountId
+    const scanUrl = `${appBaseUrl(biz, request)}${hostScanPath(accountId, code)}`
+    after(() => dispatchWebhookEvent(db, accountId, 'host.deleted', hostPublicView(removed, scanUrl)))
   }
   return NextResponse.json({ ok: true })
 }

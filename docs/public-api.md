@@ -51,6 +51,8 @@ it. Grant the minimum.
 | `broadcasts:send`    | Launch broadcast campaigns               |
 | `webhooks:manage`    | Register and manage outbound webhooks    |
 | `catalog:write`      | Upload the store system's product list   |
+| `broadcasts:draft`   | Leave broadcast drafts (cannot send)     |
+| `marketing:read`     | Read partner hosts and their QR links    |
 
 A key with **no scopes** still authenticates and can call
 `GET /api/v1/me` — useful for verifying a key works.
@@ -264,6 +266,98 @@ Broadcast status + counts. Scope: `broadcasts:send`. `status` moves
 `sending` → `sent`; `delivered_count` / `read_count` keep climbing as
 Meta delivery webhooks arrive. `404` for another account's broadcast.
 
+### `POST /api/v1/broadcast-drafts`
+
+Leave a broadcast for a person to review and send — for a marketing
+app that designs the pieces. Scope: `broadcasts:draft` (it can never
+send). **Migration required:** `052_broadcast_origin.sql`.
+
+```bash
+curl -X POST https://your-crm.example.com/api/v1/broadcast-drafts   -H "Authorization: Bearer wacrm_live_xxx"   -H "Content-Type: application/json"   -d '{
+        "name": "Christmas launch",
+        "template_name": "christmas_launch",
+        "template_language": "es",
+        "header_image_url": "https://example.com/piece.jpg",
+        "variables": ["{contact.name}", "5 %"],
+        "audience_tags": ["Frequent customers"],
+        "text": "The approved copy, shown to the reviewer",
+        "ref": "XMAS-01",
+        "note": "Send on Nov 10 in the morning"
+      }'
+```
+
+- `name`, `template_name` — required. The template must be approved by
+  Meta before it can be sent; a draft can be left earlier.
+- `header_image_url` — `https://`, for templates with an image header.
+- `variables` — body values for `{{1}}`, `{{2}}`…; `{contact.name}` and
+  `{contact.phone}` are filled per customer, anything else is sent as
+  written.
+- `audience_tags` — tag names; the draft starts with that audience
+  (everyone when none match). The reviewer can change it.
+- `text`, `ref`, `note` — shown to the reviewer next to the wizard.
+
+The draft appears in Broadcasts marked "from <key name>", and the
+account's admins get a notification. Response (201):
+
+```json
+{
+  "data": {
+    "draft_id": "…",
+    "status": "draft",
+    "template_status": "APPROVED",
+    "unknown_tags": [],
+    "review_url": "https://your-crm.example.com/broadcasts/new?draft=…"
+  }
+}
+```
+
+`template_status` is `missing` when the account has no template by that
+name.
+
+### `GET /api/v1/broadcast-drafts/{id}`
+
+What became of a draft. Scope: `broadcasts:draft`. `status` stays
+`draft` until a person sends it, then moves `sending` → `sent` with the
+same counts as `GET /api/v1/broadcasts/{id}`. `404` for ids not left
+through the API.
+
+### `GET /api/v1/hosts`
+
+Partner hosts (e.g. Airbnb apartments) with their QR link, for a design
+app that prints the sign. Scope: `marketing:read`. **Migration
+required:** `051_ad_link_tracking.sql`.
+
+```json
+{
+  "data": {
+    "business_name": "…",
+    "program": { "discount_pct": 5, "free_delivery_from": 20, "valid_days": 15 },
+    "month": "noviembre de 2026",
+    "hosts": [
+      {
+        "code": "JUAN",
+        "name": "Juan Pérez",
+        "lodging": "Depto El Vergel",
+        "scan_url": "https://your-crm.example.com/r/<account>/JUAN",
+        "created_at": "…",
+        "qr_svg": "<svg …>",
+        "results": {
+          "all": { "scans": 12, "guests": 5, "orders": 3, "sales": 64.5 },
+          "month": { "scans": 4, "guests": 2, "orders": 1, "sales": 18 },
+          "countries": [{ "country": "EE. UU. / Canadá", "count": 3 }],
+          "last_order_at": "…"
+        }
+      }
+    ]
+  }
+}
+```
+
+Print `scan_url` (or `qr_svg`) exactly: that link counts the scan and
+gives the guest the discount — a QR made from a plain `wa.me` link does
+neither. Never returns the host's phone or agreed reward. Best sellers
+first.
+
 ### `POST /api/v1/erp-products`
 
 Upload the store system's (ERP) product list, in batches of up to 2000.
@@ -318,6 +412,10 @@ things happen in your account. **Migration required:** apply
 | `message.received`       | An inbound message arrives from a contact         |
 | `message.status_updated` | A message you sent changed delivery status        |
 | `conversation.created`   | A new conversation is opened for a contact        |
+| `host.created`           | A partner host was added (data: code, name, lodging, scan_url) |
+| `host.updated`           | A host's name or lodging changed                  |
+| `host.deleted`           | A host was removed — its QR stops working         |
+| `host_program.updated`   | The program's terms changed (data: discount_pct, free_delivery_from, valid_days) |
 
 ### Managing endpoints
 

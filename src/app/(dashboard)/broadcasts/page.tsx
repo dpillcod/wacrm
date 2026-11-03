@@ -240,10 +240,21 @@ export default function BroadcastsPage() {
                   <TableRow
                     key={broadcast.id}
                     className="cursor-pointer border-border hover:bg-muted/50"
-                    onClick={() => router.push(`/broadcasts/${broadcast.id}`)}
+                    onClick={() =>
+                      router.push(
+                        broadcast.status === 'draft'
+                          ? `/broadcasts/new?draft=${broadcast.id}`
+                          : `/broadcasts/${broadcast.id}`,
+                      )
+                    }
                   >
                     <TableCell className="font-medium text-foreground">
                       {broadcast.name}
+                      {broadcast.origin?.source && (
+                        <span className="ml-2 rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-xs font-normal text-primary">
+                          {t('fromSource', { source: broadcast.origin.source })}
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell className="hidden text-muted-foreground md:table-cell">
                       {broadcast.template_name}

@@ -422,6 +422,8 @@ export interface Broadcast {
   replied_count: number;
   failed_count: number;
   created_at: string;
+  /** Set when another app left this broadcast as a draft (migration 052). */
+  origin?: { source?: string; ref?: string | null } | null;
 }
 
 export interface BroadcastRecipient {

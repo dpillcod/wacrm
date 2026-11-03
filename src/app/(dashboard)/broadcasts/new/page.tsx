@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
@@ -11,7 +11,8 @@ import { Step2SelectAudience } from '@/components/broadcasts/step2-select-audien
 import { Step3Personalize } from '@/components/broadcasts/step3-personalize';
 import { Step4ScheduleSend } from '@/components/broadcasts/step4-schedule-send';
 import { useBroadcastSending } from '@/hooks/use-broadcast-sending';
-import { Check } from 'lucide-react';
+import { readOrigin, type DraftOrigin } from '@/lib/broadcasts/drafts';
+import { Check, Info } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
 const steps = [
@@ -45,6 +46,47 @@ export default function NewBroadcastPage() {
   >({});
   const [headerMediaUrl, setHeaderMediaUrl] = useState('');
   const [name, setName] = useState('');
+  // Opened from a saved draft (/broadcasts/new?draft=<id>) — possibly one
+  // another app left through the API: prefill everything, and sending
+  // turns that same row into the broadcast.
+  const [draftId, setDraftId] = useState<string | null>(null);
+  const [draftOrigin, setDraftOrigin] = useState<DraftOrigin | null>(null);
+  const [missingTemplate, setMissingTemplate] = useState<string | null>(null);
+
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get('draft');
+    if (!id) return;
+    void (async () => {
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from('broadcasts')
+        .select('id, name, status, template_name, template_language, template_variables, audience_filter, origin')
+        .eq('id', id)
+        .maybeSingle();
+      if (error || !data || data.status !== 'draft') {
+        toast.error(t('draftLoadFailed'));
+        return;
+      }
+      setDraftId(data.id);
+      setName(data.name ?? '');
+      setVariables((data.template_variables ?? {}) as typeof variables);
+      const filter = (data.audience_filter ?? {}) as { type?: string; tagIds?: string[] };
+      if (filter.type === 'tags' && filter.tagIds?.length) setAudience({ type: 'tags', tagIds: filter.tagIds });
+      const origin = readOrigin(data.origin);
+      setDraftOrigin(origin);
+      if (origin?.headerMediaUrl) setHeaderMediaUrl(origin.headerMediaUrl);
+      const { data: templates } = await supabase
+        .from('message_templates')
+        .select('*')
+        .eq('name', data.template_name)
+        .eq('status', 'APPROVED');
+      const list = (templates ?? []) as MessageTemplate[];
+      const match = list.find((tpl) => tpl.language === data.template_language) ?? list[0];
+      if (match) setTemplate(match);
+      else setMissingTemplate(data.template_name);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleSend() {
     if (!template) return;
@@ -62,6 +104,7 @@ export default function NewBroadcastPage() {
         },
         variables,
         headerMediaUrl,
+        draftId: draftId ?? undefined,
       });
       router.push(`/broadcasts/${broadcastId}`);
     } catch (err) {
@@ -101,9 +144,7 @@ export default function NewBroadcastPage() {
       return;
     }
 
-    const { error } = await supabase.from('broadcasts').insert({
-      user_id: user.id,
-      account_id: accountId,
+    const draft = {
       name: name.trim(),
       template_name: template.name,
       template_language: template.language ?? 'en_US',
@@ -112,14 +153,24 @@ export default function NewBroadcastPage() {
         type: audience.type,
         tagIds: audience.tagIds,
       },
-      status: 'draft',
-      total_recipients: 0,
-      sent_count: 0,
-      delivered_count: 0,
-      read_count: 0,
-      replied_count: 0,
-      failed_count: 0,
-    });
+    };
+    const { error } = draftId
+      ? await supabase
+          .from('broadcasts')
+          .update({ ...draft, updated_at: new Date().toISOString() })
+          .eq('id', draftId)
+      : await supabase.from('broadcasts').insert({
+          ...draft,
+          user_id: user.id,
+          account_id: accountId,
+          status: 'draft',
+          total_recipients: 0,
+          sent_count: 0,
+          delivered_count: 0,
+          read_count: 0,
+          replied_count: 0,
+          failed_count: 0,
+        });
 
     if (error) {
       toast.error(t('toastFailedDraft', { error: error.message }));
@@ -138,6 +189,43 @@ export default function NewBroadcastPage() {
           {t('subtitle')}
         </p>
       </div>
+
+      {(draftOrigin || missingTemplate) && (
+        <div className="space-y-2 rounded-lg border border-primary/30 bg-primary/5 p-4 text-sm">
+          {draftOrigin && (
+            <>
+              <p className="flex items-center gap-2 font-medium text-foreground">
+                <Info className="h-4 w-4 text-primary" />
+                {t('draftFrom', { source: draftOrigin.source })}
+                {draftOrigin.ref && (
+                  <span className="font-normal text-muted-foreground">· {t('draftRef', { ref: draftOrigin.ref })}</span>
+                )}
+              </p>
+              {draftOrigin.text && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">{t('draftCopy')}</p>
+                  <p className="whitespace-pre-wrap text-foreground">{draftOrigin.text}</p>
+                </div>
+              )}
+              {draftOrigin.note && (
+                <p className="text-foreground">
+                  <span className="text-xs font-medium text-muted-foreground">{t('draftNote')}: </span>
+                  {draftOrigin.note}
+                </p>
+              )}
+              {draftOrigin.suggestedTags.length > 0 && (
+                <p className="text-muted-foreground">{t('draftTags', { tags: draftOrigin.suggestedTags.join(', ') })}</p>
+              )}
+              <p className="text-muted-foreground">{t('draftReview')}</p>
+            </>
+          )}
+          {missingTemplate && (
+            <p className="font-medium text-amber-600 dark:text-amber-400">
+              {t('draftTemplateMissing', { name: missingTemplate })}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Step Indicator */}
       <div className="flex items-center justify-between">

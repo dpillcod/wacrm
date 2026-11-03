@@ -11,6 +11,10 @@ export const WEBHOOK_EVENTS = [
   'message.received', // an inbound WhatsApp message landed
   'message.status_updated', // a sent message advanced (sent/delivered/read)
   'conversation.created', // a new conversation was opened for a contact
+  'host.created', // a partner host (Airbnb) was added — has its QR link
+  'host.updated', // a host's name or lodging changed
+  'host.deleted', // a host was removed (its QR stops working)
+  'host_program.updated', // the host program's terms changed (discount, delivery)
 ] as const;
 
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
@@ -21,6 +25,10 @@ export const WEBHOOK_EVENT_DESCRIPTIONS: Record<WebhookEvent, string> = {
   'message.status_updated':
     'A message you sent changed delivery status (sent/delivered/read/failed)',
   'conversation.created': 'A new conversation was opened',
+  'host.created': 'A partner host was added (with its QR link)',
+  'host.updated': "A partner host's name or lodging changed",
+  'host.deleted': 'A partner host was removed',
+  'host_program.updated': "The host program's terms changed",
 };
 
 /** Type-narrow an unknown value into a valid `WebhookEvent`. */

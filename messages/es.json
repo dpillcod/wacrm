@@ -683,7 +683,8 @@
         "date": "Fecha"
       },
       "errorLoad": "No se pudieron cargar las difusiones",
-      "retry": "Reintentar"
+      "retry": "Reintentar",
+      "fromSource": "desde {source}"
     },
     "status": {
       "draft": "Borrador",
@@ -749,7 +750,15 @@
       "toastNotSignedIn": "No ha iniciado sesión.",
       "toastNotLinked": "Su perfil no está vinculado a una cuenta.",
       "toastFailedDraft": "No se pudo guardar el borrador: {error}",
-      "toastDraftSaved": "Borrador guardado"
+      "toastDraftSaved": "Borrador guardado",
+      "draftFrom": "Borrador de {source}",
+      "draftRef": "Pieza: {ref}",
+      "draftCopy": "Texto aprobado",
+      "draftNote": "Nota",
+      "draftTags": "Etiquetas sugeridas: {tags}",
+      "draftReview": "Revise la plantilla, los destinatarios y la vista previa antes de enviar. Nada sale hasta que usted toque Enviar.",
+      "draftTemplateMissing": "La plantilla «{name}» todavía no está aprobada en Meta. Elija otra o espere la aprobación.",
+      "draftLoadFailed": "No se pudo abrir el borrador."
     },
     "wizard": {
       "next": "Siguiente",
