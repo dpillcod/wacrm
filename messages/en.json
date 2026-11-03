@@ -2220,6 +2220,7 @@
       "rewardLabel": "Reward",
       "rewardNone": "not set",
       "downloadQr": "Download QR",
+      "downloadQrSvg": "QR only (for the designer)",
       "qrFailed": "Could not create the QR.",
       "copyLink": "Copy link",
       "copySummary": "Copy monthly summary",

@@ -73,6 +73,17 @@ async function downloadQrCard(host: HostRow, businessName: string, discountPct: 
   a.click();
 }
 
+/** Just the QR, as vector SVG — for a designer's own layout (acrylic sign, print shop). */
+async function downloadQrSvg(host: HostRow) {
+  const svg = await QRCode.toString(host.scanUrl, { type: "svg", margin: 1, errorCorrectionLevel: "M" });
+  const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `qr-${host.code.toLowerCase()}.svg`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 /**
  * Airbnb hosts: a QR per host for their apartment. Guests who write
  * through it get the program's discount; the ranking shows which host
@@ -345,6 +356,15 @@ export function HostsPanel({
                   >
                     <Download className="mr-1 h-3.5 w-3.5" />
                     {t("downloadQr")}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => void downloadQrSvg(h).catch(() => toast.error(t("qrFailed")))}
+                  >
+                    <Download className="mr-1 h-3.5 w-3.5" />
+                    {t("downloadQrSvg")}
                   </Button>
                   <Button type="button" size="sm" variant="ghost" onClick={() => void copy(h.scanUrl)}>
                     <Copy className="mr-1 h-3.5 w-3.5" />
