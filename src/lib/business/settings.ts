@@ -15,6 +15,7 @@ import { sanitizeAdLinks, type AdLink } from '@/lib/marketing/ad-links'
 // ============================================================
 
 import { sanitizeSeasonalReplies, type SeasonalReply } from './seasonal-replies'
+import { sanitizeMenuPromos, type MenuPromo } from './menu-promos'
 
 export interface CrossSellRule {
   keyword: string
@@ -57,6 +58,8 @@ export interface BusinessSettings {
   crossSell: CrossSellRule[]
   /** Campaign answers for words like "canasta" — see seasonal-replies.ts. */
   seasonalReplies: SeasonalReply[]
+  /** Campaign line at the top of the menu and for the AI — see menu-promos.ts. */
+  menuPromos: MenuPromo[]
   /** Contact custom field holding the birthday (MM-DD) for the birthday flow. */
   birthdayFieldName: string
   /** One line about delivery shown in the product picker's cart ('' = none). */
@@ -241,6 +244,7 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
   customerInfo: '',
   crossSell: [],
   seasonalReplies: [],
+  menuPromos: [],
   birthdayFieldName: 'Fecha de nacimiento',
   idNumberFieldName: 'Cédula',
   shopDeliveryNote: '',
@@ -412,6 +416,7 @@ export function sanitizeSettings(stored: unknown): BusinessSettings {
       welcomeText: s.hostProgram.welcomeText.slice(0, 1000),
     },
     seasonalReplies: sanitizeSeasonalReplies(s.seasonalReplies),
+    menuPromos: sanitizeMenuPromos(s.menuPromos),
     checkInWords: strings(s.checkInWords, 20).map((w) => w.toLowerCase()),
     blockedProducts: {
       terms: strings(s.blockedProducts.terms, 300).map((w) => w.toLowerCase()),

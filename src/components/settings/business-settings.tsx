@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/card";
 import type { BusinessSettings, CrossSellRule } from "@/lib/business/settings";
 import { seasonalRepliesFromText, seasonalRepliesToText } from "@/lib/business/seasonal-replies";
+import { menuPromosFromText, menuPromosToText } from "@/lib/business/menu-promos";
 import { SettingsPanelHead } from "./settings-panel-head";
 import { StaffShifts } from "./staff-shifts";
 
@@ -41,6 +42,7 @@ interface Draft {
   blockedTerms: string;
   crossSell: string;
   seasonalReplies: string;
+  menuPromos: string;
 }
 
 const DAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
@@ -117,6 +119,7 @@ function toDraft(settings: BusinessSettings): Draft {
     blockedTerms: settings.blockedProducts.terms.join(", "),
     crossSell: settings.crossSell.map((r) => `${r.keyword} = ${r.suggestion}`).join("\n"),
     seasonalReplies: seasonalRepliesToText(settings.seasonalReplies),
+    menuPromos: menuPromosToText(settings.menuPromos),
   };
 }
 
@@ -134,6 +137,7 @@ function fromDraft(d: Draft): BusinessSettings {
     blockedProducts: { ...d.settings.blockedProducts, terms: words(d.blockedTerms) },
     crossSell,
     seasonalReplies: seasonalRepliesFromText(d.seasonalReplies),
+    menuPromos: menuPromosFromText(d.menuPromos),
   };
 }
 
@@ -411,6 +415,9 @@ export function BusinessSettingsPanel() {
         </Field>
         <Field label={t("rules.seasonal")} hint={t("rules.seasonalHint")}>
           {area(draft.seasonalReplies, (v) => edit({ seasonalReplies: v }), 10)}
+        </Field>
+        <Field label={t("rules.menuPromos")} hint={t("rules.menuPromosHint")}>
+          {area(draft.menuPromos, (v) => edit({ menuPromos: v }), 3)}
         </Field>
       </Section>
 

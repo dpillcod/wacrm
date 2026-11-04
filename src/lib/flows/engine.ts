@@ -69,7 +69,7 @@ import { updateWooOrder } from "../woocommerce/client";
 import { classifyFirstMessage, readImage, transcribeAudio, type ImageReading } from "../ai/media-understanding";
 import { isPurchaseOnly, nextGuideStep, purchaseItemFrom, type GuideAnswer } from "./service-guide";
 import { localToUtc, remindAppointmentOnInbound, syncDealCalendar } from "../calendar/appointments";
-import { acceptOfferedProduct, answerInFlow, looksLikeQuestion } from "./question-answer";
+import { acceptOfferedProduct, answerInFlow, looksLikeQuestion, recentMessages } from "./question-answer";
 import { nextOpeningPhrase } from "./store-policy";
 import { createOrderLinkToken, orderLinkUrl } from "../catalog/order-link";
 import { keepCatalogLines, money, totalLine } from "../catalog/order-lines";
@@ -116,6 +116,7 @@ import {
 } from "./store-policy";
 import { loadBusinessSettings, renderText, type BusinessSettings } from "../business/settings";
 import { findSeasonalReply, localDate } from "../business/seasonal-replies";
+import { activeMenuPromo } from "../business/menu-promos";
 import { activeHostFor, hostGuestLine } from "../marketing/hosts";
 import {
   type CollectInputNodeConfig,
@@ -2287,17 +2288,24 @@ async function customerStartVars(
   } catch (err) {
     console.error("[flows] contact name lookup failed:", err);
   }
+  // "{{vars.promo}}" at the top of the menu: today's campaign line and a
+  // blank line after it, or nothing at all once the campaign is over.
+  let promo = "";
   try {
     const biz = await bizOf(db, accountId);
+    const line = activeMenuPromo(biz.menuPromos, localDate(biz.utcOffsetHours));
+    promo = line ? `${line}
+
+` : "";
     const profile = await loadCustomerProfile(db, accountId, contactId, biz.idNumberFieldName);
-    if (profile) return { contact_name: contactName, ...profileVars(profile, { contact_name: contactName }) };
+    if (profile) return { contact_name: contactName, promo, ...profileVars(profile, { contact_name: contactName }) };
   } catch (err) {
     console.error("[flows] customer profile lookup failed:", err);
   }
   // Not registered (yet): a list reached some other way (repeat an
   // order, a catalog cart) shows "Consumidor final" — "Otros datos"
   // changes it — never an empty invoice line.
-  return { contact_name: contactName, billing_info: "Consumidor final", billing_line: "Consumidor final" };
+  return { contact_name: contactName, promo, billing_info: "Consumidor final", billing_line: "Consumidor final" };
 }
 
 /** The customer's personal product-picker link (24 h), or "" when the CRM has no public address. */
@@ -3507,7 +3515,12 @@ async function clarifyCapturedBatch(
   ) {
     return false;
   }
-  const review = await reviewOrderLines(db, run.account_id, run.conversation_id, lines as string[]);
+  // The last messages, so "1 funda grande" right after "¿tiene Royal
+  // Canin Kitten?" is read as that food's bag, not as a bag to buy.
+  const recent = run.conversation_id
+    ? (await recentMessages(db, run.conversation_id, (lines as string[]).join(" ")).catch(() => [])).map((m) => `${m.who}: ${m.text}`)
+    : [];
+  const review = await reviewOrderLines(db, run.account_id, run.conversation_id, lines as string[], recent);
   if (!review) return false;
   // Nothing in the batch was a product ("voy a pasar viendo", "no gafas"):
   // take it out of the list and keep listening, without an "Anotado".

@@ -53,6 +53,7 @@ Reglas:
 - Responde SOLO con JSON válido, sin texto antes ni después.`;
 
 const REVIEW_TASK = `Tarea: revisa las líneas del pedido. Si una línea es vaga y a un empleado le faltaría un dato para tomar el producto correcto de la percha (tamaño, presentación, medida, watts, color, sabor, tipo), escribe UNA pregunta corta para el cliente. Usa las referencias del catálogo solo para sugerir opciones reales (ej. "¿de 2 litros o de 3 litros?"); no menciones códigos. NO preguntes si la línea ya es razonablemente clara (ej. "1 libra de arroz", "10 panes de agua", "1 cuaderno de 100 hojas cuadros", "un dólar de huevos", "2 dólares de pan": una cantidad en dinero es clara). Para lo básico de todos los días (huevos, pan, leche, arroz, azúcar, sal) asume la presentación común y no preguntes. Nunca ofrezcas opciones absurdas ni de otra categoría que aparezcan en las referencias (ej. un juguete o caramelo con el mismo nombre). Las referencias pueden estar incompletas: si no ves todas las presentaciones, pregunta de forma abierta con ejemplos comunes (ej. "¿De qué tamaño: 1, 2 o 3 litros?") en vez de limitarte a las referencias.
+Si hay conversación anterior, úsala: una línea que solo da cantidad, empaque o tamaño ("1 funda grande", "2 cajas", "la de 3 litros") se refiere al producto del que se venía hablando; escríbela con ese producto ("1 funda grande de comida Royal Canin Kitten para gato") y no la tomes como otro producto (ahí "funda" es el empaque, no una funda de basura).
 Nombra siempre el producto en la pregunta (ej. "¿La Coca-Cola la desea de 1, 2 o 3 litros?").
 Si hay una sola línea vaga, haz una sola pregunta corta. Si hay varias, empieza con "Para anotar bien su pedido:" y pon una línea por producto con viñeta "•" (ej. "• Foco: ¿LED o ahorrador? ¿De cuántos watts?"), máximo 3 productos.
 
@@ -223,6 +224,8 @@ export async function reviewOrderLines(
   accountId: string,
   conversationId: string | null,
   lines: string[],
+  /** The last messages before this batch ("Tienda: …", "Cliente: …"), oldest first. */
+  recent: string[] = [],
 ): Promise<ReviewResult | null> {
   if (lines.length === 0) return null;
   const config = await loadConfig(db, accountId);
@@ -234,6 +237,7 @@ export async function reviewOrderLines(
       ),
     );
     const content =
+      (recent.length ? `Conversación anterior (para entender a qué producto se refiere cada línea):\n${recent.join("\n")}\n\n` : "") +
       "Líneas del pedido:\n" +
       numbered(lines) +
       "\n\nReferencias del catálogo (nombres abreviados del sistema; solo para sugerir opciones, pueden no coincidir):\n" +

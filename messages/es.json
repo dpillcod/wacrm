@@ -1853,7 +1853,9 @@
         "crossSell": "Sugerencias (una por línea: palabra = sugerencia)",
         "crossSellHint": "Por ejemplo \"pan = Por cierto, ¿le gustaría también queso? 🙂\". Máximo una por conversación.",
         "seasonal": "Respuestas de temporada",
-        "seasonalHint": "Cuando el cliente nombra una de estas palabras, el bot responde con el texto (una vez al día por cliente). Primera línea: palabras separadas por coma y, después de \"|\", el último día (AAAA-MM-DD). Luego el texto. Separe cada respuesta con una línea \"---\"."
+        "seasonalHint": "Cuando el cliente nombra una de estas palabras, el bot responde con el texto (una vez al día por cliente). Primera línea: palabras separadas por coma y, después de \"|\", el último día (AAAA-MM-DD). Luego el texto. Separe cada respuesta con una línea \"---\".",
+        "menuPromos": "Promociones del menú",
+        "menuPromosHint": "Una por línea; la primera vigente sale arriba del menú del bot y la IA la menciona al responder. Empiece con el último día (AAAA-MM-DD) y \"|\" para que desaparezca sola: 2026-11-09 | 🎄 *Canastas navideñas* …"
       },
       "texts": {
         "title": "Textos del bot",

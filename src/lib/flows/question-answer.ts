@@ -20,6 +20,8 @@ import { generateAnthropic } from "../ai/providers/anthropic";
 import { generateOpenAi } from "../ai/providers/openai";
 import { logAiUsage } from "../ai/usage";
 import { loadBusinessSettings } from "../business/settings";
+import { campaignsForAi } from "../business/menu-promos";
+import { localDate } from "../business/seasonal-replies";
 import { businessIntro } from "./order-clarify";
 import { hoursInWords } from "./store-policy";
 
@@ -94,6 +96,16 @@ export function productSearchText(text: string): string {
 // "Sí, por favor", "me confirma" after the offer: one or more of these.
 const AFFIRMATIVE = /^((si|ok|okey|dale|claro|bueno|ya|por favor|porfavor|porfa|anotelo|agreguelo|apuntelo|de una|perfecto|me confirma|me confirman|confirmeme|me lo anota|me anota)(?=$|[\s,.!])[\s,.!]*)+/i;
 
+// "1 funda grande", "una caja de 12 unidades": how the offered product
+// comes (its package and size), not another product.
+const PACKAGED_QUANTITY = new RegExp(
+  "^(\\d+(?:[.,]\\d+)?|un|una)\\s+" +
+    "(?:funda|paquete|caja|saco|bolsa|sobre|frasco|botella|lata|galon|tarro|cubeta|rollo|docena|unidad|tubo|pote|bidon|quintal)(?:s|es)?" +
+    "(?:\\s+(?:grandes?|medianas?|medianos?|pequenas?|pequenos?|chicas?|chicos?|familiar|personal|economica|economico))?" +
+    "(?:\\s+de\\s+\\d+(?:[.,]\\d+)?\\s*[a-z]+)?\\s*(?:de\\s*)?$",
+  "i",
+);
+
 /**
  * After the bot offered to add `product`: "sí" → "1 product", "sí, 10
  * metros" / "10 metros" → "10 metros product". Null when the reply isn't
@@ -104,6 +116,8 @@ export function acceptOfferedProduct(text: string, product: string): string | nu
   const t = text.trim().normalize("NFD").replace(/[̀-ͯ]/g, "");
   const affirmative = AFFIRMATIVE.test(t);
   const rest = t.replace(AFFIRMATIVE, "").replace(/^[\s,.!-]+/, "").trim();
+  const packed = PACKAGED_QUANTITY.exec(rest);
+  if (packed) return `${/^\d/.test(packed[1]) ? packed[1] : "1"} ${rest.slice(packed[1].length).trim().replace(/\s+de\s*$/i, "")} ${product}`;
   const quantity = /^\d+([.,]\d+)?\s*[a-záéíóúñ]*\.?\s*(de\s*)?$/i.test(rest) ? rest.replace(/\s*de\s*$/i, "") : "";
   if (affirmative && !rest) return `1 ${product}`;
   if (quantity && (affirmative || /^\d/.test(rest))) return `${quantity} ${product}`;
@@ -139,7 +153,7 @@ const SITUATION: Record<"menu" | "order" | "other", string> = {
 
 /** One short, grounded answer to a question asked mid-flow (see the module note). */
 /** The conversation's last few messages before this one, oldest first. */
-async function recentMessages(
+export async function recentMessages(
   db: SupabaseClient,
   conversationId: string,
   current: string,
@@ -201,6 +215,7 @@ Responde SOLO con JSON: {"reply": "...", "product": "..." o null}`,
     `Información del negocio:
 - Horario: ${hoursInWords(biz) || "consultar"}.
 ${biz.websiteUrl ? `- Página web: ${biz.websiteUrl}\n` : ""}${biz.customerInfo.trim() ? biz.customerInfo.trim() : ""}`,
+    campaignsForAi(biz.menuPromos, biz.seasonalReplies, localDate(biz.utcOffsetHours)),
     recent.length
       ? `Conversación reciente (para entender a qué se refiere; NO saludes de nuevo):\n${recent.map((m) => `${m.who}: ${m.text}`).join("\n")}`
       : "",

@@ -9,6 +9,8 @@ import { buildSystemPrompt } from './defaults'
 import { buildHandoffSummary } from './handoff'
 import { pickCrossSellSuggestion } from './cross-sell'
 import { loadBusinessSettings } from '../business/settings'
+import { campaignsForAi } from '../business/menu-promos'
+import { localDate } from '../business/seasonal-replies'
 import { logAiUsage } from './usage'
 import { latestUserMessage } from './query'
 import { engineSendText, engineSendProduct, engineSendProductList } from '@/lib/flows/meta-send'
@@ -242,10 +244,18 @@ export async function dispatchInboundToAiReply(
 
     // The business's own answers (delivery, payments, returns…) — the
     // official word, so the AI never makes up a policy.
-    const customerInfo = (await loadBusinessSettings(db, accountId)).customerInfo.trim()
-    const groundedPrompt = customerInfo
-      ? `${systemPrompt}\n\nInformación oficial del negocio para responder a los clientes (si algo no está aquí ni arriba, no lo inventes). Trata SIEMPRE al cliente de "usted" (nunca de "tú"). Formato de WhatsApp: negritas con UN solo asterisco (*así*), sin títulos ni ** dobles:\n${customerInfo}`
-      : systemPrompt
+    // Plus the campaigns running today (menu promotion, seasonal replies).
+    const biz = await loadBusinessSettings(db, accountId)
+    const customerInfo = biz.customerInfo.trim()
+    const groundedPrompt = [
+      systemPrompt,
+      customerInfo
+        ? `Información oficial del negocio para responder a los clientes (si algo no está aquí ni arriba, no lo inventes). Trata SIEMPRE al cliente de "usted" (nunca de "tú"). Formato de WhatsApp: negritas con UN solo asterisco (*así*), sin títulos ni ** dobles:\n${customerInfo}`
+        : '',
+      campaignsForAi(biz.menuPromos, biz.seasonalReplies, localDate(biz.utcOffsetHours)),
+    ]
+      .filter(Boolean)
+      .join('\n\n')
 
     console.log('[ai auto-reply] calling provider', { provider: config.provider, model: config.model })
     const { text: generatedText, handoff, usage, recommendedRetailerIds, cartAdds, wantsCartTotal } = await generateReply({
