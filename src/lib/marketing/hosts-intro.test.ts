@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { sanitizeSettings } from '@/lib/business/settings'
-import { hostWelcomeText, isHostIntro } from './hosts'
+import { hostWelcomeText, isHostIntro, splitWelcome } from './hosts'
 import type { AdLink } from './ad-links'
 
 const link = {
@@ -31,5 +31,12 @@ describe('hostWelcomeText', () => {
     const text = hostWelcomeText(biz, link)!
     expect(text).toContain('*envío gratis* desde $20,00')
     expect(text).toContain('*free delivery* from $20.00')
+  })
+})
+
+describe('splitWelcome', () => {
+  it('splits on a line with just ---', () => {
+    expect(splitWelcome('Hola\nDescuento\n---\nWeb\nhttps://x.com')).toEqual(['Hola\nDescuento', 'Web\nhttps://x.com'])
+    expect(splitWelcome('Todo junto')).toEqual(['Todo junto', ''])
   })
 })

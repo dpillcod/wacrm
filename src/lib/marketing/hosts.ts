@@ -46,6 +46,16 @@ export function hostWelcomeText(biz: BusinessSettings, link: AdLink): string | n
 }
 
 /**
+ * A welcome written in two parts, split by a line with just "---": the
+ * first goes with the catalog button (and the picture), the second as
+ * plain text after it. Without the line, it's all one part.
+ */
+export function splitWelcome(text: string): [string, string] {
+  const parts = text.split(/\n[ \t]*---[ \t]*\n/)
+  return [parts[0].trim(), parts.slice(1).join('\n\n').trim()]
+}
+
+/**
  * The guest's first message is just the QR's text ("Hola 👋 me hospedo
  * en …"), nothing to order yet: the welcome answers it, and the general
  * menu shouldn't follow on top.

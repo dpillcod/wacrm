@@ -827,12 +827,46 @@ async function sendButtonsAndSuspend(
   return { outcome: "advanced", node_key: node.node_key };
 }
 
+/** A list's intro_cta: the link button first, or just its text when the link isn't usable or the send fails. */
+async function sendIntroCta(
+  db: AdminClient,
+  run: FlowRunRow,
+  nodeKey: string,
+  cta: NonNullable<SendListNodeConfig["intro_cta"]>,
+): Promise<void> {
+  const text = interpolateVars(cta.text, run.vars);
+  if (!text.trim()) return;
+  const url = interpolateVarsForUrl(cta.url, run.vars);
+  if (/^https:\/\/[^\s/]+/.test(url)) {
+    try {
+      const { whatsapp_message_id } = await engineSendCtaUrl({
+        accountId: run.account_id,
+        userId: run.user_id,
+        conversationId: run.conversation_id!,
+        contactId: run.contact_id!,
+        bodyText: text,
+        buttonText: cta.button_text,
+        url,
+      });
+      await logEvent(db, run.id, "message_sent", nodeKey, { node_type: "intro_cta", whatsapp_message_id });
+      return;
+    } catch (err) {
+      await logEvent(db, run.id, "error", nodeKey, {
+        reason: "intro_cta_failed",
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  await sendEngineText(db, run, nodeKey, text, "intro_cta_without_link");
+}
+
 async function sendListAndSuspend(
   db: AdminClient,
   run: FlowRunRow,
   node: FlowNodeRow,
 ): Promise<{ outcome: "advanced"; node_key: string }> {
   const cfg = node.config as unknown as SendListNodeConfig;
+  if (cfg.intro_cta) await sendIntroCta(db, run, node.node_key, cfg.intro_cta);
   const { whatsapp_message_id } = cfg.send_as_text
     ? // A plain numbered menu (the customer replies with a number — see
       // optionByNumber). `text` must already list the options in row
@@ -2309,6 +2343,10 @@ async function customerStartVars(
 }
 
 /** The customer's personal product-picker link (24 h), or "" when the CRM has no public address. */
+export async function customerCatalogLink(accountId: string, contactId: string, conversationId: string): Promise<string> {
+  return catalogLink(supabaseAdmin(), accountId, contactId, conversationId);
+}
+
 async function catalogLink(db: AdminClient, accountId: string, contactId: string, conversationId: string): Promise<string> {
   try {
     const biz = await bizOf(db, accountId);

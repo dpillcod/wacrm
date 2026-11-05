@@ -134,6 +134,13 @@ export interface SendListNodeConfig {
    * each number leads.
    */
   send_as_text?: boolean;
+  /**
+   * A link-button message sent just before the list (e.g. the greeting
+   * with a "🛒 Catálogo express" button above a numbered menu). `url`
+   * may be a whole `{{vars.x}}` (pair it with `catalog_link: true` on
+   * this node); without a usable https link only `text` goes out.
+   */
+  intro_cta?: { text: string; button_text: string; url: string };
 }
 
 /**

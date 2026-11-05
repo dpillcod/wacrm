@@ -14,7 +14,7 @@ import {
   type CoexMessage,
 } from '@/lib/whatsapp/coexistence'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
-import { dispatchInboundToFlows, openOrderQuietly, recordDeliveryFailure } from '@/lib/flows/engine'
+import { dispatchInboundToFlows, customerCatalogLink, openOrderQuietly, recordDeliveryFailure } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import {
@@ -28,8 +28,8 @@ import { formatFormReply, parseFormReply } from '@/lib/whatsapp/flow-form'
 import { recordReferralOrigin, tagContact, type MetaReferral } from '@/lib/contacts/origin'
 import { adOriginNote, adOriginTag, findAdLink, stripAdCode } from '@/lib/marketing/ad-links'
 import { loadBusinessSettings } from '@/lib/business/settings'
-import { GUEST_WELCOME_TAG, hostWelcomeText, isHostIntro, rememberAdContact } from '@/lib/marketing/hosts'
-import { engineSendMedia, engineSendText } from '@/lib/flows/meta-send'
+import { GUEST_WELCOME_TAG, hostWelcomeText, isHostIntro, rememberAdContact, splitWelcome } from '@/lib/marketing/hosts'
+import { engineSendCtaUrl, engineSendMedia, engineSendText } from '@/lib/flows/meta-send'
 import { listLibrary } from '@/lib/media/library'
 import { localDate } from '@/lib/business/seasonal-replies'
 import {
@@ -914,20 +914,27 @@ async function processMessage(
       })
       // A host's guest: tell them about the discount before the menu —
       // on the program's picture when the media library has one tagged
-      // "huespedes" (a piece made in the design app), else as text.
+      // "huespedes" (a piece made in the design app), with the catalog
+      // button when there's a picker link; the part after "---" follows
+      // as plain text.
       const welcome = firstTime ? hostWelcomeText(biz, ad) : null
       if (welcome) {
         const send = { accountId, userId: configOwnerUserId, conversationId: conversation.id, contactId: contactRecord.id }
         const piece = (
           await listLibrary(supabaseAdmin(), accountId, localDate(biz.utcOffsetHours)).catch(() => [])
         ).find((p) => p.tags.includes(GUEST_WELCOME_TAG))
+        const [main, rest] = splitWelcome(welcome)
         try {
-          if (piece && welcome.length <= 1024) {
-            await engineSendMedia({ ...send, kind: 'image', link: piece.url, caption: welcome })
+          const catalog = main.length <= 1024 ? await customerCatalogLink(accountId, contactRecord.id, conversation.id) : ''
+          if (catalog) {
+            await engineSendCtaUrl({ ...send, bodyText: main, headerImageUrl: piece?.url, buttonText: '🛒 Catálogo express', url: catalog })
+          } else if (piece && main.length <= 1024) {
+            await engineSendMedia({ ...send, kind: 'image', link: piece.url, caption: main })
           } else {
             if (piece) await engineSendMedia({ ...send, kind: 'image', link: piece.url })
-            await engineSendText({ ...send, text: welcome })
+            await engineSendText({ ...send, text: main })
           }
+          if (rest) await engineSendText({ ...send, text: rest })
           // Just the QR's text ("Hola, me hospedo en …"): the welcome
           // answered it — wait for their list instead of adding the menu.
           guestWelcomed = isHostIntro(flowText ?? '', ad)
