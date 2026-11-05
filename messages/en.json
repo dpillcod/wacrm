@@ -229,6 +229,7 @@
       "stopAndAttach": "Stop and attach",
       "attachMedia": "Attach media",
       "photo": "Photo",
+      "libraryPieces": "📚 Ready pieces (design app)",
       "video": "Video",
       "document": "Document",
       "voiceNote": "Voice note",
@@ -812,6 +813,7 @@
         "headerImage": "Header Image",
         "headerImageDesc": "This template requires a header image.",
         "imageUrl": "Image URL",
+        "fromLibrary": "Pick from the library",
         "imageUrlPlaceholder": "https://example.com/image.jpg",
         "variables": "Variables",
         "varDesc": "Set values for {{name}}",
@@ -2243,5 +2245,12 @@
       "copied": "Copied",
       "copyFailed": "Could not copy"
     }
+  },
+  "MediaLibrary": {
+    "title": "Pieces ready to send",
+    "search": "Search by name, text or tag",
+    "empty": "No pieces yet. When the design app approves one, it shows up here by itself.",
+    "noMatch": "No piece matches the search.",
+    "until": "until {date}"
   }
 }

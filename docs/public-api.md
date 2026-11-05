@@ -53,6 +53,7 @@ it. Grant the minimum.
 | `catalog:write`      | Upload the store system's product list   |
 | `broadcasts:draft`   | Leave broadcast drafts (cannot send)     |
 | `marketing:read`     | Read partner hosts and their QR links    |
+| `media:write`        | Add images to the media library (cannot send) |
 
 A key with **no scopes** still authenticates and can call
 `GET /api/v1/me` — useful for verifying a key works.
@@ -357,6 +358,41 @@ Print `scan_url` (or `qr_svg`) exactly: that link counts the scan and
 gives the guest the discount — a QR made from a plain `wa.me` link does
 neither. Never returns the host's phone or agreed reward. Best sellers
 first.
+
+### `POST /api/v1/media`
+
+Leave a finished piece (an image) in the CRM's media library, ready for
+agents to send from the inbox (**📚 Piezas listas**) or to use as a
+broadcast header — no downloading and re-uploading. Nothing is sent to
+anyone. Scope: `media:write`. **Migration required:**
+`053_media_library.sql`.
+
+```bash
+curl -X POST https://your-crm.example.com/api/v1/media \
+  -H "Authorization: Bearer wacrm_live_…" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "image_url": "https://…/nav26-post.jpg",
+    "name": "Canastas navideñas — post",
+    "ref": "NAV26-01",
+    "caption": "🎄 Reserve su canasta 👉 https://…",
+    "tags": ["navidad"],
+    "valid_until": "2026-12-24"
+  }'
+# → 201 { "data": { "media_id": "…", "url": "https://…/media-library/…", "replaced": false } }
+```
+
+- `image_url` must be a public `https` URL that answers the image
+  directly (no redirects): PNG, JPEG or WebP, at most 5 MB. The CRM
+  downloads it once and keeps its own copy.
+- `ref` (the piece's code in the design app) makes it idempotent:
+  sending the same `ref` again replaces the image and details — a
+  corrected version, never a duplicate (`200`, `"replaced": true`).
+- `caption` is the suggested text sent with the image (editable).
+- `valid_until` hides the piece after that day (a campaign's end).
+
+`GET /api/v1/media` lists the pieces still available.
+`DELETE /api/v1/media?ref=NAV26-01` takes one out of the library.
 
 ### `POST /api/v1/erp-products`
 

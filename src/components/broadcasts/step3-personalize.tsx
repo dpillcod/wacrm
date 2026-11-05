@@ -12,7 +12,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { ArrowLeft, ArrowRight, Eye, ImageIcon, Loader2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Eye, ImageIcon, Library, Loader2 } from 'lucide-react';
+import { MediaLibraryPicker } from '@/components/media/media-library-picker';
 import { useTranslations } from 'next-intl';
 
 type VariableType = 'static' | 'field' | 'custom_field';
@@ -79,6 +80,7 @@ export function Step3Personalize({
   const t = useTranslations('Broadcasts.wizard');
   const [customFields, setCustomFields] = useState<CustomField[]>([]);
   const [loadingFields, setLoadingFields] = useState(true);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const [firstContact, setFirstContact] = useState<Contact | null>(null);
   const [firstContactCustomValues, setFirstContactCustomValues] = useState<
     Map<string, string>
@@ -251,9 +253,17 @@ export function Step3Personalize({
               {mediaHeaderType}
             </span>
           </div>
-          <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-            {t('personalize.imageUrl')}
-          </label>
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <label className="block text-xs font-medium text-muted-foreground">
+              {t('personalize.imageUrl')}
+            </label>
+            {mediaHeaderType === 'image' && (
+              <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => setLibraryOpen(true)}>
+                <Library className="mr-1 h-3.5 w-3.5" />
+                {t('personalize.fromLibrary')}
+              </Button>
+            )}
+          </div>
           <Input
             type="url"
             value={headerMediaUrl}
@@ -281,6 +291,14 @@ export function Step3Personalize({
                 : 'Enter a valid http(s) URL.'}
             </p>
           )}
+          <MediaLibraryPicker
+            open={libraryOpen}
+            onOpenChange={setLibraryOpen}
+            onPick={(piece) => {
+              onHeaderMediaUrlChange(piece.url);
+              setLibraryOpen(false);
+            }}
+          />
         </div>
       )}
 

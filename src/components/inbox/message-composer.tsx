@@ -23,6 +23,7 @@ import {
   MessageSquareDashed,
   ShoppingBag,
   Zap,
+  Library,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { GatedButton } from "@/components/ui/gated-button";
@@ -57,6 +58,7 @@ import { validateInteractivePayload } from "@/lib/whatsapp/interactive";
 import type { InteractiveMessagePayload, InteractiveProductPayload, QuickReply } from "@/types";
 import { QuickReplyPicker } from "./quick-reply-picker";
 import { ProductPicker } from "./product-picker";
+import { MediaLibraryPicker, type LibraryPiece } from "@/components/media/media-library-picker";
 
 /** Media content types an agent can send from the composer. */
 export type ComposerMediaKind = "image" | "video" | "document" | "audio";
@@ -167,6 +169,7 @@ export function MessageComposer({
   const [savingQuickReply, setSavingQuickReply] = useState(false);
   const [quickReplyOpen, setQuickReplyOpen] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
 
   // Media attachment state. `draft` holds an uploaded-but-not-yet-sent
   // attachment; `busy` covers the upload/transcode window.
@@ -565,6 +568,13 @@ export function MessageComposer({
     onClearReply?.();
   }, [draft, busy, onSendMedia, replyTo?.id, onClearReply]);
 
+  // A finished piece from the media library: already stored by the CRM,
+  // so it's staged as is (no upload, and no path — nothing to GC).
+  const handlePickPiece = useCallback((piece: LibraryPiece) => {
+    setLibraryOpen(false);
+    setDraft({ kind: "image", mediaUrl: piece.url, path: "", filename: piece.name, caption: piece.caption ?? "" });
+  }, []);
+
   // Discard GCs the staged object — it was uploaded but never sent.
   const discardDraft = useCallback(() => {
     removeStaged(draft?.path);
@@ -695,6 +705,10 @@ export function MessageComposer({
               <DropdownMenuItem onClick={() => imageInputRef.current?.click()}>
                 <ImageIcon className="mr-2 h-4 w-4" />
                 {t("photo")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setLibraryOpen(true)}>
+                <Library className="mr-2 h-4 w-4" />
+                {t("libraryPieces")}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => videoInputRef.current?.click()}>
                 <Video className="mr-2 h-4 w-4" />
@@ -905,6 +919,9 @@ export function MessageComposer({
         onOpenChange={setQuickReplyOpen}
         onPick={handlePickQuickReply}
       />
+
+      {/* Finished pieces (media library). */}
+      <MediaLibraryPicker open={libraryOpen} onOpenChange={setLibraryOpen} onPick={handlePickPiece} />
 
       {/* Catalog product picker. */}
       <ProductPicker

@@ -131,6 +131,8 @@ export async function deleteAccountMedia(
   bucket: string,
   path: string,
 ): Promise<void> {
+  // A piece picked from the media library has no staged object to GC.
+  if (!path) return;
   const supabase = createClient();
   const { error } = await supabase.storage.from(bucket).remove([path]);
   if (error) throw new Error(error.message);

@@ -229,6 +229,7 @@
       "stopAndAttach": "Detener y adjuntar",
       "attachMedia": "Adjuntar archivo",
       "photo": "Foto",
+      "libraryPieces": "📚 Piezas listas",
       "video": "Video",
       "document": "Documento",
       "voiceNote": "Nota de voz",
@@ -812,6 +813,7 @@
         "headerImage": "Imagen de encabezado",
         "headerImageDesc": "Esta plantilla necesita una imagen de encabezado.",
         "imageUrl": "Enlace de la imagen",
+        "fromLibrary": "Elegir de la biblioteca",
         "imageUrlPlaceholder": "https://ejemplo.com/imagen.jpg",
         "variables": "Variables",
         "varDesc": "Valores para {{name}}",
@@ -2243,5 +2245,12 @@
       "copied": "Copiado",
       "copyFailed": "No se pudo copiar"
     }
+  },
+  "MediaLibrary": {
+    "title": "Piezas listas para enviar",
+    "search": "Buscar por nombre, texto o etiqueta",
+    "empty": "Todavía no hay piezas. Cuando su app de diseño apruebe una, aparece aquí sola.",
+    "noMatch": "Ninguna pieza coincide con la búsqueda.",
+    "until": "hasta {date}"
   }
 }

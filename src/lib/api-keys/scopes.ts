@@ -24,6 +24,7 @@ export const API_SCOPES = [
   'catalog:write',
   'broadcasts:draft',
   'marketing:read',
+  'media:write',
 ] as const;
 
 export type ApiScope = (typeof API_SCOPES)[number];
@@ -40,6 +41,7 @@ export const SCOPE_DESCRIPTIONS: Record<ApiScope, string> = {
   'catalog:write': 'Upload the store system product list (codes, stock, sales)',
   'broadcasts:draft': 'Leave broadcast drafts for a person to review and send (cannot send)',
   'marketing:read': 'Read partner hosts (QR links, results) and the host program',
+  'media:write': 'Add finished pieces (images) to the media library agents send from (cannot send)',
 };
 
 /** Type-narrow an unknown value into a valid `ApiScope`. */
