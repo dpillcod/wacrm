@@ -261,7 +261,7 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
     validDays: 15,
     welcomeText:
       '🏠 ¡Bienvenido/a! Por hospedarse en *{alojamiento}*, tiene *{descuento} de descuento* en sus compras en {negocio} durante su estadía{envio}.\n\n' +
-      '🇬🇧 Welcome! As a guest of {alojamiento} you get *{descuento} off* your purchases at {negocio} during your stay.',
+      '🇬🇧 Welcome! As a guest of {alojamiento} you get *{descuento} off* your purchases at {negocio} during your stay{envio_en}. Just send us your list here.',
   },
   aiFeatures: { readImages: true, transcribeAudio: true, entryRouter: true, audioDailyLimit: 200, answerQuestions: true, reviewConversations: false },
   bakery: { entryNode: '' },

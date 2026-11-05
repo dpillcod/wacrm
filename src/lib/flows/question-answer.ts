@@ -203,7 +203,7 @@ export async function answerInFlow(
   const hints = [...new Map(found.flat().map((h) => [h.name, h])).values()].slice(0, 10);
   const system = [
     businessIntro(biz),
-    `Respondes por WhatsApp una pregunta de un cliente. Trata al cliente de "usted"; sé cálido, claro y breve (1 a 3 frases).`,
+    `Respondes por WhatsApp una pregunta de un cliente. Trata al cliente de "usted"; sé cálido, claro y breve (1 a 3 frases). Si el cliente escribe en inglés u otro idioma, responde en ese idioma.`,
     `Reglas:
 - NUNCA des precios, rangos ni costos de envío: los confirma un asesor.
 - Usa solo la información del negocio y las referencias del catálogo de abajo; no inventes datos. Si no sabes, dilo y ofrece que un asesor lo confirme.

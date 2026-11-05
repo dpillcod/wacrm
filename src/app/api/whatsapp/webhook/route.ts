@@ -14,7 +14,7 @@ import {
   type CoexMessage,
 } from '@/lib/whatsapp/coexistence'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
-import { dispatchInboundToFlows, recordDeliveryFailure } from '@/lib/flows/engine'
+import { dispatchInboundToFlows, openOrderQuietly, recordDeliveryFailure } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import {
@@ -28,8 +28,10 @@ import { formatFormReply, parseFormReply } from '@/lib/whatsapp/flow-form'
 import { recordReferralOrigin, tagContact, type MetaReferral } from '@/lib/contacts/origin'
 import { adOriginNote, adOriginTag, findAdLink, stripAdCode } from '@/lib/marketing/ad-links'
 import { loadBusinessSettings } from '@/lib/business/settings'
-import { hostWelcomeText, rememberAdContact } from '@/lib/marketing/hosts'
-import { engineSendText } from '@/lib/flows/meta-send'
+import { GUEST_WELCOME_TAG, hostWelcomeText, isHostIntro, rememberAdContact } from '@/lib/marketing/hosts'
+import { engineSendMedia, engineSendText } from '@/lib/flows/meta-send'
+import { listLibrary } from '@/lib/media/library'
+import { localDate } from '@/lib/business/seasonal-replies'
 import {
   handleTemplateWebhookChange,
   isTemplateWebhookField,
@@ -885,6 +887,7 @@ async function processMessage(
   // Wrote through an advertising link ("… #TORTAS")? Tag where from and
   // hand the bot the message without the code.
   let flowText = contentText
+  let guestWelcomed = false
   if (message.type === 'text' && message.text?.body?.includes('#')) {
     const biz = await loadBusinessSettings(supabaseAdmin(), accountId)
     const ad = findAdLink(message.text.body, biz.adLinks)
@@ -909,16 +912,28 @@ async function processMessage(
         code: ad.code,
         contactId: contactRecord.id,
       })
-      // A host's guest: tell them about the discount before the menu.
+      // A host's guest: tell them about the discount before the menu —
+      // on the program's picture when the media library has one tagged
+      // "huespedes" (a piece made in the design app), else as text.
       const welcome = firstTime ? hostWelcomeText(biz, ad) : null
       if (welcome) {
-        await engineSendText({
-          accountId,
-          userId: configOwnerUserId,
-          conversationId: conversation.id,
-          contactId: contactRecord.id,
-          text: welcome,
-        }).catch((err) => console.error('[hosts] welcome failed:', err))
+        const send = { accountId, userId: configOwnerUserId, conversationId: conversation.id, contactId: contactRecord.id }
+        const piece = (
+          await listLibrary(supabaseAdmin(), accountId, localDate(biz.utcOffsetHours)).catch(() => [])
+        ).find((p) => p.tags.includes(GUEST_WELCOME_TAG))
+        try {
+          if (piece && welcome.length <= 1024) {
+            await engineSendMedia({ ...send, kind: 'image', link: piece.url, caption: welcome })
+          } else {
+            if (piece) await engineSendMedia({ ...send, kind: 'image', link: piece.url })
+            await engineSendText({ ...send, text: welcome })
+          }
+          // Just the QR's text ("Hola, me hospedo en …"): the welcome
+          // answered it — wait for their list instead of adding the menu.
+          guestWelcomed = isHostIntro(flowText ?? '', ad)
+        } catch (err) {
+          console.error('[hosts] welcome failed:', err)
+        }
       }
     }
   }
@@ -947,14 +962,17 @@ async function processMessage(
   // no active flows take the runner's early-exit "no_match" path
   // basically for free (one indexed SELECT for the active run).
   // ============================================================
-  const flowResult = await dispatchInboundToFlows({
+  const flowInput = {
     accountId,
     userId: configOwnerUserId,
     contactId: contactRecord.id,
     conversationId: conversation.id,
     message: toFlowInbound(message, flowText, mediaUrl, interactiveReplyId, orderItems, formData),
-    isFirstInboundMessage,
-  })
+  }
+  const quietStart = guestWelcomed ? await openOrderQuietly(flowInput) : null
+  const flowResult = quietStart?.consumed
+    ? quietStart
+    : await dispatchInboundToFlows({ ...flowInput, isFirstInboundMessage })
   const flowConsumed = flowResult.consumed
   // A transcribed voice note counts as text for the AI reply below.
   const aiInboundText = flowResult.transcript ?? contentText ?? message.text?.body ?? ''

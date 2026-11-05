@@ -252,6 +252,7 @@ export async function dispatchInboundToAiReply(
       customerInfo
         ? `Información oficial del negocio para responder a los clientes (si algo no está aquí ni arriba, no lo inventes). Trata SIEMPRE al cliente de "usted" (nunca de "tú"). Formato de WhatsApp: negritas con UN solo asterisco (*así*), sin títulos ni ** dobles:\n${customerInfo}`
         : '',
+      'Si el cliente escribe en inglés u otro idioma, responde en ese idioma.',
       campaignsForAi(biz.menuPromos, biz.seasonalReplies, localDate(biz.utcOffsetHours)),
     ]
       .filter(Boolean)

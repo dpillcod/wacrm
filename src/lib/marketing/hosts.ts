@@ -31,6 +31,8 @@ function programValues(biz: BusinessSettings, link: AdLink): Record<string, stri
     alojamiento: link.host?.lodging || link.name,
     descuento: pct(p.discountPct),
     envio: p.freeDeliveryFrom > 0 ? ` y *envío gratis* desde ${money(p.freeDeliveryFrom)}` : '',
+    envio_en: p.freeDeliveryFrom > 0 ? ` and *free delivery* from ${money(p.freeDeliveryFrom).replace(',', '.')}` : '',
+    web: biz.websiteUrl || '',
     dias: String(p.validDays),
     negocio: biz.name || 'nuestra tienda',
   }
@@ -42,6 +44,24 @@ export function hostWelcomeText(biz: BusinessSettings, link: AdLink): string | n
   if (!link.host || (p.discountPct <= 0 && p.freeDeliveryFrom <= 0) || !p.welcomeText.trim()) return null
   return renderText(p.welcomeText, programValues(biz, link)).trim()
 }
+
+/**
+ * The guest's first message is just the QR's text ("Hola 👋 me hospedo
+ * en …"), nothing to order yet: the welcome answers it, and the general
+ * menu shouldn't follow on top.
+ */
+export function isHostIntro(text: string, link: AdLink): boolean {
+  const plain = (t: string) =>
+    t.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9ñ ]+/g, ' ').replace(/\s+/g, ' ').trim()
+  const said = plain(text)
+  if (!said) return true
+  if (link.message && said === plain(link.message)) return true
+  return /^((hola|buenas|buenos dias|buenas tardes|buenas noches|hi|hello)\s*)?(me hospedo|estoy hospedad|i m staying|im staying)\b/.test(said) &&
+    said.split(' ').length <= 12
+}
+
+/** Tag that marks the media-library piece sent with a guest's welcome. */
+export const GUEST_WELCOME_TAG = 'huespedes'
 
 /** The line added to the guest's order card and staff alert: what to apply when charging. */
 export function hostGuestLine(biz: BusinessSettings, link: AdLink): string {

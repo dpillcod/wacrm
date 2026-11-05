@@ -6618,3 +6618,21 @@ export async function startFlowRunForExternalEvent(
     outcome: outcome.outcome === "advanced" ? "started" : outcome.outcome,
   };
 }
+
+/**
+ * A partner's guest was just welcomed — the welcome already says what
+ * we sell and how to order. Open the order quietly at the menu so their
+ * next message (a list, a photo, a question) is handled as an answer to
+ * it, without sending the general menu on top of the welcome. Not
+ * consumed when there's no default flow or the contact is mid-run.
+ */
+export async function openOrderQuietly(input: DispatchInboundInput): Promise<DispatchInboundResult> {
+  const db = supabaseAdmin();
+  const flow = await findDefaultEntryFlow(db, input.accountId);
+  if (!flow?.entry_node_id) return { consumed: false, outcome: "no_match" };
+  if (await loadActiveRunForContact(db, input.accountId, input.contactId)) {
+    return { consumed: false, outcome: "no_match" };
+  }
+  const nodes = await loadAllNodes(db, flow.id);
+  return startNewRun(db, flow, input, nodes, { silent: true });
+}
