@@ -67,6 +67,28 @@ const PRICE_QUESTION_PHRASES = [
   'cuanto sale todo',
   'cuanto le debo',
   'cuanto toca pagar',
+  // "¿Cuál es el valor?", "quiero saber precio", "mándeme precio y modelos".
+  'cual es el valor',
+  'cual seria el valor',
+  'que valor tiene',
+  'que valor tienen',
+  'saber precio',
+  'saber el precio',
+  'saber precios',
+  'saber los precios',
+  'mandeme precio',
+  'mandeme el precio',
+  'mandeme precios',
+  'mandeme los precios',
+  'me manda precio',
+  'me manda el precio',
+  'me pasa precio',
+  'me pasa el precio',
+  'me envia el precio',
+  'en cuanto esta',
+  'en cuanto sale',
+  'a como esta',
+  'a como estan',
 ];
 
 function normalize(text: string): string {

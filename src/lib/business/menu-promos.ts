@@ -74,7 +74,7 @@ export function campaignsForAi(promos: MenuPromo[] = [], seasonal: SeasonalReply
     .map((r) => `- Si preguntan por ${r.keywords.slice(0, 3).join(', ')}: ${r.reply.replace(/\s*\n+\s*/g, ' ')}`)
   if (!promo && replies.length === 0) return ''
   return [
-    'Campañas vigentes. Si es el primer mensaje del cliente o pregunta algo general, al final menciona en UNA frase corta la promoción con su enlace (una sola vez por conversación). No inventes otras promociones ni descuentos:',
+    'Campañas vigentes. Menciona la promoción (UNA frase corta con su enlace, una sola vez por conversación) solo si el cliente pregunta por ofertas, promociones, Navidad o regalos, o escribe un saludo general sin pedir nada concreto. Si pregunta por un producto o un servicio, responde solo eso, sin la promoción. No inventes otras promociones ni descuentos:',
     promo ? `- Promoción: ${promo}` : '',
     ...replies,
   ]

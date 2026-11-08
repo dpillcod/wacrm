@@ -1042,7 +1042,10 @@ async function processMessage(
     interactiveReplyId,
     inboundTextLength: inboundText.trim().length,
   })
-  if (!flowConsumed && !interactiveReplyId && aiInboundText.trim()) {
+  // "?" or "." alone (to get attention, often right after a question
+  // the bot is already answering): no second answer.
+  const onlyPunctuation = !/[\p{L}\p{N}\p{Extended_Pictographic}]/u.test(aiInboundText)
+  if (!flowConsumed && !interactiveReplyId && aiInboundText.trim() && !onlyPunctuation) {
     await dispatchInboundToAiReply({
       accountId,
       conversationId: conversation.id,

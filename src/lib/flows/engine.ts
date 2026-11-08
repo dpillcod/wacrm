@@ -2316,9 +2316,9 @@ async function customerStartVars(
   try {
     const { data: contactRow } = await db.from("contacts").select("name").eq("id", contactId).maybeSingle();
     const rawName = (contactRow as { name?: string | null } | null)?.name;
-    if (typeof rawName === "string" && rawName.trim().length > 0) {
-      contactName = ` ${rawName.trim().split(/\s+/)[0]}`;
-    }
+    // A WhatsApp name like "." or "😊" isn't a name: "¡Hola!" instead of "¡Hola .!".
+    const first = typeof rawName === "string" ? rawName.trim().split(/\s+/)[0] : "";
+    if (/\p{L}/u.test(first)) contactName = ` ${first}`;
   } catch (err) {
     console.error("[flows] contact name lookup failed:", err);
   }
@@ -3569,7 +3569,20 @@ async function clarifyCapturedBatch(
     const { error } = await db.from("flow_runs").update({ vars: cleared }).eq("id", run.id);
     if (error) return false;
     run.vars = cleared;
-    await sendEngineText(db, run, node.node_key, (await bizOf(db, run.account_id)).texts.orderAck, "not_an_order_line");
+    // Nothing on the list yet: a fragment ("Quiero", the rest is on its
+    // way) gets no reply, anything else is asked for the products —
+    // never "Escríbame el *siguiente* producto" with none written down.
+    const listEmpty = !String(cleared[cfg.var_key] ?? "").trim();
+    if (listEmpty && (lines as string[]).join(" ").trim().split(/\s+/).length <= 2) return true;
+    await sendEngineText(
+      db,
+      run,
+      node.node_key,
+      listEmpty
+        ? "👍 Escríbame qué productos necesita, o envíe una *foto* de su lista o un *audio* 🙂"
+        : (await bizOf(db, run.account_id)).texts.orderAck,
+      "not_an_order_line",
+    );
     return true;
   }
 
@@ -4571,6 +4584,17 @@ async function alertCustomerWaiting(
   await sendEngineText(db, run, null, "Disculpe la demora 🙏 Ya avisé otra vez a nuestro equipo, con prioridad; le escriben por aquí enseguida.", "waiting_complaint");
 }
 
+/** "En efectivo", "por transferencia", "con tarjeta" (a short message): how the customer will pay, or null. */
+export function paymentChoiceOf(text: string): string | null {
+  const said = normalizeForMatch(text);
+  if (!said || said.split(" ").length > 6 || looksLikeQuestion(text)) return null;
+  if (/\befectivo\b/.test(said)) return "en efectivo";
+  if (/\btransfer/.test(said)) return "por transferencia";
+  if (/\b(deuna|de una app)\b/.test(said)) return "con DeUna";
+  if (/\btarjeta\b/.test(said)) return "con tarjeta";
+  return null;
+}
+
 async function replyAfterHandoff(
   db: AdminClient,
   input: DispatchInboundInput,
@@ -4625,10 +4649,13 @@ async function replyAfterHandoff(
   // "El pollo tiene que ser descongelado": an indication for the order
   // just sent. The advisor gets it (CRM + the order card's notes) and the
   // customer knows it was passed on — instead of "your order is with us".
+  // "En efectivo", "por transferencia": how they'll pay — same path, so
+  // it reaches the card instead of "your order is with our advisor".
   const said = input.message.text.trim();
-  if (!looksLikeQuestion(said) && normalizeForMatch(said).split(" ").length >= 3 && !(await humanHasTakenOver(db, run))) {
+  const payment = paymentChoiceOf(said);
+  if ((payment || (!looksLikeQuestion(said) && normalizeForMatch(said).split(" ").length >= 3)) && !(await humanHasTakenOver(db, run))) {
     await notifyTeamInApp(db, run, null, {
-      title: orderTitle(run, "📝 Indicación del cliente"),
+      title: orderTitle(run, payment ? "💳 Forma de pago" : "📝 Indicación del cliente"),
       body: `${ref ? `Pedido ${ref}: ` : ""}"${said.slice(0, 300)}"`,
     });
     if (typeof run.vars.__deal_id === "string") {
@@ -4636,7 +4663,15 @@ async function replyAfterHandoff(
       const notes = ((deal as { notes?: string | null } | null)?.notes ?? "").trim();
       await db.from("deals").update({ notes: `${notes}\n📝 Cliente: ${said.slice(0, 300)}`.trim() }).eq("id", run.vars.__deal_id);
     }
-    await sendEngineText(db, run, null, `✅ Le pasé su indicación al asesor de su pedido${ref ? ` ${ref}` : ""} 🙂`, "after_handoff_note");
+    await sendEngineText(
+      db,
+      run,
+      null,
+      payment
+        ? `✅ Anotado: pagará ${payment}. Se lo pasé al asesor de su pedido${ref ? ` ${ref}` : ""} 🙂`
+        : `✅ Le pasé su indicación al asesor de su pedido${ref ? ` ${ref}` : ""} 🙂`,
+      payment ? "after_handoff_payment" : "after_handoff_note",
+    );
     return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
   }
   const lastAck = typeof run.vars.__after_handoff_ack_at === "string"
@@ -4704,7 +4739,31 @@ async function handleStaffCheckIn(
     .eq("id", input.contactId)
     .maybeSingle();
   const phone = toInternational((contact as { phone?: string } | null)?.phone ?? "", biz.phoneCountryCode);
-  if (!phone || !staff.includes(phone)) return null;
+  if (!phone) return null;
+  if (!staff.includes(phone)) {
+    // "Turno" from a number not on the staff list (a new employee): tell
+    // them and the admins, instead of "¿busca turrón?".
+    if (input.message.kind !== "text") return null;
+    try {
+      await engineSendText({
+        accountId: input.accountId,
+        userId: input.userId,
+        conversationId: input.conversationId,
+        contactId: input.contactId,
+        text: "Este número todavía no está en la lista del personal 🙏 Ya le avisé al administrador; cuando lo agregue, escriba *turno* otra vez.",
+      });
+      await notifyAccountInApp(db, {
+        accountId: input.accountId,
+        conversationId: input.conversationId,
+        contactId: input.contactId,
+        title: "👷 Escribió \"turno\" y no está en el personal",
+        body: `${localPhone(phone, biz.phoneCountryCode)} quiere recibir los avisos de pedidos. Si es del equipo, agréguelo en Mi negocio → Avisos al personal.`,
+      });
+    } catch (err) {
+      console.error("[flows] unknown staff check-in failed:", err);
+    }
+    return { consumed: true, outcome: "no_match" };
+  }
   try {
     await engineSendText({
       accountId: input.accountId,
@@ -5421,9 +5480,11 @@ async function handleReplyForActiveRun(
     }
   }
 
-  // A button from the message before tapped at the correction step
-  // ("✅ Confirmar pedido" after "✏️ Corregir"): do what that button does.
-  if (message.kind === "interactive_reply" && (currentCollectCfg as { edit_list_var?: string } | undefined)?.edit_list_var) {
+  // A button from the message before tapped at the step it led to
+  // ("✅ Confirmar pedido" after "✏️ Corregir" or "🧾 Otros datos"): do
+  // what that button does.
+  const backTap = currentCollectCfg as { edit_list_var?: string; form?: unknown } | undefined;
+  if (message.kind === "interactive_reply" && (backTap?.edit_list_var || backTap?.form)) {
     const tapped = message.reply_id;
     for (const n of nodes.values()) {
       if (n.node_type !== "send_buttons") continue;
@@ -5446,7 +5507,9 @@ async function handleReplyForActiveRun(
   // products, while writing the list, at the confirmation, or with the
   // form: kept for the invoice, never written down as a product; the
   // rest of the message (the products) carries on.
-  if ((message.kind === "text" || message.kind === "form_reply") && !run.vars.__pending_line_edit) {
+  // Not at a step that asks for the invoice data itself ("🧾 Otros
+  // datos" with its form): there the answer is that step's capture.
+  if ((message.kind === "text" || message.kind === "form_reply") && !run.vars.__pending_line_edit && !currentCollectCfg?.form) {
     const currentVar = (currentCollectCfg ?? currentTextFallback)?.var_key;
     const early = await takeEarlyProfile(db, run, nodes, currentVar, message);
     if (early) {
