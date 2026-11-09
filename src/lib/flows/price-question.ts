@@ -89,6 +89,11 @@ const PRICE_QUESTION_PHRASES = [
   'en cuanto sale',
   'a como esta',
   'a como estan',
+  'y los precios',
+  'los precios por favor',
+  'precios por favor',
+  'el precio por favor',
+  'y el precio',
 ];
 
 function normalize(text: string): string {

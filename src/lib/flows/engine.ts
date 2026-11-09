@@ -413,8 +413,19 @@ export function isVendorPitch(text: string): boolean {
 /** "Muéstreme los que tiene", "¿qué modelos hay?" without a question mark: show the catalog. */
 export function isShowMeRequest(text: string): boolean {
   const t = normalizeForMatch(text);
+  if (t.length > 160) return false;
+  // "¿Tienes fotos?", "envíeme fotitos con los precios", "le pido unas fotos".
+  if (/\b(tiene|tienes|tienen|enviar|enviarme|envie|envieme|mande|mandar|mandarme|pasar|pasarme|pase|ver|pido|regala|regaleme|hay)\b.{0,25}\b(fotos|fotitos|imagenes|fotografias)\b/.test(t)) return true;
   return t.length <= 80 &&
     /\b(muestreme|muestrame|muestre|muestreme|me muestra|me muesta|muetreme|mandeme fotos|envieme fotos|mande fotos|fotos de los|los que tiene|los q tiene|que opciones tiene|que modelos tiene|ver el catalogo|ver catalogo|ver los productos)\b/.test(t);
+}
+
+/** "¿Dispone en este momento? Lo necesito hoy": whether it's there today — a person's call. */
+export function isUrgentAvailability(text: string): boolean {
+  const t = normalizeForMatch(text);
+  return t.split(" ").length <= 25 &&
+    (/\b(dispone|disponen|tiene|tienen|tendra|tendran|hay)\b.{0,30}\b(ahora|hoy|en este momento|ahorita|ya mismo)\b/.test(t) ||
+      /\blo (necesito|ocupo|requiero) (para )?(hoy|ya|urgente|ahorita|ahora)\b/.test(t));
 }
 
 /** "Corregir", "✏️ Corregir" typed (or a stale button) while writing the list. */
@@ -1772,6 +1783,10 @@ async function startOrderFromFirstMessage(
   // the order quietly, so "sí, 2 libras" writes it down.
   if (route?.intent === "question" && (await bizOf(db, input.accountId)).aiFeatures.answerQuestions) {
     const answer = await answerInFlow(db, input.accountId, input.conversationId, input.message.text, "menu");
+    // Two messages a second apart ("Aditec SF-106" + "¿dispone?"): only the newer one is answered.
+    if (answer && (await newerCustomerMessage(db, input.conversationId, input.message.meta_message_id))) {
+      return { consumed: true, outcome: "no_match" };
+    }
     if (answer) {
       await engineSendText({
         accountId: input.accountId,
@@ -2699,7 +2714,8 @@ export type TroubleReason =
   | "human_request"
   | "photo_question"
   | "formal_quote"
-  | "price_request";
+  | "price_request"
+  | "availability_today";
 
 const TROUBLE_TEXT: Record<TroubleReason, string> = {
   edit_failed: "el bot no logra corregir la lista del cliente",
@@ -2711,6 +2727,7 @@ const TROUBLE_TEXT: Record<TroubleReason, string> = {
   photo_question: "el cliente mandó una foto que el bot no puede responder",
   formal_quote: "el cliente pide una cotización formal",
   price_request: "el cliente pide el precio",
+  availability_today: "el cliente pregunta si lo tenemos para hoy",
 };
 
 /**
@@ -4595,6 +4612,63 @@ export function paymentChoiceOf(text: string): string | null {
   return null;
 }
 
+/**
+ * The catalog button with `withLink` as its text, or `lead` as plain
+ * text when the CRM has no public address (or the send fails).
+ */
+async function sendCatalogButton(
+  db: AdminClient,
+  run: FlowRunRow,
+  nodeKey: string,
+  lead: string,
+  withLink: string,
+  reason: string,
+): Promise<void> {
+  // Sent a moment ago: point to it instead of a second identical button.
+  const lastAt = typeof run.vars.__catalog_button_at === "string" ? new Date(run.vars.__catalog_button_at).getTime() : 0;
+  if (Date.now() - lastAt < 15 * 60_000) {
+    const pointer = "👆 Toque el botón *CATÁLOGO EXPRESS* de arriba: ahí ve fotos y precios. Si prefiere, escriba *asesor* y una persona le envía opciones 🙂";
+    await sendEngineText(db, run, nodeKey, lead.startsWith("Con gusto") ? pointer : `${lead}\n\n${pointer}`, reason);
+    return;
+  }
+  const link = run.contact_id && run.conversation_id
+    ? await catalogLink(db, run.account_id, run.contact_id, run.conversation_id)
+    : "";
+  if (link) {
+    await saveVars(db, run, { ...run.vars, __catalog_button_at: new Date().toISOString() });
+    try {
+      const { whatsapp_message_id } = await engineSendCtaUrl({
+        accountId: run.account_id,
+        userId: run.user_id,
+        conversationId: run.conversation_id!,
+        contactId: run.contact_id!,
+        bodyText: withLink,
+        buttonText: "🛒 CATÁLOGO EXPRESS",
+        url: link,
+      });
+      await logEvent(db, run.id, "message_sent", nodeKey, { reason, whatsapp_message_id });
+      return;
+    } catch (err) {
+      await logEvent(db, run.id, "error", nodeKey, { reason: `${reason}_cta_failed`, detail: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  await sendEngineText(db, run, nodeKey, lead, reason);
+}
+
+/** Whether the customer wrote again after this message (it's answered there, with this one in context). */
+async function newerCustomerMessage(db: AdminClient, conversationId: string, metaMessageId: string): Promise<boolean> {
+  if (!metaMessageId) return false;
+  const { data } = await db
+    .from("messages")
+    .select("message_id")
+    .eq("conversation_id", conversationId)
+    .eq("sender_type", "customer")
+    .order("created_at", { ascending: false })
+    .limit(1);
+  const last = ((data as { message_id: string | null }[] | null) ?? [])[0]?.message_id;
+  return !!last && last !== metaMessageId;
+}
+
 async function replyAfterHandoff(
   db: AdminClient,
   input: DispatchInboundInput,
@@ -4727,9 +4801,12 @@ async function handleStaffCheckIn(
   const biz = await bizOf(db, input.accountId);
   // "turno" typed, or "✅ Recibido" tapped on a staff alert — either one
   // (re)opens the free 24h window for that staff member's alerts.
+  // "Recibido" typed instead of tapped counts too, but only from staff.
+  const typedAck = input.message.kind === "text" && /^(ok )?recibido$/.test(normalizeForMatch(input.message.text));
   const isCheckIn =
     (input.message.kind === "text" && isStaffCheckInText(biz, input.message.text)) ||
-    (input.message.kind === "interactive_reply" && input.message.reply_id === STAFF_ACK_ID);
+    (input.message.kind === "interactive_reply" && input.message.reply_id === STAFF_ACK_ID) ||
+    typedAck;
   if (!isCheckIn) return null;
   const staff = getStaffPhones(biz);
   if (staff.length === 0) return null;
@@ -4741,6 +4818,7 @@ async function handleStaffCheckIn(
   const phone = toInternational((contact as { phone?: string } | null)?.phone ?? "", biz.phoneCountryCode);
   if (!phone) return null;
   if (!staff.includes(phone)) {
+    if (typedAck) return null;
     // "Turno" from a number not on the staff list (a new employee): tell
     // them and the admins, instead of "¿busca turrón?".
     if (input.message.kind !== "text") return null;
@@ -5800,12 +5878,26 @@ async function handleReplyForActiveRun(
     }
     if (isPriceQuestion(message.text)) {
       await alertTeamOfTrouble(db, run, "price_request", message.text);
-      await sendEngineText(
+      await sendCatalogButton(
         db,
         run,
         currentNode.node_key,
         "💲 Le pido a una persona de nuestro equipo que le confirme el precio por aquí en breve 🙂",
+        "💲 Le pido a una persona de nuestro equipo que le confirme el precio por aquí en breve 🙂\n\nMientras tanto, en nuestro *CATÁLOGO EXPRESS* puede ver fotos y precios 👇",
         "price_request_alerted",
+      );
+      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
+    // "¿Dispone en este momento? Lo necesito hoy": only a person can say.
+    if (isUrgentAvailability(message.text)) {
+      await alertTeamOfTrouble(db, run, "availability_today", message.text);
+      const atRegistration = !!(currentNode.config as NodeSideEffectsConfig).save_customer_profile;
+      await sendEngineText(
+        db,
+        run,
+        currentNode.node_key,
+        `Le pido a una persona de nuestro equipo que le confirme si lo tenemos para hoy; le escribe por aquí en breve 🙂${atRegistration ? "\nMientras tanto, envíeme su nombre completo y su cédula para dejar listo su pedido." : ""}`,
+        "availability_alerted",
       );
       return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
     }
@@ -5822,11 +5914,16 @@ async function handleReplyForActiveRun(
     !run.vars.__pending_line_edit &&
     !run.vars.__pending_list_answer &&
     !run.vars.__pending_disambiguation &&
+    !isShowMeRequest(message.text) &&
     looksLikeQuestion(message.text)
   ) {
     const flow = await loadFlow(db, run.flow_id);
     const situation = flow?.entry_node_id === currentNode.node_key ? "menu" : "order";
     const answer = await answerInFlow(db, run.account_id, run.conversation_id, message.text, situation);
+    // Two messages a second apart: the newer one is answered (with this one in context), not both.
+    if (answer && run.conversation_id && (await newerCustomerMessage(db, run.conversation_id, message.meta_message_id))) {
+      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
     if (answer) {
       if (answer.product) await saveVars(db, run, { ...run.vars, __offered_product: answer.product });
       await sendEngineText(db, run, currentNode.node_key, answer.reply, "question_answered");
@@ -5868,14 +5965,12 @@ async function handleReplyForActiveRun(
     }
     // "Muéstreme los que tiene": the catalog with photos, and a person if they prefer.
     if (isShowMeRequest(message.text) && run.contact_id && run.conversation_id) {
-      const link = await catalogLink(db, run.account_id, run.contact_id, run.conversation_id);
-      await sendEngineText(
+      await sendCatalogButton(
         db,
         run,
         currentNode.node_key,
-        link
-          ? `🛍️ Aquí puede ver nuestros productos con fotos y precios 👇\n${link}\n\nSi prefiere, escriba *asesor* y una persona le envía opciones por aquí 🙂`
-          : "Con gusto 🙂 Escriba *asesor* y una persona de nuestro equipo le envía opciones por aquí.",
+        "Con gusto 🙂 Escriba *asesor* y una persona de nuestro equipo le envía opciones por aquí.",
+        "🛍️ En nuestro *CATÁLOGO EXPRESS* ve los productos con fotos y precios, y su pedido llega a este chat 👇\n\nSi prefiere, escriba *asesor* y una persona le envía opciones por aquí 🙂",
         "show_catalog",
       );
       return { consumed: true, flow_run_id: run.id, outcome: "no_match" };

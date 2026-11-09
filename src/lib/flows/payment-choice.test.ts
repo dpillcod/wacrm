@@ -23,3 +23,15 @@ describe('isPriceQuestion (Nov 5 chats)', () => {
     expect(isPriceQuestion('2 aguas grandes')).toBe(false)
   })
 })
+
+describe('Nov 8 chats', () => {
+  it('asks for photos → catalog', async () => {
+    const { isShowMeRequest, isUrgentAvailability } = await import('./engine')
+    expect(isShowMeRequest('Tienes fotos y si haces delivery?')).toBe(true)
+    expect(isShowMeRequest('Mejor que me envíe delivery si me puede enviar Fotitos por favor con los precios y una cuenta para poder depositarle')).toBe(true)
+    expect(isShowMeRequest('le envío foto de mi lista')).toBe(false)
+    expect(isUrgentAvailability('Pero dispone en este momento\nPorque lo necesito hoy')).toBe(true)
+    expect(isUrgentAvailability('2 sacos de cemento')).toBe(false)
+    expect(isPriceQuestion('Y los precios por favor?')).toBe(true)
+  })
+})
