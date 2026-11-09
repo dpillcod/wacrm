@@ -60,7 +60,7 @@ export async function upsertOrderCard(
     if (args.dealId) {
       const { error } = await db
         .from('deals')
-        .update({ notes: args.notes, updated_at: new Date().toISOString() })
+        .update({ title: args.title, notes: args.notes, updated_at: new Date().toISOString() })
         .eq('id', args.dealId)
         .eq('account_id', args.accountId)
       if (!error) return args.dealId

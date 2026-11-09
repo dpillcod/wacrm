@@ -1884,6 +1884,8 @@
         "audioTooLong": "Voice note longer than ~3 minutes",
         "recoveryReminder": "Reminder 2 hours after a list was left half-way",
         "recoveryLater": "\"Later\" on that reminder",
+        "listHandedOver": "The customer didn't send name and ID: the list goes to the team anyway ({cuando} = shortly / at opening; {sin_cedula} = note for foreign numbers only)",
+        "closingPromo": "Closing promotion: once a week when an order ends well or with the \"thanks\" reply ({promo} = menu promotion if they didn't see it; empty = off)",
         "totalPending": "\"What's the total?\" after the order went to staff",
         "thanksReply": "\"Thanks\" after the order went to staff",
         "callRequestOpen": "Customer asks to be called (open)",

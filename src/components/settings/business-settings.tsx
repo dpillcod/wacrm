@@ -72,6 +72,8 @@ const TEXT_KEYS: (keyof Texts)[] = [
   "audioTooLong",
   "recoveryReminder",
   "recoveryLater",
+  "listHandedOver",
+  "closingPromo",
   "totalPending",
   "thanksReply",
   "callRequestOpen",

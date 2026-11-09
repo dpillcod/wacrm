@@ -982,6 +982,7 @@ async function executeHandoff(
     if (cardId && cardId !== run.vars.__deal_id) {
       await saveVars(db, run, { ...run.vars, __deal_id: cardId });
     }
+    if (cfg.card_board !== "services") scheduleClosingPromo(db, run.id);
     // The date the bakery advisor understood becomes the card's
     // appointment (and a Google Calendar event) — staff confirm it.
     if (cardId && typeof run.vars.__appointment_local === "string") {
@@ -2159,6 +2160,8 @@ function scheduleRecovery(db: AdminClient, runId: string, nodeKey: string): void
 async function sendRecovery(db: AdminClient, runId: string, nodeKey: string): Promise<void> {
   const run = await loadRun(db, runId);
   if (!run || run.status !== "active" || run.current_node_key !== nodeKey || run.vars.__recovered) return;
+  // The team already has the list (see handOverUnregisteredList).
+  if (run.vars.__list_handed_over) return;
   const biz = await bizOf(db, run.account_id);
   if (!isWithinBusinessHours(biz) || !runHoldsList(run)) return;
   if (await personIsOnIt(db, run)) return;
@@ -2178,6 +2181,179 @@ async function sendRecovery(db: AdminClient, runId: string, nodeKey: string): Pr
     ],
   });
   await logEvent(db, run.id, "message_sent", nodeKey, { reason: "list_recovery" });
+}
+
+/** What a foreign customer's invoice shows when they have no ID number to give. */
+const FOREIGN_NO_ID = "SIN CÉDULA (EXTRANJERO)";
+const FOREIGN_PROFILE_PROBLEM =
+  "Escríbame su *nombre completo* (nombres y apellidos) 🙂 La cédula solo si tiene una ecuatoriana; si no, su pasaporte o nada.";
+
+/** The contact's number is from another country (no Ecuadorian cédula to ask for). */
+async function isForeignContact(db: AdminClient, contactId: string, biz: BusinessSettings): Promise<boolean> {
+  if (!biz.phoneCountryCode) return false;
+  const { data } = await db.from("contacts").select("phone").eq("id", contactId).maybeSingle();
+  const phone = String((data as { phone?: string | null } | null)?.phone ?? "").replace(/\D/g, "");
+  return phone.length > 0 && !phone.startsWith(biz.phoneCountryCode);
+}
+
+/** The step asking for name and ID number: the one leading to the save_customer_profile node. */
+function isRegistrationAsk(nodes: Map<string, FlowNodeRow>, nodeKey: string): boolean {
+  const next = (nodes.get(nodeKey)?.config as { next_node_key?: string } | undefined)?.next_node_key;
+  return !!next && !!(nodes.get(next)?.config as NodeSideEffectsConfig | undefined)?.save_customer_profile;
+}
+
+/** The order's lines as the customer sees them ("1. 4 Aditec…"), '' when there's none. */
+function runListText(run: FlowRunRow): string {
+  const list = Object.entries(run.vars).find(([k, v]) => k.endsWith("_numbered") && typeof v === "string" && v.trim());
+  return String(list?.[1] ?? "").trim();
+}
+
+/**
+ * A finished list whose customer didn't send name and ID number (went
+ * quiet, or kept talking about something else): the order isn't lost —
+ * the team gets it as "⏳ Pedido sin datos" (card on the order board +
+ * alert) and the customer is told so, with the data asked for as a
+ * favor, not a gate. Once per run; if the data comes later the order
+ * goes on as usual and the same card becomes "Pedido N° …".
+ */
+async function handOverUnregisteredList(
+  db: AdminClient,
+  run: FlowRunRow,
+  nodeKey: string,
+  opts: { tellCustomer: boolean },
+): Promise<void> {
+  if (!run.contact_id || run.vars.__list_handed_over) return;
+  const list = runListText(run);
+  if (!list) return;
+  const biz = await bizOf(db, run.account_id);
+  const { data: contact } = await db.from("contacts").select("name, phone").eq("id", run.contact_id).maybeSingle();
+  const c = contact as { name?: string | null; phone?: string | null } | null;
+  const phone = c?.phone ? localPhone(c.phone.replace(/^\+/, ""), biz.phoneCountryCode) : "";
+  const name = c?.name?.trim() || "Cliente";
+  const total = typeof run.vars.order_total === "string" && run.vars.order_total ? `\n💰 Total estimado: $${run.vars.order_total}` : "";
+  const notes = `${list}${total}\n\n⏳ Sin datos de factura todavía (nombre y cédula). Escríbale para confirmar el pedido.`;
+  const amount = Number(String(run.vars.order_total ?? "").replace(",", "."));
+  const cardId = await upsertOrderCard(db, {
+    accountId: run.account_id,
+    userId: run.user_id,
+    contactId: run.contact_id,
+    conversationId: run.conversation_id,
+    dealId: typeof run.vars.__deal_id === "string" ? run.vars.__deal_id : null,
+    title: `⏳ Pedido sin datos — ${name}`,
+    notes,
+    value: Number.isFinite(amount) && amount > 0 ? amount : undefined,
+  });
+  await saveVars(db, run, { ...run.vars, __list_handed_over: true, ...(cardId ? { __deal_id: cardId } : {}) });
+  await notifyAccountInApp(db, {
+    accountId: run.account_id,
+    conversationId: run.conversation_id,
+    contactId: run.contact_id,
+    title: `⏳ Pedido sin datos: ${name}${phone ? ` (${phone})` : ""}`,
+    body: `Armó su lista pero no envió nombre y cédula. Escríbale para confirmar:\n${list}`,
+  }).catch(() => null);
+  await notifyStaffOfHandoff(db, {
+    accountId: run.account_id,
+    contactName: name,
+    summary: `⏳ PEDIDO SIN DATOS DE FACTURA${phone ? ` · ${phone}` : ""}\n${list}${total}\nEscríbale para confirmar.`,
+    conversationId: run.conversation_id ?? undefined,
+  }).catch(() => null);
+  await logEvent(db, run.id, "node_entered", nodeKey, { reason: "list_handed_over_without_profile", card: cardId });
+  if (opts.tellCustomer) {
+    const foreign = await isForeignContact(db, run.contact_id, biz);
+    await sendEngineText(db, run, nodeKey, listHandedOverText(biz, foreign), "list_handed_over");
+  }
+}
+
+function listHandedOverText(biz: BusinessSettings, foreign: boolean): string {
+  return renderText(biz.texts.listHandedOver, {
+    cuando: isWithinBusinessHours(biz) ? "en breve" : nextOpeningPhrase(biz),
+    // Only a foreign number hears that the name alone is fine.
+    sin_cedula: foreign ? " (si no tiene cédula ecuatoriana, solo su nombre)" : "",
+  });
+}
+
+// ------------------------------------------------------------
+// Closing promotion (texts.closingPromo, '' = off): one short line about
+// the campaign / the web shop, only at a natural end — the order went
+// to the team and the customer has nothing pending — and only when the
+// conversation went well. Inside the 24 h window it's a free message,
+// but a promotion that interrupts gets the number blocked or reported
+// (Meta lowers the quality rating), so: once a week per customer, never
+// to staff, never after trouble, never if the customer is writing.
+// ------------------------------------------------------------
+
+const CLOSING_PROMO_DELAY_MS = Number(process.env.FLOW_CLOSING_PROMO_DELAY_MS) || 2 * 60_000;
+const CLOSING_PROMO_EVERY_DAYS = 7;
+
+function scheduleClosingPromo(db: AdminClient, runId: string): void {
+  setTimeout(() => {
+    sendClosingPromo(db, runId).catch((err) => console.error("[flows] closing promo failed:", err));
+  }, CLOSING_PROMO_DELAY_MS);
+}
+
+/** The closing promotion for this customer now, or '' when it isn't the moment. */
+async function closingPromoFor(db: AdminClient, run: FlowRunRow): Promise<string> {
+  if (!run.contact_id || !run.conversation_id || run.vars.__closing_promo_at) return "";
+  const biz = await bizOf(db, run.account_id);
+  const template = biz.texts.closingPromo.trim();
+  if (!template || !isWithinBusinessHours(biz)) return "";
+  // Went well: no alert to the team, no list handed over without data.
+  if (Array.isArray(run.vars.__trouble_alerts) && run.vars.__trouble_alerts.length > 0) return "";
+  if (run.vars.__list_handed_over) return "";
+  const { data: contact } = await db.from("contacts").select("phone").eq("id", run.contact_id).maybeSingle();
+  const phone = String((contact as { phone?: string | null } | null)?.phone ?? "").replace(/\D/g, "");
+  if (phone && getStaffPhones(biz).includes(phone)) return "";
+  const since = new Date(Date.now() - CLOSING_PROMO_EVERY_DAYS * 86_400_000).toISOString();
+  const { data: recent } = await db
+    .from("flow_runs")
+    .select("id")
+    .eq("account_id", run.account_id)
+    .eq("contact_id", run.contact_id)
+    .gte("vars->>__closing_promo_at", since)
+    .limit(1);
+  if ((recent ?? []).length > 0) return "";
+  // The campaign line only for whoever didn't see it on the menu today.
+  const flow = await loadFlow(db, run.flow_id);
+  const { data: menuSent } = flow?.entry_node_id
+    ? await db
+        .from("flow_run_events")
+        .select("id")
+        .eq("flow_run_id", run.id)
+        .eq("event_type", "message_sent")
+        .eq("node_key", flow.entry_node_id)
+        .limit(1)
+    : { data: [] };
+  const promo = (menuSent ?? []).length > 0 ? "" : activeMenuPromo(biz.menuPromos, localDate(biz.utcOffsetHours));
+  return renderText(template, { promo })
+    .split("\n")
+    .map((l) => l.trimEnd())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+async function markClosingPromo(db: AdminClient, run: FlowRunRow): Promise<void> {
+  const fresh = (await loadRun(db, run.id)) ?? run;
+  await saveVars(db, run, { ...fresh.vars, __closing_promo_at: new Date().toISOString() });
+}
+
+/** A couple of minutes after the order went to the team, if the chat stayed quiet. */
+async function sendClosingPromo(db: AdminClient, runId: string): Promise<void> {
+  const run = await loadRun(db, runId);
+  if (!run || run.status !== "handed_off" || !run.conversation_id) return;
+  // Whoever wrote since (the customer, or staff from the Inbox) owns the moment.
+  const { data: since } = await db
+    .from("messages")
+    .select("id")
+    .eq("conversation_id", run.conversation_id)
+    .in("sender_type", ["customer", "agent"])
+    .gte("created_at", run.ended_at ?? new Date(Date.now() - CLOSING_PROMO_DELAY_MS).toISOString())
+    .limit(1);
+  if ((since ?? []).length > 0) return;
+  const text = await closingPromoFor(db, run);
+  if (!text) return;
+  await markClosingPromo(db, run);
+  await sendEngineText(db, run, null, text, "closing_promo");
 }
 
 /** Taps on the reminder buttons. Null when it isn't one. */
@@ -3969,7 +4145,19 @@ async function runNodeSideEffects(
     }
     const refused = !fromForm && isRefusal(typed);
     const emailRequired = !cfg.profile_email_optional;
-    const parsed = parseCustomerProfile(fromForm ? { fields } : { text: typed }, biz.phoneCountryCode, emailRequired);
+    let parsed = parseCustomerProfile(fromForm ? { fields } : { text: typed }, biz.phoneCountryCode, emailRequired);
+    // A foreign number (a tourist; Wilson wrote from the US) has no
+    // Ecuadorian cédula: the full name is enough, and a passport number
+    // is kept if they give one.
+    const foreign = !fromForm && !refused && (await isForeignContact(db, run.contact_id, biz));
+    if (foreign && !parsed.ok) {
+      const name = pickName(typed.split("\n"));
+      if (name.split(" ").filter((w) => w.length > 1).length >= 2) {
+        const email = typed.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/)?.[0]?.toLowerCase() ?? "";
+        const passport = parsed.problem === "id" ? parsed.bad : (typed.match(/\b[A-Za-z]{0,3}\d{5,12}\b/)?.[0] ?? "");
+        parsed = { ok: true, profile: { name, idNumber: passport ? passport.toUpperCase() : FOREIGN_NO_ID, email } };
+      }
+    }
     let vars: Record<string, unknown>;
     // "Consumidor final" isn't a profile when the node asks for real data.
     const finalNotAllowed = !!cfg.profile_required && parsed.ok && parsed.profile.idNumber === FINAL_CONSUMER;
@@ -3992,7 +4180,7 @@ async function runNodeSideEffects(
       }
       vars = { ...run.vars, ...profileVars(parsed.profile, run.vars), profile_ok: "si", profile_problem: "" };
     } else {
-      const problem = profileProblemText(parsed, emailRequired);
+      const problem = foreign ? FOREIGN_PROFILE_PROBLEM : profileProblemText(parsed, emailRequired);
       // Nothing new for the registration and nothing written down ("voy a
       // pasar viendo", "no gafas"): don't repeat the same reminder.
       const repeated = !noted.length && !corrected.length && problem === run.vars.__profile_last_problem;
@@ -4017,6 +4205,11 @@ async function runNodeSideEffects(
     vars.__profile_attempts = attempts;
     vars.__profile_rounds = rounds;
     vars.__profile_kept = typed;
+    // Two answers that still aren't the data, with a list ready: asking a
+    // third time is the bot being rigid. The list goes to the team and the
+    // data stays a favor ("cuando pueda").
+    const handOver = !parsed.ok && !refused && rounds >= 2 && !run.vars.__list_handed_over && runHoldsList(run);
+    if (handOver) vars.profile_problem = listHandedOverText(biz, foreign);
     // Typed data that isn't complete stays, so the next message adds to
     // it (minus a wrong ID number, to be typed again); otherwise the raw
     // answers go — kept on the contact when valid, and never mistaken
@@ -4053,7 +4246,8 @@ async function runNodeSideEffects(
       problem: refused || parsed.ok ? null : parsed.problem,
       ...(noted.length ? { noted_order_lines: noted } : {}),
     });
-    if (attempts >= 3 || rounds >= 6) await alertTeamOfTrouble(db, run, "registration_stuck", typed.split("\n").at(-1) ?? "");
+    if (handOver) await handOverUnregisteredList(db, run, node.node_key, { tellCustomer: false });
+    else if (attempts >= 3 || rounds >= 6) await alertTeamOfTrouble(db, run, "registration_stuck", typed.split("\n").at(-1) ?? "");
   }
 
   if (cfg.catalog_link && run.contact_id && run.conversation_id) {
@@ -4710,7 +4904,11 @@ async function replyAfterHandoff(
     const lastThanks = typeof run.vars.__thanks_at === "string" ? new Date(run.vars.__thanks_at).getTime() : 0;
     if (now - lastThanks < AFTER_HANDOFF_MIN_GAP_MS) return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
     await saveVars(db, run, { ...run.vars, __thanks_at: new Date(now).toISOString() });
-    await sendEngineText(db, run, null, texts.thanksReply, "thanks_reply");
+    // "Gracias" closes the conversation: the natural moment for the
+    // closing promotion, in the same message (see closingPromoFor).
+    const promo = await closingPromoFor(db, run);
+    if (promo) await markClosingPromo(db, run);
+    await sendEngineText(db, run, null, promo ? `${texts.thanksReply}\n\n${promo}` : texts.thanksReply, promo ? "thanks_reply_promo" : "thanks_reply");
     return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
   }
   // "Ni aún no me responde", "sigo esperando": the order is waiting on
@@ -5152,8 +5350,16 @@ async function sendIdleNudge(
   const flow = await loadFlow(db, freshRun.flow_id);
   // entry_node_id holds the entry node's key (see startNewRun).
   if (!holdsList && flow?.entry_node_id === expectedNodeKey) return;
-  // Once per conversation is a reminder; twice is nagging.
-  if (freshRun.vars.__idle_nudged) return;
+  // Quiet at "nombre y cédula" with a finished list: the team gets the
+  // order anyway instead of a "¿seguimos?" (customers who drop here are
+  // often the ones in a hurry — Ronny needed four sacks that same day).
+  if (holdsList && !freshRun.vars.__list_handed_over && isRegistrationAsk(await loadAllNodes(db, freshRun.flow_id), expectedNodeKey)) {
+    await handOverUnregisteredList(db, freshRun, expectedNodeKey, { tellCustomer: true });
+    return;
+  }
+  // Once per conversation is a reminder; twice is nagging. And once the
+  // team has the list, the next message comes from a person.
+  if (freshRun.vars.__idle_nudged || freshRun.vars.__list_handed_over) return;
   // A person was already called in (or is talking with them): the bot
   // asking "¿seguimos?" on top of that only confuses.
   if (await personIsOnIt(db, freshRun)) return;
@@ -5197,7 +5403,8 @@ function scheduleIdleNudge(
     sendIdleNudge(db, runId, nodeKey).catch((err) => {
       console.error("[flows] idle nudge failed:", err);
     });
-  }, minutes * 60_000);
+    // FLOW_IDLE_NUDGE_MS shortens it for tests.
+  }, Number(process.env.FLOW_IDLE_NUDGE_MS) || minutes * 60_000);
   pendingIdleNudges.set(runId, timer);
 }
 

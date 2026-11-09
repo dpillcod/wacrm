@@ -164,6 +164,20 @@ export interface BusinessSettings {
     recoveryReminder: string
     /** "Más tarde" on that reminder. */
     recoveryLater: string
+    /**
+     * A finished list whose customer didn't send name and ID number: it
+     * went to the team anyway, and the data is asked for as a favor.
+     * {cuando} = "en breve" / "mañana a partir de las 7am"; {sin_cedula} =
+     * "(si no tiene cédula ecuatoriana, solo su nombre)" for foreign numbers.
+     */
+    listHandedOver: string
+    /**
+     * One promotion line when an order ends well (after the order went to
+     * the team, or with the "gracias" reply); once a week per customer.
+     * {promo} = the menu promotion, when the customer didn't see the menu.
+     * '' = off.
+     */
+    closingPromo: string
     /** "¿Cuánto es el total?" after the order went to staff; {pedido} = the order number. */
     totalPending: string
     /** "Gracias" / "ok" after the order went to staff. */
@@ -296,6 +310,9 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
     audioTooLong: 'Su audio es un poco largo 🙏 ¿Me lo puede escribir, o enviar uno más corto (menos de 3 minutos)?',
     recoveryReminder: '🛒 Su lista quedó guardada:\n{lista}\n\n¿Seguimos con su pedido?',
     recoveryLater: 'Perfecto, aquí la guardamos 🙂 Cuando quiera, escriba *menú* y seguimos.',
+    listHandedOver:
+      '📋 Le pasé su lista a nuestro equipo; le escriben por aquí {cuando} para confirmarla 🙂\n\nPara la factura, cuando pueda envíeme su *nombre completo* y su *cédula*{sin_cedula}.',
+    closingPromo: '',
     totalPending:
       'Su asesor está preparando el total de su pedido {pedido} y se lo envía por aquí en unos minutos 🙂 Mientras tanto, ¿desea agregar algo más?',
     thanksReply: '¡Con gusto! 🙂 Cualquier cosa, aquí estamos.',

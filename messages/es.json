@@ -1884,6 +1884,8 @@
         "audioTooLong": "Nota de voz de más de ~3 minutos",
         "recoveryReminder": "Recordatorio 2 horas después de dejar una lista a medias",
         "recoveryLater": "\"Más tarde\" en ese recordatorio",
+        "listHandedOver": "El cliente no envió nombre y cédula: su lista pasa igual al equipo ({cuando} = en breve / al abrir; {sin_cedula} = aclaración solo para números extranjeros)",
+        "closingPromo": "Promoción de cierre: 1 vez por semana al terminar bien un pedido o con el \"gracias\" ({promo} = promoción del menú si no la vio; vacío = apagado)",
         "totalPending": "\"¿Cuánto es el total?\" después de pasar el pedido al personal",
         "thanksReply": "\"Gracias\" después de pasar el pedido al personal",
         "callRequestOpen": "El cliente pide que lo llamen (abierto)",
