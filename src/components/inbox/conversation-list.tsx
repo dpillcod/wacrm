@@ -99,7 +99,7 @@ export function ConversationList({
       const { data, error } = await supabase
         .from("conversations")
         .select(CONVERSATION_SELECT)
-        .order("last_message_at", { ascending: false });
+        .order("last_message_at", { ascending: false, nullsFirst: false });
 
       if (cancelled) return;
 

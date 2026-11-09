@@ -177,7 +177,7 @@ export async function reviewDueConversations(
     .eq("account_id", accountId)
     .gte("last_message_at", new Date(now - MAX_AGE_MS).toISOString())
     .lte("last_message_at", new Date(now - SESSION_QUIET_MS).toISOString())
-    .order("last_message_at", { ascending: false })
+    .order("last_message_at", { ascending: false, nullsFirst: false })
     .limit(60);
   const staff = getStaffPhones(biz).map((p) => p.slice(-9));
   let reviewed = 0;
