@@ -5123,6 +5123,35 @@ export function isStaffCheckInText(biz: BusinessSettings, text: string): boolean
   return biz.checkInWords.some((w) => normalizeForMatch(w) === said);
 }
 
+/**
+ * "Tierno", "truno", "turmo": a one-word slip on a check-in word. Only
+ * for numbers already on the staff list — otherwise it went to the chat
+ * AI, which imitated an old check-in reply with a made-up time.
+ */
+export function isStaffCheckInTypo(biz: BusinessSettings, text: string): boolean {
+  const said = normalizeForMatch(text);
+  if (said.length < 4 || said.includes(" ")) return false;
+  return biz.checkInWords.some((w) => {
+    const word = normalizeForMatch(w);
+    return !word.includes(" ") && word[0] === said[0] && editDistance(word, said) <= 2;
+  });
+}
+
+function editDistance(a: string, b: string): number {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+/** Last check-in reply per contact: "Tierno" + "Turno" two seconds apart get one reply. */
+const lastCheckInReply = new Map<string, number>();
+
 export function checkInReply(biz: BusinessSettings, now: Date = new Date()): string {
   const until = new Date(now.getTime() + 24 * 3_600_000 + biz.utcOffsetHours * 3_600_000);
   const hh = String(until.getUTCHours()).padStart(2, "0");
@@ -5143,7 +5172,8 @@ async function handleStaffCheckIn(
     (input.message.kind === "text" && isStaffCheckInText(biz, input.message.text)) ||
     (input.message.kind === "interactive_reply" && input.message.reply_id === STAFF_ACK_ID) ||
     typedAck;
-  if (!isCheckIn) return null;
+  const typo = !isCheckIn && input.message.kind === "text" && isStaffCheckInTypo(biz, input.message.text);
+  if (!isCheckIn && !typo) return null;
   const staff = getStaffPhones(biz);
   if (staff.length === 0) return null;
   const { data: contact } = await db
@@ -5154,7 +5184,7 @@ async function handleStaffCheckIn(
   const phone = toInternational((contact as { phone?: string } | null)?.phone ?? "", biz.phoneCountryCode);
   if (!phone) return null;
   if (!staff.includes(phone)) {
-    if (typedAck) return null;
+    if (typedAck || typo) return null;
     // "Turno" from a number not on the staff list (a new employee): tell
     // them and the admins, instead of "¿busca turrón?".
     if (input.message.kind !== "text") return null;
@@ -5178,6 +5208,9 @@ async function handleStaffCheckIn(
     }
     return { consumed: true, outcome: "no_match" };
   }
+  const last = lastCheckInReply.get(input.contactId) ?? 0;
+  if (Date.now() - last < 60_000) return { consumed: true, outcome: "no_match" };
+  lastCheckInReply.set(input.contactId, Date.now());
   try {
     await engineSendText({
       accountId: input.accountId,

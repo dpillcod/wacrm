@@ -14,6 +14,7 @@ import {
   matchesKeywordTrigger,
   isRestartCommand,
   isStaffCheckInText,
+  isStaffCheckInTypo,
   checkInReply,
   extractValidInput,
   optionByNumber,
@@ -351,6 +352,12 @@ describe("staff check-in", () => {
     expect(isStaffCheckInText(DEMO_STORE, "activar avisos")).toBe(true);
     expect(isStaffCheckInText(DEMO_STORE, "hola")).toBe(false);
     expect(isStaffCheckInText(DEMO_STORE, "mañana tengo turno")).toBe(false);
+    expect(isStaffCheckInTypo(DEMO_STORE, "Tierno")).toBe(true);
+    expect(isStaffCheckInTypo(DEMO_STORE, "truno")).toBe(true);
+    expect(isStaffCheckInTypo(DEMO_STORE, "turmo")).toBe(true);
+    expect(isStaffCheckInTypo(DEMO_STORE, "hola")).toBe(false);
+    expect(isStaffCheckInTypo(DEMO_STORE, "pan")).toBe(false);
+    expect(isStaffCheckInTypo(DEMO_STORE, "tienen pan")).toBe(false);
   });
 
   it("says until when (Ecuador time) the alerts are on", () => {
