@@ -44,6 +44,7 @@ import {
 } from "./meta-send";
 import { decideFallback, resolveFallbackPolicy } from "./fallback";
 import { pickCrossSellSuggestion } from "../ai/cross-sell";
+import { installableLine, listAsksInstallation } from "./install-offer";
 import {
   retrieveCatalogProducts,
   type CatalogProductCandidate,
@@ -2291,18 +2292,35 @@ function scheduleClosingPromo(db: AdminClient, runId: string): void {
   }, CLOSING_PROMO_DELAY_MS);
 }
 
-/** The closing promotion for this customer now, or '' when it isn't the moment. */
-async function closingPromoFor(db: AdminClient, run: FlowRunRow): Promise<string> {
-  if (!run.contact_id || !run.conversation_id || run.vars.__closing_promo_at) return "";
+type ClosingMessage =
+  /** The order carries something usually installed: offer a technician (two buttons). */
+  | { kind: "install"; text: string; line: string }
+  /** The promotion, plus the catalog tip and button when the order was typed. */
+  | { kind: "promo"; text: string; catalogUrl: string };
+
+const CLOSING_INSTALL_YES_PREFIX = "close_install:";
+const CLOSING_INSTALL_NO_PREFIX = "close_noinstall:";
+
+/** The closing message for this customer now, or null when it isn't the moment. */
+async function closingMessageFor(db: AdminClient, run: FlowRunRow): Promise<ClosingMessage | null> {
+  if (!run.contact_id || !run.conversation_id || run.vars.__closing_promo_at) return null;
   const biz = await bizOf(db, run.account_id);
-  const template = biz.texts.closingPromo.trim();
-  if (!template || !isWithinBusinessHours(biz)) return "";
+  if (!isWithinBusinessHours(biz)) return null;
   // Went well: no alert to the team, no list handed over without data.
-  if (Array.isArray(run.vars.__trouble_alerts) && run.vars.__trouble_alerts.length > 0) return "";
-  if (run.vars.__list_handed_over) return "";
+  if (Array.isArray(run.vars.__trouble_alerts) && run.vars.__trouble_alerts.length > 0) return null;
+  if (run.vars.__list_handed_over) return null;
   const { data: contact } = await db.from("contacts").select("phone").eq("id", run.contact_id).maybeSingle();
   const phone = String((contact as { phone?: string | null } | null)?.phone ?? "").replace(/\D/g, "");
-  if (phone && getStaffPhones(biz).includes(phone)) return "";
+  if (phone && getStaffPhones(biz).includes(phone)) return null;
+
+  // A lock, a faucet, a socket: "¿se lo instalamos?" is worth more than
+  // any promotion — and it's about this order, so no weekly limit.
+  const list = runListText(run);
+  const line = biz.texts.closingInstall.trim() && !listAsksInstallation(list) ? installableLine(list) : null;
+  if (line) return { kind: "install", text: renderText(biz.texts.closingInstall, { producto: line }), line };
+
+  const template = biz.texts.closingPromo.trim();
+  if (!template) return null;
   const since = new Date(Date.now() - CLOSING_PROMO_EVERY_DAYS * 86_400_000).toISOString();
   const { data: recent } = await db
     .from("flow_runs")
@@ -2311,7 +2329,7 @@ async function closingPromoFor(db: AdminClient, run: FlowRunRow): Promise<string
     .eq("contact_id", run.contact_id)
     .gte("vars->>__closing_promo_at", since)
     .limit(1);
-  if ((recent ?? []).length > 0) return "";
+  if ((recent ?? []).length > 0) return null;
   // The campaign line only for whoever didn't see it on the menu today.
   const flow = await loadFlow(db, run.flow_id);
   const { data: menuSent } = flow?.entry_node_id
@@ -2324,17 +2342,80 @@ async function closingPromoFor(db: AdminClient, run: FlowRunRow): Promise<string
         .limit(1)
     : { data: [] };
   const promo = (menuSent ?? []).length > 0 ? "" : activeMenuPromo(biz.menuPromos, localDate(biz.utcOffsetHours));
-  return renderText(template, { promo })
+  let text = renderText(template, { promo })
     .split("\n")
     .map((l) => l.trimEnd())
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+  // Typed the whole order: next time the catalog is quicker — said with
+  // its button.
+  let catalogUrl = "";
+  const tip = biz.texts.closingCatalogTip.trim();
+  if (tip && !run.vars.__from_catalog) {
+    const url = await catalogLink(db, run.account_id, run.contact_id, run.conversation_id);
+    if (/^https:\/\/[^\s/]+/.test(url)) {
+      catalogUrl = url;
+      text = `${text}\n\n${tip}`;
+    }
+  }
+  return { kind: "promo", text, catalogUrl };
 }
 
-async function markClosingPromo(db: AdminClient, run: FlowRunRow): Promise<void> {
+async function markClosingPromo(db: AdminClient, run: FlowRunRow, extra: Record<string, unknown> = {}): Promise<void> {
   const fresh = (await loadRun(db, run.id)) ?? run;
-  await saveVars(db, run, { ...fresh.vars, __closing_promo_at: new Date().toISOString() });
+  await saveVars(db, run, { ...fresh.vars, ...extra, __closing_promo_at: new Date().toISOString() });
+}
+
+/** Sends the closing message, after `lead` (the "con gusto" reply) when there is one. */
+async function sendClosingMessage(db: AdminClient, run: FlowRunRow, msg: ClosingMessage, lead: string): Promise<void> {
+  await markClosingPromo(db, run, msg.kind === "install" ? { __install_offer_line: msg.line } : {});
+  if (msg.kind === "install") {
+    if (lead) await sendEngineText(db, run, null, lead, "thanks_reply");
+    try {
+      await engineSendInteractiveButtons({
+        accountId: run.account_id,
+        userId: run.user_id,
+        conversationId: run.conversation_id!,
+        contactId: run.contact_id!,
+        bodyText: msg.text,
+        buttons: [
+          { id: `${CLOSING_INSTALL_YES_PREFIX}${run.id}`, title: "🔧 Sí, instálenlo" },
+          { id: `${CLOSING_INSTALL_NO_PREFIX}${run.id}`, title: "No, gracias" },
+        ],
+      });
+      await logEvent(db, run.id, "message_sent", null, { reason: "closing_install_offer" });
+    } catch (err) {
+      await logEvent(db, run.id, "error", null, {
+        reason: "closing_install_offer_failed",
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return;
+  }
+  const text = lead ? `${lead}\n\n${msg.text}` : msg.text;
+  const reason = lead ? "thanks_reply_promo" : "closing_promo";
+  if (msg.catalogUrl) {
+    try {
+      const { whatsapp_message_id } = await engineSendCtaUrl({
+        accountId: run.account_id,
+        userId: run.user_id,
+        conversationId: run.conversation_id!,
+        contactId: run.contact_id!,
+        bodyText: text,
+        buttonText: "🛒 CATÁLOGO EXPRESS",
+        url: msg.catalogUrl,
+      });
+      await logEvent(db, run.id, "message_sent", null, { reason, whatsapp_message_id });
+      return;
+    } catch (err) {
+      await logEvent(db, run.id, "error", null, {
+        reason: "closing_catalog_button_failed",
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  await sendEngineText(db, run, null, text, reason);
 }
 
 /** A couple of minutes after the order went to the team, if the chat stayed quiet. */
@@ -2350,10 +2431,65 @@ async function sendClosingPromo(db: AdminClient, runId: string): Promise<void> {
     .gte("created_at", run.ended_at ?? new Date(Date.now() - CLOSING_PROMO_DELAY_MS).toISOString())
     .limit(1);
   if ((since ?? []).length > 0) return;
-  const text = await closingPromoFor(db, run);
-  if (!text) return;
-  await markClosingPromo(db, run);
-  await sendEngineText(db, run, null, text, "closing_promo");
+  const msg = await closingMessageFor(db, run);
+  if (msg) await sendClosingMessage(db, run, msg, "");
+}
+
+/** Taps on "🔧 Sí, instálenlo" / "No, gracias" of the closing message. Null when it isn't one. */
+async function handleClosingReply(
+  db: AdminClient,
+  input: DispatchInboundInput,
+  replyId: string,
+): Promise<DispatchInboundResult | null> {
+  const yes = replyId.startsWith(CLOSING_INSTALL_YES_PREFIX);
+  if (!yes && !replyId.startsWith(CLOSING_INSTALL_NO_PREFIX)) return null;
+  const run = await loadRun(db, replyId.slice((yes ? CLOSING_INSTALL_YES_PREFIX : CLOSING_INSTALL_NO_PREFIX).length));
+  if (!run || run.account_id !== input.accountId || run.contact_id !== input.contactId) {
+    return { consumed: true, outcome: "no_match" };
+  }
+  // A second tap: already answered.
+  if (run.vars.__install_answer) return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+  await saveVars(db, run, { ...run.vars, __install_answer: yes ? "yes" : "no" });
+  if (!yes) {
+    await sendEngineText(db, run, null, "¡Perfecto! Gracias por su compra 🙂", "closing_install_no");
+    return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+  }
+  const biz = await bizOf(db, run.account_id);
+  const line = typeof run.vars.__install_offer_line === "string" ? run.vars.__install_offer_line : "";
+  const ref = run.vars.order_number ? `N° ${run.vars.order_number}` : "";
+  const { data: contact } = await db.from("contacts").select("name, phone").eq("id", input.contactId).maybeSingle();
+  const c = contact as { name?: string | null; phone?: string | null } | null;
+  const name = (typeof run.vars.contact_name === "string" && run.vars.contact_name.trim()) || c?.name?.trim() || "Cliente";
+  const phone = c?.phone ? localPhone(c.phone.replace(/^\+/, ""), biz.phoneCountryCode) : "";
+  // On the order's card (whoever prepares it knows) and as a request on
+  // the services board (where the technicians look).
+  if (typeof run.vars.__deal_id === "string") {
+    const { data: deal } = await db.from("deals").select("notes").eq("id", run.vars.__deal_id).maybeSingle();
+    const notes = ((deal as { notes?: string | null } | null)?.notes ?? "").trim();
+    await db.from("deals").update({ notes: `${notes}\n🔧 Quiere INSTALACIÓN: ${line}`.trim() }).eq("id", run.vars.__deal_id);
+  }
+  const serviceCard = await upsertOrderCard(db, {
+    accountId: run.account_id,
+    userId: run.user_id,
+    contactId: input.contactId,
+    conversationId: input.conversationId,
+    title: `🔧 Instalación — ${name}`,
+    notes: `Instalar: ${line}${ref ? `\nDel pedido ${ref}` : ""}\nConfirmar con el cliente el día y el costo.`,
+    pipelineName: biz.serviceBoard.pipelineName,
+  });
+  if (serviceCard) await saveVars(db, run, { ...run.vars, __install_deal_id: serviceCard });
+  await notifyTeamInApp(db, run, null, {
+    title: `🔧 ${orderTitle(run, "Cliente")} quiere INSTALACIÓN`,
+    body: `${line}${phone ? ` · ${phone}` : ""}. Confírmele el día y el costo.`,
+  });
+  await notifyStaffOfHandoff(db, {
+    accountId: run.account_id,
+    contactName: name,
+    summary: `🔧 PIDE INSTALACIÓN${phone ? ` · ${phone}` : ""}${ref ? ` · Pedido ${ref}` : ""}\n${line}`,
+    conversationId: input.conversationId,
+  }).catch(() => null);
+  await sendEngineText(db, run, null, biz.texts.closingInstallYes, "closing_install_yes");
+  return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
 }
 
 /** Taps on the reminder buttons. Null when it isn't one. */
@@ -3206,6 +3342,8 @@ async function dispatchInboundToFlowsInner(
       if (followUpResult) return followUpResult;
       const csatResult = await handleCsatReply(db, input, input.message.reply_id);
       if (csatResult) return csatResult;
+      const closingResult = await handleClosingReply(db, input, input.message.reply_id);
+      if (closingResult) return closingResult;
       const nudgeResult = await handleNudgeReply(db, input, input.message.reply_id);
       if (nudgeResult) return nudgeResult;
       const cartResult = await handleCartReply(db, input, input.message.reply_id);
@@ -4906,9 +5044,9 @@ async function replyAfterHandoff(
     await saveVars(db, run, { ...run.vars, __thanks_at: new Date(now).toISOString() });
     // "Gracias" closes the conversation: the natural moment for the
     // closing promotion, in the same message (see closingPromoFor).
-    const promo = await closingPromoFor(db, run);
-    if (promo) await markClosingPromo(db, run);
-    await sendEngineText(db, run, null, promo ? `${texts.thanksReply}\n\n${promo}` : texts.thanksReply, promo ? "thanks_reply_promo" : "thanks_reply");
+    const closing = await closingMessageFor(db, run);
+    if (closing) await sendClosingMessage(db, run, closing, texts.thanksReply);
+    else await sendEngineText(db, run, null, texts.thanksReply, "thanks_reply");
     return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
   }
   // "Ni aún no me responde", "sigo esperando": the order is waiting on
