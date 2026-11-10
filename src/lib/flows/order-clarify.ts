@@ -32,6 +32,24 @@ const CLARIFY_TIMEOUT_MS = 12_000;
 export interface ReviewResult {
   lines: string[];
   question: string | null;
+  /** The line written before this batch, completed by it ("para dormitorio"); null when untouched. */
+  previous: string | null;
+  previousSearch: string;
+  /** Search words per kept line ("" = no models to show), same order as `lines`. */
+  search: string[];
+}
+
+export interface ApplyResult {
+  lines: string[];
+  search: string[];
+}
+
+/** One search entry per line: missing or invalid entries become "". */
+function searchesFor(value: unknown, count: number): string[] {
+  const list = Array.isArray(value) ? value : [];
+  return Array.from({ length: count }, (_, i) =>
+    typeof list[i] === "string" ? (list[i] as string).replace(/\s+/g, " ").trim().slice(0, 60) : "",
+  );
 }
 
 /** Who the assistant works for, from the business settings. */
@@ -52,19 +70,33 @@ Reglas:
 - Trata al cliente de "usted". Sé breve y cordial.
 - Responde SOLO con JSON válido, sin texto antes ni después.`;
 
-const REVIEW_TASK = `Tarea: revisa las líneas del pedido. Si una línea es vaga y a un empleado le faltaría un dato para tomar el producto correcto de la percha (tamaño, presentación, medida, watts, color, sabor, tipo), escribe UNA pregunta corta para el cliente. Usa las referencias del catálogo solo para sugerir opciones reales (ej. "¿de 2 litros o de 3 litros?"); no menciones códigos. NO preguntes si la línea ya es razonablemente clara (ej. "1 libra de arroz", "10 panes de agua", "1 cuaderno de 100 hojas cuadros", "un dólar de huevos", "2 dólares de pan": una cantidad en dinero es clara). Para lo básico de todos los días (huevos, pan, leche, arroz, azúcar, sal) asume la presentación común y no preguntes. Nunca ofrezcas opciones absurdas ni de otra categoría que aparezcan en las referencias (ej. un juguete o caramelo con el mismo nombre). Las referencias pueden estar incompletas: si no ves todas las presentaciones, pregunta de forma abierta con ejemplos comunes (ej. "¿De qué tamaño: 1, 2 o 3 litros?") en vez de limitarte a las referencias.
+// Words to look the product up among the store's own (abbreviated,
+// upper-case) product names, so the customer can be shown a few real
+// models — only where there's a choice to make.
+const SEARCH_RULE = `"search": para cada línea, 1 a 3 palabras para buscar el producto en el sistema de la tienda, en singular y sin tildes, con el nombre que usa una ferretería (ej. "chapa para dormitorio" → "cerradura dormitorio", "llave de lavabo" → "llave lavabo", "foco led" → "foco led", "pintura para pared" → "pintura latex", "manguera de jardín" → "manguera jardin"). Úsalo SOLO para productos donde el cliente escoge entre modelos (ferretería, cerrajería, grifería, eléctricos, iluminación, pintura, herramientas, tecnología, menaje); pon "" para alimentos, bebidas, panadería, aseo, papelería básica, servicios y lo que no sea un producto.`;
+
+const REVIEW_TASK = `Tarea: revisa las líneas del pedido. Las preguntas cansan al cliente: un asesor completa los detalles después, así que pregunta lo MÍNIMO.
+- Solo si una línea es tan general que el empleado no sabría qué TIPO de producto buscar, haz UNA pregunta corta sobre el uso o el tipo principal, con 2 o 3 opciones comunes y generales (ej. "¿La chapa es para dormitorio, baño o puerta principal?", "¿El foco es LED de casa o reflector?", "¿La pintura es para pared, madera o metal?"). Nunca preguntes color, marca, acabado, modelo ni medidas finas: eso lo ve el asesor con el cliente.
+- NO preguntes si la línea ya dice para qué es o qué tipo es (ej. "chapa de dormitorio", "1 libra de arroz", "10 panes de agua", "1 cuaderno de 100 hojas cuadros", "un dólar de huevos", "2 dólares de pan": una cantidad en dinero es clara). Para lo básico de todos los días (huevos, pan, leche, arroz, azúcar, sal, alimentos, aseo) asume la presentación común y no preguntes.
+- Si en la conversación anterior la tienda YA le preguntó al cliente sobre ese producto, NO vuelvas a preguntar: anota lo que haya dicho.
+- Nunca ofrezcas opciones absurdas ni de otra categoría (una chapa no es "para colgar"). No digas si lo tenemos o no.
 Si hay conversación anterior, úsala: una línea que solo da cantidad, empaque o tamaño ("1 funda grande", "2 cajas", "la de 3 litros") se refiere al producto del que se venía hablando; escríbela con ese producto ("1 funda grande de comida Royal Canin Kitten para gato") y no la tomes como otro producto (ahí "funda" es el empaque, no una funda de basura).
-Nombra siempre el producto en la pregunta (ej. "¿La Coca-Cola la desea de 1, 2 o 3 litros?").
-Si hay una sola línea vaga, haz una sola pregunta corta. Si hay varias, empieza con "Para anotar bien su pedido:" y pon una línea por producto con viñeta "•" (ej. "• Foco: ¿LED o ahorrador? ¿De cuántos watts?"), máximo 3 productos.
+"Última línea anotada": si una línea nueva solo completa o corrige ESE producto (ej. "para dormitorio", "negra", "la de 1/2 pulgada", "y con instalación", "mejor 2"), NO la pongas como producto nuevo: pon "" en su posición y escribe en "previous" la última línea completa ya corregida (ej. "1 chapa para dormitorio negra (con instalación)"). Si no, "previous": null. "Con instalación" nunca se pierde: va entre paréntesis en el producto al que se refiere.
+Nombra siempre el producto en la pregunta. Si varias líneas necesitan pregunta, empieza con "Para anotar bien su pedido:" y pon una línea por producto con viñeta "•", máximo 2 productos.
 
 Si una línea NO es un producto (un comentario como "voy a pasar por la tienda", una aclaración como "no, gafas no", un saludo, una pregunta, un nombre de persona, un número de cédula, un correo o una dirección como "Bartolomé Serrano 161 y Simón Bolívar"), ponla como "" en su posición: no se anota.
 
-Formato: {"lines": ["línea 1", "línea 2"], "question": "pregunta" o null}
-"lines" debe tener una entrada por cada línea recibida, en el mismo orden ("" para las que no son productos).`;
+${SEARCH_RULE}
 
-const APPLY_TASK = `Tarea: al cliente se le hizo una pregunta sobre su pedido y respondió. Reescribe las líneas incorporando lo que respondió. Si la respuesta no aclara algo, deja esa línea como estaba. Si en la respuesta pide productos nuevos, agrégalos como líneas nuevas al final. No hagas más preguntas.
+Formato: {"lines": ["línea 1", "línea 2"], "previous": "última línea corregida" o null, "previous_search": "palabras de búsqueda de esa línea corregida" o "", "question": "pregunta" o null, "search": ["palabras 1", ""]}
+"lines" y "search" deben tener una entrada por cada línea recibida, en el mismo orden ("" para las que no son productos).`;
 
-Formato: {"lines": ["línea 1", "línea 2"]}`;
+const APPLY_TASK = `Tarea: al cliente se le hizo una pregunta sobre su pedido y respondió. Reescribe las líneas incorporando lo que respondió. Si la respuesta no aclara algo, deja esa línea como estaba. Si en la respuesta pide productos nuevos, agrégalos como líneas nuevas al final. "Con instalación" va entre paréntesis en el producto al que se refiere. No hagas más preguntas.
+
+${SEARCH_RULE}
+
+Formato: {"lines": ["línea 1", "línea 2"], "search": ["palabras 1", ""]}
+"search" lleva una entrada por cada línea de "lines".`;
 
 const EDIT_TASK = `Tarea: el cliente revisó su lista y pide un cambio. Aplica EXACTAMENTE lo que pide: quitar, cambiar cantidad, reemplazar o agregar productos. Los números que menciona se refieren a la numeración de la lista ("quitar el 3" = quitar la línea 3). No toques las demás líneas.
 Las líneas con precio y código ("2 × NOMBRE · $1,30 c/u (cód. 123)") cópialas EXACTAMENTE igual; si pide otra cantidad, cambia solo el número del inicio.
@@ -136,17 +168,22 @@ export function parseReviewResponse(raw: string, inputCount: number): ReviewResu
   // (a comment, a clarification) — dropped, not lost by accident.
   const positioned = (json.lines as unknown[]).map((l) => (typeof l === "string" ? l.replace(/\s+/g, " ").trim() : null));
   if (positioned.length !== inputCount || positioned.some((l) => l === null)) return null;
+  const searches = searchesFor(json.search, inputCount);
   const lines = positioned.filter((l): l is string => !!l);
+  const search = searches.filter((_, i) => !!positioned[i]);
   const question =
     typeof json.question === "string" && json.question.trim() ? json.question.trim() : null;
-  return { lines, question };
+  const previous =
+    typeof json.previous === "string" && json.previous.trim() ? json.previous.replace(/\s+/g, " ").trim() : null;
+  const previousSearch = previous ? searchesFor([json.previous_search], 1)[0] : "";
+  return { lines, question, previous, previousSearch, search };
 }
 
 /** An answer may add items but must not lose any. */
-export function parseApplyResponse(raw: string, minCount: number): string[] | null {
+export function parseApplyResponse(raw: string, minCount: number): ApplyResult | null {
   const json = extractJson(raw);
   const lines = json ? cleanLines(json.lines) : null;
-  return lines && lines.length >= minCount ? lines : null;
+  return json && lines && lines.length >= minCount ? { lines, search: searchesFor(json.search, lines.length) } : null;
 }
 
 /**
@@ -226,6 +263,8 @@ export async function reviewOrderLines(
   lines: string[],
   /** The last messages before this batch ("Tienda: …", "Cliente: …"), oldest first. */
   recent: string[] = [],
+  /** The list's line just before this batch, which a new line may complete. */
+  previousLine = "",
 ): Promise<ReviewResult | null> {
   if (lines.length === 0) return null;
   const config = await loadConfig(db, accountId);
@@ -238,6 +277,7 @@ export async function reviewOrderLines(
     );
     const content =
       (recent.length ? `Conversación anterior (para entender a qué producto se refiere cada línea):\n${recent.join("\n")}\n\n` : "") +
+      (previousLine ? `Última línea anotada (antes de estas): ${previousLine}\n\n` : "") +
       "Líneas del pedido:\n" +
       numbered(lines) +
       "\n\nReferencias del catálogo (nombres abreviados del sistema; solo para sugerir opciones, pueden no coincidir):\n" +
@@ -257,7 +297,7 @@ export async function applyClarificationAnswer(
   accountId: string,
   conversationId: string | null,
   args: { lines: string[]; question: string; answer: string },
-): Promise<string[] | null> {
+): Promise<ApplyResult | null> {
   const config = await loadConfig(db, accountId);
   if (!config) return null;
   try {

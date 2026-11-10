@@ -45,6 +45,7 @@ import {
 import { decideFallback, resolveFallbackPolicy } from "./fallback";
 import { pickCrossSellSuggestion } from "../ai/cross-sell";
 import { installableLine, listAsksInstallation } from "./install-offer";
+import { modelOptionsNote } from "./model-options";
 import {
   retrieveCatalogProducts,
   type CatalogProductCandidate,
@@ -3860,6 +3861,14 @@ function withReplacedLines(
   };
 }
 
+/** AI questions about a vague product per order, at most (see clarifyCapturedBatch). */
+const MAX_CLARIFY_QUESTIONS = 2;
+
+/** The kinds of product whose models this run already showed ("cerradura"). */
+function modelsShown(vars: Record<string, unknown>): string[] {
+  return Array.isArray(vars.__models_shown) ? (vars.__models_shown as unknown[]).filter((x): x is string => typeof x === "string") : [];
+}
+
 /**
  * Run the just-captured batch past the AI before it's confirmed. Tidies
  * the lines in place; if one is too vague, sends ONE question and
@@ -3889,11 +3898,31 @@ async function clarifyCapturedBatch(
   const recent = run.conversation_id
     ? (await recentMessages(db, run.conversation_id, (lines as string[]).join(" ")).catch(() => [])).map((m) => `${m.who}: ${m.text}`)
     : [];
-  const review = await reviewOrderLines(db, run.account_id, run.conversation_id, lines as string[], recent);
+  // The line written just before this batch: "para dormitorio" or "y con
+  // instalación" completes it instead of becoming a product of its own.
+  const listLines = String(run.vars[cfg.var_key] ?? "").split("\n").filter((l) => l.trim());
+  const previousLine = listLines.length > lines.length ? listLines[listLines.length - lines.length - 1] : "";
+  const review = await reviewOrderLines(db, run.account_id, run.conversation_id, lines as string[], recent, previousLine);
   if (!review) return false;
+  // Questions tire customers: two per order at most, the advisor sees the rest.
+  const asked = typeof run.vars.__clarify_asked === "number" ? run.vars.__clarify_asked : 0;
+  if (asked >= MAX_CLARIFY_QUESTIONS) review.question = null;
+  // A question about a line the model also blanked out: keep the line
+  // ("1 chapa" + "¿para dormitorio, baño…?" must not lose the chapa).
+  if (review.question && review.lines.length === 0) {
+    review.lines = lines as string[];
+    review.search = (lines as string[]).map(() => "");
+  }
+  const previous = previousLine && review.previous && review.previous !== previousLine ? review.previous : null;
+  if (previous) {
+    // The model sometimes also repeats the completed line as a new one.
+    const same = (l: string) => normalizeForMatch(l) === normalizeForMatch(previous);
+    review.search = review.search.filter((_, i) => !same(review.lines[i]));
+    review.lines = review.lines.filter((l) => !same(l));
+  }
   // Nothing in the batch was a product ("voy a pasar viendo", "no gafas"):
   // take it out of the list and keep listening, without an "Anotado".
-  if (review.lines.length === 0) {
+  if (review.lines.length === 0 && !previous) {
     const cleared = withReplacedLines(run.vars, cfg.var_key, lines.length, []);
     delete cleared.__capture_batch_var;
     delete cleared.__capture_batch_lines;
@@ -3917,8 +3946,28 @@ async function clarifyCapturedBatch(
     return true;
   }
 
-  let vars = withReplacedLines(run.vars, cfg.var_key, lines.length, review.lines);
+  let vars = previous
+    ? withReplacedLines(run.vars, cfg.var_key, lines.length + 1, [previous, ...review.lines])
+    : withReplacedLines(run.vars, cfg.var_key, lines.length, review.lines);
+  if (!review.question) {
+    // Settled: a few real models of what has a choice to make.
+    const { note, shown } = await modelOptionsNote(
+      db,
+      run.account_id,
+      previous ? [previous, ...review.lines] : review.lines,
+      previous ? [review.previousSearch, ...review.search] : review.search,
+      modelsShown(run.vars),
+    );
+    if (note) {
+      vars = {
+        ...vars,
+        [`${cfg.var_key}_cross_sell`]: `${note}${String(vars[`${cfg.var_key}_cross_sell`] ?? "")}`,
+        __models_shown: [...modelsShown(run.vars), ...shown],
+      };
+    }
+  }
   if (review.question) {
+    vars = { ...vars, __clarify_asked: asked + 1 };
     const pending: PendingClarification = {
       var_key: cfg.var_key,
       next_node_key: cfg.next_node_key,
@@ -6572,16 +6621,27 @@ async function handleReplyForActiveRun(
       );
       // AI unavailable: keep the answer next to the last line rather
       // than lose it — the clerk reads the list, not a model.
-      const newLines = answered ?? [
+      const newLines = answered?.lines ?? [
         ...pendingClarification.lines.slice(0, -1),
         `${pendingClarification.lines.at(-1)} (${answer})`,
       ];
-      const vars = withReplacedLines(
+      let vars = withReplacedLines(
         restVars,
         pendingClarification.var_key,
         pendingClarification.lines.length,
         newLines,
       );
+      // Answered: a few real models, and the advisor takes it from there.
+      const models = answered
+        ? await modelOptionsNote(db, run.account_id, answered.lines, answered.search, modelsShown(run.vars))
+        : null;
+      if (models?.note) {
+        vars = {
+          ...vars,
+          [`${pendingClarification.var_key}_cross_sell`]: models.note,
+          __models_shown: [...modelsShown(run.vars), ...models.shown],
+        };
+      }
       await db.from("flow_runs").update({ vars, reprompt_count: 0 }).eq("id", run.id);
       run.vars = vars;
       run.reprompt_count = 0;
@@ -6842,7 +6902,10 @@ async function handleReplyForActiveRun(
       return { consumed: true, flow_run_id: run.id, outcome: "debounced" };
     }
 
-    if (message.kind === "text" && (await clarifyCapturedBatch(db, run, currentNode))) {
+    // Typed lines, and lines the AI read from a sentence, an audio or a
+    // photo (an "order" without catalog items) — not a catalog cart.
+    const reviewable = message.kind === "text" || (message.kind === "order" && message.items.length === 0);
+    if (reviewable && (await clarifyCapturedBatch(db, run, currentNode))) {
       return { consumed: true, flow_run_id: run.id, outcome: "awaiting_clarification" };
     }
     const outcome = await advanceFromNodeKey(db, run, matched, nodes);

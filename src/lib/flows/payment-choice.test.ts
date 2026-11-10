@@ -35,3 +35,11 @@ describe('Nov 8 chats', () => {
     expect(isPriceQuestion('Y los precios por favor?')).toBe(true)
   })
 })
+
+describe('isPriceQuestion (Nov 10 chats)', () => {
+  it('reads "¿qué costo tiene?" as a price question', () => {
+    expect(isPriceQuestion('No, que costo tiene')).toBe(true)
+    expect(isPriceQuestion('Y el costo?')).toBe(true)
+    expect(isPriceQuestion('1 chapa para dormitorio')).toBe(false)
+  })
+})

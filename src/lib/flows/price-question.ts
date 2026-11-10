@@ -94,6 +94,16 @@ const PRICE_QUESTION_PHRASES = [
   'precios por favor',
   'el precio por favor',
   'y el precio',
+  // "No, ¿qué costo tiene?" (Nov 10).
+  'que costo tiene',
+  'que costo tienen',
+  'que costo',
+  'y el costo',
+  'el costo por favor',
+  'cual es su costo',
+  'cual es su precio',
+  'cuanto esta',
+  'cuanto estan',
 ];
 
 function normalize(text: string): string {

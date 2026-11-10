@@ -32,6 +32,26 @@ describe("parseReviewResponse", () => {
     expect(parseReviewResponse(raw, 2)).toEqual({
       lines: ["1 Coca-Cola grande", "10 panes de agua"],
       question: "¿La Coca-Cola la desea de 2 o de 3 litros?",
+      previous: null,
+      previousSearch: "",
+      search: ["", ""],
+    });
+  });
+
+  it("keeps the search words of the kept lines and the completed previous line", () => {
+    const raw = JSON.stringify({
+      lines: ["", "1 foco LED"],
+      previous: "1 chapa para dormitorio (con instalación)",
+      previous_search: "cerradura dormitorio",
+      question: null,
+      search: ["", "foco led"],
+    });
+    expect(parseReviewResponse(raw, 2)).toEqual({
+      lines: ["1 foco LED"],
+      question: null,
+      previous: "1 chapa para dormitorio (con instalación)",
+      previousSearch: "cerradura dormitorio",
+      search: ["foco led"],
     });
   });
 
@@ -46,7 +66,8 @@ describe("parseReviewResponse", () => {
 
 describe("parseApplyResponse", () => {
   it("allows the answer to add items but never to lose any", () => {
-    expect(parseApplyResponse('{"lines": ["a", "b", "c"]}', 2)).toEqual(["a", "b", "c"]);
+    expect(parseApplyResponse('{"lines": ["a", "b", "c"]}', 2)).toEqual({ lines: ["a", "b", "c"], search: ["", "", ""] });
+    expect(parseApplyResponse('{"lines": ["1 chapa para baño"], "search": ["cerradura bano"]}', 1)).toEqual({ lines: ["1 chapa para baño"], search: ["cerradura bano"] });
     expect(parseApplyResponse('{"lines": ["a"]}', 2)).toBeNull();
   });
 });
@@ -94,8 +115,8 @@ describe("parseDuplicatesResponse", () => {
 
 describe("lines that aren't products", () => {
   it("drops the ones marked empty, keeps the rest", () => {
-    expect(parseReviewResponse('{"lines":["2 panes",""],"question":null}', 2)).toEqual({ lines: ["2 panes"], question: null });
-    expect(parseReviewResponse('{"lines":[""],"question":null}', 1)).toEqual({ lines: [], question: null });
+    expect(parseReviewResponse('{"lines":["2 panes",""],"question":null}', 2)).toEqual({ lines: ["2 panes"], question: null, previous: null, previousSearch: "", search: [""] });
+    expect(parseReviewResponse('{"lines":[""],"question":null}', 1)).toEqual({ lines: [], question: null, previous: null, previousSearch: "", search: [] });
   });
   it("still rejects a response that loses positions", () => {
     expect(parseReviewResponse('{"lines":["2 panes"],"question":null}', 2)).toBeNull();
