@@ -46,6 +46,7 @@ import { decideFallback, resolveFallbackPolicy } from "./fallback";
 import { pickCrossSellSuggestion } from "../ai/cross-sell";
 import { installableLine, listAsksInstallation } from "./install-offer";
 import { modelOptionsNote } from "./model-options";
+import { needsAnswer } from "./unanswered-alerts";
 import {
   retrieveCatalogProducts,
   type CatalogProductCandidate,
@@ -294,7 +295,11 @@ const GREETING_WORDS = new Set([
 
 /** "hola", "buenas tardes", "hola que tal" — a greeting and nothing else. */
 export function isPlainGreeting(text: string): boolean {
-  const words = normalizeForMatch(text).split(" ").filter(Boolean);
+  // "Vecinooo", "veciii": a call-out, stretched.
+  const words = normalizeForMatch(text)
+    .split(" ")
+    .filter(Boolean)
+    .map((w) => (/^(vecin[oa]+|veci+|vecinit[oa]s?|holaa+)$/.test(w) ? (w.startsWith("h") ? "hola" : "veci") : w));
   return words.length > 0 && words.length <= 4 && words.every((w) => GREETING_WORDS.has(w)) &&
     !words.every((w) => w === "que" || w === "tal" || w === "como" || w === "esta" || w === "estas");
 }
@@ -2025,7 +2030,13 @@ async function flushDocuments(
   const listed = names.map((n) => n || "foto").join(", ");
   const body = `El cliente envió ${names.length > 1 ? `${names.length} archivos` : "un archivo"}${listed ? `: ${listed}` : ""}. Revíselo en la conversación.${urls.length ? `\n${urls.join("\n")}` : ""}`;
   if (run) {
-    await notifyTeamInApp(db, run, run.current_node_key, { title: orderTitle(run, "📄 Archivo del cliente"), body });
+    // Kept as "📄 Archivo…" even inside an order: the unanswered-alert
+    // sweep looks for it.
+    const ref = orderTitle(run, "");
+    await notifyTeamInApp(db, run, run.current_node_key, {
+      title: `📄 Archivo del cliente${ref.startsWith(" — ") || !ref ? ref : ` · ${ref}`}`,
+      body,
+    });
   } else {
     await notifyAccountInApp(db, {
       accountId: input.accountId,
@@ -2919,6 +2930,25 @@ async function teamRecentlyActive(db: AdminClient, conversationId: string): Prom
   return (data ?? []).length > 0;
 }
 
+/**
+ * The team was called in for this conversation (a trouble alert, a file,
+ * a photo, a list without details…) and nobody from it has written since.
+ */
+async function waitingOnTeam(db: AdminClient, run: FlowRunRow): Promise<boolean> {
+  if (!run.conversation_id) return false;
+  let alerted = Array.isArray(run.vars.__trouble_alerts) && run.vars.__trouble_alerts.length > 0;
+  if (!alerted) {
+    const { data } = await db
+      .from("notifications")
+      .select("title")
+      .eq("conversation_id", run.conversation_id)
+      .gte("created_at", new Date(Date.now() - 3 * 3_600_000).toISOString())
+      .limit(50);
+    alerted = ((data ?? []) as { title: string }[]).some((n) => needsAnswer(n.title));
+  }
+  return alerted && !(await teamRecentlyActive(db, run.conversation_id));
+}
+
 /** The team was alerted about this run, or someone from it wrote in the chat lately. */
 async function personIsOnIt(db: AdminClient, run: FlowRunRow): Promise<boolean> {
   if (Array.isArray(run.vars.__trouble_alerts) && run.vars.__trouble_alerts.length > 0) return true;
@@ -3437,6 +3467,17 @@ async function dispatchInboundToFlowsInner(
       const isWaitingForCustomer =
         waitingNode?.node_type === "collect_input" &&
         (waitingNode.config as unknown as CollectInputNodeConfig).silent === true;
+      // "Veci", "¿hola?" after the team was called in and nobody wrote
+      // (Nov 9: files to print, 44 min unanswered): the customer is
+      // waiting on a person — escalate instead of greeting again.
+      if (
+        input.message.kind === "text" &&
+        (isPlainGreeting(input.message.text) || isHelpNudge(input.message.text)) &&
+        (await waitingOnTeam(db, activeRun))
+      ) {
+        await alertCustomerWaiting(db, activeRun, input, input.message.text);
+        return { consumed: true, flow_run_id: activeRun.id, outcome: "no_match" };
+      }
       // A plain "hola" in the middle of an order would throw the list
       // away; say we're still on it instead ("menú" still starts over).
       if (
@@ -4979,6 +5020,11 @@ async function alertCustomerWaiting(
       conversationId: input.conversationId,
     }).catch(() => null);
   }
+  // "Veci" and "Vecinooo" a second apart: one apology, not two.
+  const lastReply = typeof run.vars.__waiting_reply_at === "string" ? new Date(run.vars.__waiting_reply_at).getTime() : 0;
+  if (now - lastReply < 2 * 60_000) return;
+  const latest = (await loadRun(db, run.id)) ?? run;
+  await saveVars(db, latest, { ...latest.vars, __waiting_reply_at: new Date(now).toISOString() });
   await sendEngineText(db, run, null, "Disculpe la demora 🙏 Ya avisé otra vez a nuestro equipo, con prioridad; le escriben por aquí enseguida.", "waiting_complaint");
 }
 
@@ -6288,12 +6334,10 @@ async function handleReplyForActiveRun(
     // A person was already called in ("cuánto sería") and the customer
     // asks again for help: that person hasn't written yet — escalate.
     if (
-      Array.isArray(run.vars.__trouble_alerts) &&
-      run.vars.__trouble_alerts.length > 0 &&
       run.conversation_id &&
       run.contact_id &&
       (isHelpNudge(message.text) || isWaitingComplaint(message.text)) &&
-      !(await teamRecentlyActive(db, run.conversation_id))
+      (await waitingOnTeam(db, run))
     ) {
       await alertCustomerWaiting(
         db,

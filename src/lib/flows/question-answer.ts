@@ -24,6 +24,7 @@ import { campaignsForAi } from "../business/menu-promos";
 import { localDate } from "../business/seasonal-replies";
 import { businessIntro } from "./order-clarify";
 import { hoursInWords } from "./store-policy";
+import { productKey } from "./model-options";
 
 const ANSWER_TIMEOUT_MS = 12_000;
 
@@ -128,6 +129,43 @@ export interface FlowAnswer {
   reply: string;
   /** The product asked about, when the reply offered to add it. */
   product: string | null;
+  /** The catalog reference the reply relies on to say "sí, lo tenemos". */
+  match?: string | null;
+}
+
+const GREETING_START =
+  /^\s*¡?\s*(hola|buen[oa]s?(\s+(d[ií]as|tardes|noches))?|saludos)(\s+[\p{L}]+){0,2}\s*([!,.]+\s*(👋|😊|🙂|😃)?|👋|😊|🙂|😃)\s*/iu;
+
+/** "¡Hola Eduardo! 👋 Sí, manejamos…" → "Sí, manejamos…": the menu already greeted them. */
+export function withoutGreeting(reply: string): string {
+  const rest = reply.replace(GREETING_START, "");
+  if (!rest.trim() || rest === reply) return reply;
+  return rest.charAt(0).toUpperCase() + rest.slice(1);
+}
+
+const STOCK_CLAIM =
+  /^(¡?\s*s[ií]\s*[!,.]*\s*)?(lo |la |los |las )?(manejamos|tenemos|contamos con|disponemos de)\b[^.!?¿\n]*[.!]*\s*(👍|😊|🙂)?\s*/iu;
+
+/** A catalog reference names the product: "arroz" in "ARROZ FLOR 5 LB", "chapa" in "CERRADURA NOVA…". */
+export function catalogHasProduct(product: string, names: string[]): boolean {
+  const plain = (t: string) => t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  const head = productKey(plain(product));
+  const stem = head.length > 4 ? head.replace(/(es|s)$/, "") : head;
+  if (stem.length < 3) return false;
+  return names.some((n) => plain(n).split(/[^a-z0-9]+/).some((w) => w.startsWith(stem)));
+}
+
+/**
+ * "¡Sí! Manejamos dulces de guayaba…" said with nothing in the catalog
+ * behind it (Nov 9: "sí, manejamos adhesivos", "sí, manejamos chapas"):
+ * the claim goes, an advisor confirms.
+ */
+export function withoutStockClaim(reply: string): string {
+  const rest = reply.replace(STOCK_CLAIM, "");
+  if (rest === reply) return reply;
+  const tail = rest.trim();
+  if (/asesor[a]? le confirma/i.test(tail)) return tail.charAt(0).toUpperCase() + tail.slice(1);
+  return `Un asesor le confirma si lo tenemos 🙂${tail ? ` ${tail}` : ""}`;
 }
 
 export function parseFlowAnswer(raw: string): FlowAnswer | null {
@@ -139,7 +177,8 @@ export function parseFlowAnswer(raw: string): FlowAnswer | null {
     const reply = typeof j.reply === "string" ? j.reply.trim() : "";
     if (!reply) return null;
     const product = typeof j.product === "string" && j.product.trim() ? j.product.trim() : null;
-    return { reply, product };
+    const match = typeof j.match === "string" && j.match.trim() ? j.match.trim() : null;
+    return { reply, product, match };
   } catch {
     return null;
   }
@@ -176,6 +215,19 @@ export async function recentMessages(
   return rows.slice(-8);
 }
 
+/** Someone (the customer or the store) wrote in this chat in the last 10 minutes, besides this question. */
+async function talkedLately(db: SupabaseClient, conversationId: string, current: string): Promise<boolean> {
+  const { data } = await db
+    .from("messages")
+    .select("sender_type, content_text")
+    .eq("conversation_id", conversationId)
+    .gte("created_at", new Date(Date.now() - 10 * 60_000).toISOString())
+    .limit(5);
+  return ((data ?? []) as { sender_type: string; content_text: string | null }[]).some(
+    (m) => !(m.sender_type === "customer" && (m.content_text ?? "").trim() === current.trim()),
+  );
+}
+
 export async function answerInFlow(
   db: SupabaseClient,
   accountId: string,
@@ -201,6 +253,9 @@ export async function answerInFlow(
   }
   const found = await Promise.all(searches.map((q) => retrieveCatalogProducts(db, accountId, q, 8).catch(() => [])));
   const hints = [...new Map(found.flat().map((h) => [h.name, h])).values()].slice(0, 10);
+  // Greeting and question sent together ("Buenas noches" + "¿tiene
+  // afix?"): the menu already said hello.
+  const greeted = conversationId ? await talkedLately(db, conversationId, question) : false;
   const system = [
     businessIntro(biz),
     `Respondes por WhatsApp una pregunta de un cliente. Trata al cliente de "usted" (sin decir "usted" suelto como saludo: nada de "Buenas tardes, usted"); sé cálido, claro y breve (1 a 3 frases). Si el cliente escribe en inglés u otro idioma, responde en ese idioma.`,
@@ -210,9 +265,10 @@ export async function answerInFlow(
 - No ofrezcas servicios que no estén en la información del negocio (impresiones, copias, envíos especiales…): si preguntan por uno, di que un asesor le confirma. El "técnico a domicilio" es SOLO para trabajos en la casa del cliente (gasfitería, electricidad, pintura, reparaciones): nunca lo sugieras para otra cosa.
 - Si pregunta si tenemos un producto: di que sí lo manejamos SOLO si una referencia del catálogo es claramente ese producto (no algo con nombre parecido: "grillete" no es "grilón"); no prometas stock exacto. Si no está claro en las referencias, di con amabilidad que no lo ves en el catálogo pero que lo anotas para que el asesor confirme. En ambos casos ofrece anotarlo preguntando la cantidad.
 - Si el producto tiene muchos modelos (una chapa, una llave, un foco, una pintura) y el cliente no dijo para qué es, haz UNA sola pregunta general con 2 o 3 opciones de uso o tipo (ej. "¿La chapa es para dormitorio, baño o puerta principal?"). Nunca preguntes color, marca, modelo ni medidas: eso lo ve el asesor.
-- "product": el producto por el que pregunta, nombre corto y claro (ej. "garbanzo", "timer digital"), SIEMPRE que pregunte por un producto, lo tengamos o no. Si no pregunta por un producto, null.
+- "product": el producto por el que pregunta, nombre corto y claro (ej. "garbanzo", "timer digital"), SIEMPRE que pregunte por un producto, lo tengamos o no (si pregunta por varios, el primero). Si no pregunta por un producto, null.
+- "match": si dices que sí lo tenemos, el nombre EXACTO (copiado) de la referencia del catálogo que es ese producto; si no, null.${greeted ? "\n- No saludes: ya se saludó al cliente hace un momento." : ""}
 - ${SITUATION[situation]}
-Responde SOLO con JSON: {"reply": "...", "product": "..." o null}`,
+Responde SOLO con JSON: {"reply": "...", "product": "..." o null, "match": "..." o null}`,
     `Información del negocio:
 - Horario: ${hoursInWords(biz) || "consultar"}.
 ${biz.websiteUrl ? `- Página web: ${biz.websiteUrl}\n` : ""}${biz.customerInfo.trim() ? biz.customerInfo.trim() : ""}`,
@@ -241,7 +297,15 @@ ${biz.websiteUrl ? `- Página web: ${biz.websiteUrl}\n` : ""}${biz.customerInfo.
       model: config.model,
       usage: result.usage,
     });
-    return parseFlowAnswer(result.text);
+    const answer = parseFlowAnswer(result.text);
+    if (!answer) return null;
+    let reply = greeted ? withoutGreeting(answer.reply) : answer.reply;
+    const names = hints.map((h) => h.name);
+    const backed =
+      (!!answer.match && names.some((n) => n.trim().toLowerCase() === answer.match!.toLowerCase())) ||
+      (!!answer.product && catalogHasProduct(answer.product, names));
+    if (answer.product && !backed) reply = withoutStockClaim(reply);
+    return { ...answer, reply };
   } catch (err) {
     console.error("[question-answer] failed:", err);
     return null;

@@ -37,6 +37,7 @@ describe("parseFlowAnswer", () => {
     expect(parseFlowAnswer('{"reply":"Sí, lo manejamos 🙂 ¿Cuántos metros?","product":"hilo grilón"}')).toEqual({
       reply: "Sí, lo manejamos 🙂 ¿Cuántos metros?",
       product: "hilo grilón",
+      match: null,
     });
     expect(parseFlowAnswer('{"reply":"Sí, hacemos envíos con motorizado.","product":null}')?.product).toBeNull();
     expect(parseFlowAnswer("hola")).toBeNull();
