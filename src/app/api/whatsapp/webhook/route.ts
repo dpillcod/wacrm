@@ -1129,6 +1129,7 @@ function toFlowInbound(
       kind: 'other',
       message_type: message.type,
       media_url: mediaUrl ? absoluteMediaUrl(mediaUrl) : null,
+      caption: message.video?.caption || message.document?.caption || null,
       meta_message_id: message.id,
     }
   }

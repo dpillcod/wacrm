@@ -813,6 +813,8 @@ export type ParsedInbound =
       kind: "other";
       message_type: string;
       media_url: string | null;
+      /** The text sent with a video or document, when any. */
+      caption?: string | null;
       meta_message_id: string;
     };
 

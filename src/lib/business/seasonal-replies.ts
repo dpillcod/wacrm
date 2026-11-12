@@ -79,15 +79,27 @@ export function localDate(utcOffsetHours: number, now = Date.now()): string {
 }
 
 /** The first rule still in date whose word appears (whole words, no accents) in the text. */
+// "Navidad" alone says which season, not which product: "una base para
+// árbol de navidad", "luces navideñas" are products to write down, not
+// a question about the Christmas baskets.
+const SEASON_WORDS = /^(navidad|navidenas?|navidenos?|ano nuevo|fin de ano|dia de la madre|dia del padre|halloween|san valentin)$/
+const SEASON_PRODUCTS =
+  /\b(arbol|arboles|luces|luz|serie|series|adorno|adornos|esferas?|nacimiento|pesebre|guirnaldas?|botas?|gorros?|papel|regalos?|bases?|velas?|manteles?|bolsas?|tarjetas?|disfraz|disfraces|figuras?|munecos?|coronas?|cintas?|lazos?|decoracion|decoraciones|platos?|vasos?|servilletas?)\b/
+
 export function findSeasonalReply(
   rules: SeasonalReply[],
   text: string,
   today: string,
 ): { index: number; rule: SeasonalReply } | null {
-  const said = ` ${normalize(text)} `
+  const plain = normalize(text)
+  const said = ` ${plain} `
+  const namesProduct = SEASON_PRODUCTS.test(plain)
   for (const [index, rule] of rules.entries()) {
     if (rule.until && rule.until < today) continue
-    if (rule.keywords.some((k) => normalize(k) && said.includes(` ${normalize(k)} `))) return { index, rule }
+    const hits = rule.keywords.map(normalize).filter((k) => k && said.includes(` ${k} `))
+    if (hits.length === 0) continue
+    if (namesProduct && hits.every((k) => SEASON_WORDS.test(k))) continue
+    return { index, rule }
   }
   return null
 }

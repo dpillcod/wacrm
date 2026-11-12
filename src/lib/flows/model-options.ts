@@ -25,6 +25,15 @@ const STORE_WORDS: Record<string, string> = {
   enchufe: "tomacorriente",
 };
 
+// Products whose name alone is enough to list models: "cerradura" finds
+// locks. Any other single word is too broad — "base" for a Christmas
+// tree stand listed a blender base and a foam disc (Nov 11).
+const FAMILIES = new Set([
+  "cerradura", "candado", "llave", "grifo", "ducha", "foco", "lampara", "reflector", "tomacorriente",
+  "interruptor", "pintura", "esmalte", "brocha", "rodillo", "taladro", "amoladora", "broca", "manguera",
+  "extension", "cable", "sifon", "inodoro", "lavabo", "fregadero", "bisagra", "picaporte", "cortina",
+]);
+
 /** Up to three product names for these search words, dropping the last word until something matches. */
 export async function modelNames(db: SupabaseClient, accountId: string, search: string): Promise<string[]> {
   const words = search
@@ -34,7 +43,7 @@ export async function modelNames(db: SupabaseClient, accountId: string, search: 
     .slice(0, 3)
     .map((w) => STORE_WORDS[w] ?? w);
   const head = words[0];
-  while (words.length > 0) {
+  while (words.length > 1 || FAMILIES.has(head)) {
     const { items } = await searchShop(db, accountId, { q: words.join(" ") });
     if (items.length > 0) {
       // "foco led" also finds a LED strip in the "Focos" section: names
@@ -46,6 +55,7 @@ export async function modelNames(db: SupabaseClient, accountId: string, search: 
     // One word left and nothing: that word isn't how the store names it.
     if (words.length === 1) break;
     words.pop();
+    if (words.length === 1 && !FAMILIES.has(head)) break;
   }
   return [];
 }

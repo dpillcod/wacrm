@@ -313,6 +313,16 @@ const ACK_ONLY = new Set([
   "si por favor", "si porfa", "si porfavor", "ok por favor", "claro que si", "si claro", "esta bien", "ok esta bien",
 ]);
 
+/** "Cualquiera", "el que tenga", "el más barato": the note for the last line, or null. */
+export function anyModelNote(text: string): string | null {
+  const t = normalizeForMatch(text);
+  if (t.split(" ").length > 6) return null;
+  if (/\b(el|la|lo) (mas )?(barat[oa]|economic[oa])\b/.test(t)) return "el más económico";
+  return /^(cualquiera|cualquier (modelo|uno|una|marca|tipo)|cualquiera esta bien|cualquiera nomas|(el|la|lo) que (sea|tenga|tengan|haya)|da igual|me da igual|el que usted (vea|recomiende)|el que me recomiende)( (esta bien|nomas|no mas|por favor|porfa|gracias))*$/.test(t)
+    ? "cualquier modelo"
+    : null;
+}
+
 /** A bare acknowledgement ("sí", "ok", "gracias") — never an order line. */
 export function isAckOnly(text: string): boolean {
   const said = normalizeForMatch(text);
@@ -1792,7 +1802,12 @@ async function startOrderFromFirstMessage(
   if (route?.intent === "question" && (await bizOf(db, input.accountId)).aiFeatures.answerQuestions) {
     const answer = await answerInFlow(db, input.accountId, input.conversationId, input.message.text, "menu");
     // Two messages a second apart ("Aditec SF-106" + "¿dispone?"): only the newer one is answered.
-    if (answer && (await newerCustomerMessage(db, input.conversationId, input.message.meta_message_id))) {
+    // "¿Disponen de este tipo de malla?" + the photo: the photo answers it.
+    if (
+      answer &&
+      ((await newerCustomerMessage(db, input.conversationId, input.message.meta_message_id)) ||
+        (await waitForPointedPhoto(db, input.conversationId, input.message.meta_message_id, input.message.text)))
+    ) {
       return { consumed: true, outcome: "no_match" };
     }
     if (answer) {
@@ -3605,6 +3620,9 @@ async function dispatchInboundToFlowsInner(
             await acknowledgeDocument(db, input, null);
             return { consumed: true, outcome: "no_match" };
           }
+          // A supplier's ad as a video with text (Nov 11: a chatbot
+          // agency): the suppliers' number, not "please write it".
+          const pitch = input.message.kind === "other" && !!input.message.caption && isVendorPitch(input.message.caption);
           // A voice note / video as the first message: ask for text.
           try {
             await engineSendText({
@@ -3612,7 +3630,7 @@ async function dispatchInboundToFlowsInner(
               userId: input.userId,
               conversationId: input.conversationId,
               contactId: input.contactId,
-              text: (await bizOf(db, input.accountId)).texts.nonTextReply,
+              text: (await bizOf(db, input.accountId)).texts[pitch ? "vendorReply" : "nonTextReply"],
             });
             return { consumed: true, outcome: "no_match" };
           } catch (err) {
@@ -5096,6 +5114,23 @@ async function newerCustomerMessage(db: AdminClient, conversationId: string, met
   return !!last && last !== metaMessageId;
 }
 
+/** "¿Tienen de estas bases?", "este tipo de malla": the photo usually comes next (Nov 11). */
+export function pointsAtPhoto(text: string): boolean {
+  const t = normalizeForMatch(text);
+  return t.split(" ").length <= 25 &&
+    /\b(este|estos|estas|esto)\b|\b(de|como|tienen|tiene|disponen|dispone|venden|vende|hay) esta\b|\b(algo|uno|una) asi\b|\b(la|esta|de la) (foto|imagen)\b/.test(t);
+}
+
+/** A question pointing at a photo: wait a few seconds for it. True when a newer message arrived. */
+async function waitForPointedPhoto(db: AdminClient, conversationId: string, metaMessageId: string, text: string): Promise<boolean> {
+  if (!pointsAtPhoto(text)) return false;
+  for (let i = 0; i < 5; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    if (await newerCustomerMessage(db, conversationId, metaMessageId)) return true;
+  }
+  return false;
+}
+
 async function replyAfterHandoff(
   db: AdminClient,
   input: DispatchInboundInput,
@@ -5174,7 +5209,9 @@ async function replyAfterHandoff(
       null,
       payment
         ? `✅ Anotado: pagará ${payment}. Se lo pasé al asesor de su pedido${ref ? ` ${ref}` : ""} 🙂`
-        : `✅ Le pasé su indicación al asesor de su pedido${ref ? ` ${ref}` : ""} 🙂`,
+        : ref
+          ? `✅ Le pasé su indicación al asesor de su pedido ${ref} 🙂`
+          : "✅ Le pasé su consulta al asesor; le responde por aquí en breve 🙂",
       payment ? "after_handoff_payment" : "after_handoff_note",
     );
     return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
@@ -6159,6 +6196,8 @@ async function handleReplyForActiveRun(
         },
         run,
       );
+    } else if (message.caption && isVendorPitch(message.caption)) {
+      await sendEngineText(db, run, currentNode.node_key, (await bizOf(db, run.account_id)).texts.vendorReply, "vendor_reply");
     } else if (message.message_type !== "sticker") {
       await sendEngineText(db, run, currentNode.node_key, (await bizOf(db, run.account_id)).texts.nonTextReply, "non_text_reply");
     }
@@ -6347,6 +6386,28 @@ async function handleReplyForActiveRun(
       );
       return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
     }
+    // "¿Disponen y cuál es el precio?" with the list ready to confirm
+    // (Nov 11: the order never left): the price comes with the order —
+    // send it, as if "Confirmar pedido" were tapped.
+    const confirmButton = currentNode.node_type === "send_buttons" && currentTextFallback?.edit_list_var
+      ? ((currentNode.config as { buttons?: { reply_id: string; title: string; check_duplicates_var?: string }[] }).buttons ?? [])
+          .find((b) => !!b.check_duplicates_var && b.reply_id === "ok")
+      : undefined;
+    if (isPriceQuestion(message.text) && confirmButton) {
+      await sendEngineText(
+        db,
+        run,
+        currentNode.node_key,
+        "💲 Con gusto: le envío su pedido a nuestro equipo para que le confirme disponibilidad y precio 🙂",
+        "price_sends_order",
+      );
+      return handleReplyForActiveRun(
+        db,
+        run,
+        { kind: "interactive_reply", reply_id: confirmButton.reply_id, reply_title: confirmButton.title, meta_message_id: `${message.meta_message_id}#confirm` },
+        nodes,
+      );
+    }
     if (isPriceQuestion(message.text)) {
       await alertTeamOfTrouble(db, run, "price_request", message.text);
       await sendCatalogButton(
@@ -6374,6 +6435,20 @@ async function handleReplyForActiveRun(
     }
   }
 
+  // "Necesito de estas" + a photo (Nov 11): the photo is the product —
+  // wait for it instead of writing the sentence down.
+  if (
+    message.kind === "text" &&
+    capturesOrderList &&
+    !run.vars.__pending_clarification &&
+    run.conversation_id &&
+    !/^\s*\d/.test(message.text) &&
+    !looksLikeQuestion(message.text) &&
+    (await waitForPointedPhoto(db, run.conversation_id, message.meta_message_id, message.text))
+  ) {
+    return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+  }
+
   // A question is answered, never written down as a product ("¿Dispone
   // de Grilon?" used to become order line 1).
   const takesListText = capturesOrderList || !!currentTextFallback?.edit_list_var;
@@ -6392,7 +6467,12 @@ async function handleReplyForActiveRun(
     const situation = flow?.entry_node_id === currentNode.node_key ? "menu" : "order";
     const answer = await answerInFlow(db, run.account_id, run.conversation_id, message.text, situation);
     // Two messages a second apart: the newer one is answered (with this one in context), not both.
-    if (answer && run.conversation_id && (await newerCustomerMessage(db, run.conversation_id, message.meta_message_id))) {
+    if (
+      answer &&
+      run.conversation_id &&
+      ((await newerCustomerMessage(db, run.conversation_id, message.meta_message_id)) ||
+        (await waitForPointedPhoto(db, run.conversation_id, message.meta_message_id, message.text)))
+    ) {
       return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
     }
     if (answer) {
@@ -6477,6 +6557,23 @@ async function handleReplyForActiveRun(
       await sendEngineText(db, run, currentNode.node_key, `Corregido ✅ ${lines.at(-1)}\n\n¿Algo más? Escríbalo, o escriba *listo* 🙂`, "quantity_corrected");
       return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
     }
+    // "Cualquiera" after the models or a "¿qué tipo?" (Nov 11): any will
+    // do — said on the last line, for the advisor who picks one.
+    const anyNote = anyModelNote(message.text);
+    if (anyNote && current) {
+      const lines = current.split("\n");
+      if (!lines[lines.length - 1].includes(`(${anyNote})`)) lines[lines.length - 1] = `${lines[lines.length - 1]} (${anyNote})`;
+      const list = lines.join("\n");
+      await saveVars(db, run, { ...run.vars, [listVar]: list, [`${listVar}_numbered`]: numberLines(list), [`${listVar}_last`]: lines.at(-1) });
+      await sendEngineText(
+        db,
+        run,
+        currentNode.node_key,
+        `Anotado ✅ ${lines.at(-1)}\nEl asesor le escoge uno 🙂\n\n¿Algo más? Escríbalo, o escriba *listo* 🙂`,
+        "any_model",
+      );
+      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
     // "Corregir" typed (or an old button): to the correction step.
     if (isCorrectionRequest(message.text)) {
       const editNode = [...nodes.values()].find((n) => n.node_type === "collect_input" && !!(n.config as { edit_list_var?: string }).edit_list_var);
@@ -6499,6 +6596,16 @@ async function handleReplyForActiveRun(
         "Con gusto 🙂 Ya le aviso a una persona de nuestro equipo; le escribirá por aquí en breve. Lo que lleva anotado queda guardado.",
         "human_request_alerted",
       );
+      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
+    // "Ok gracias" after asking for a person: they're waiting for that
+    // person, not about to type the next product.
+    if (isAckOnly(message.text) && Array.isArray(run.vars.__trouble_alerts) && run.vars.__trouble_alerts.length > 0) {
+      const lastAt = typeof run.vars.__ack_after_alert_at === "string" ? new Date(run.vars.__ack_after_alert_at).getTime() : 0;
+      if (/gracias/.test(normalizeForMatch(message.text)) && Date.now() - lastAt > 10 * 60_000) {
+        await saveVars(db, run, { ...run.vars, __ack_after_alert_at: new Date().toISOString() });
+        await sendEngineText(db, run, currentNode.node_key, "Con gusto 🙂 Una persona de nuestro equipo le escribe por aquí en breve.", "ack_after_alert");
+      }
       return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
     }
     // "Gracias" with nothing on the list is a goodbye, not "next product".
