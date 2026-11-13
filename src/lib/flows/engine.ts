@@ -390,6 +390,94 @@ export function isFormalQuoteRequest(text: string): boolean {
   );
 }
 
+/** "Solo necesito una cotización", "solo quiero saber el precio" (Nov 12): prices first, not a change to the list. */
+export function isQuoteOnly(text: string): boolean {
+  const t = normalizeForMatch(text);
+  return t.split(" ").length <= 14 && (
+    /\b(solo|solamente|unicamente|nada mas|no mas|nomas)\b.{0,30}\b(cotizacion|cotizar|presupuesto|proforma|precio|precios|valor|costo)\b/.test(t) ||
+    /\b(necesito|quiero|quisiera|deseo|era|es|seria) (una |la |un |el )?(cotizacion|presupuesto)\b/.test(t) ||
+    /^(es |era )?(una |para )?(cotizacion|presupuesto)( nomas| nada mas| no mas| por favor)?$/.test(t)
+  );
+}
+
+/** The AI says it wrote the product down ("le anoto…", "anotamos…") — not just offering to ("¿se lo anoto?"). */
+export function claimsWrittenDown(reply: string): boolean {
+  // "Le anoto… ¿Cuántos necesita?": it's still waiting for the quantity —
+  // an offer, so the answer ("100 unidades") writes the line.
+  if (/¿\s*cu[aá]nt[oa]s?\b/i.test(reply)) return false;
+  const statements = reply.replace(/¿[^?]*\?/g, " ");
+  return /\b(le |lo |se lo )?(anoto|anotamos|anote|anotado|anotando)\b/.test(normalizeForMatch(statements));
+}
+
+/**
+ * The order line for a product the AI said it wrote down, with the
+ * customer's quantity when they gave one: "cotizando 200 sacos de cemento
+ * holcim" + "cemento Holcim" → "200 sacos de cemento Holcim".
+ */
+export function offeredLine(text: string, product: string): string {
+  const clean = product.trim();
+  if (/^\d/.test(clean)) return clean;
+  const m = normalizeForMatch(text).match(
+    /\b(\d+(?:[.,]\d+)?)\s*(sacos?|unidades?|uds?|und|metros?|libras?|kilos?|fundas?|cajas?|galones?|litros?|paquetes?|rollos?|docenas?|piezas?|planchas?|tubos?|quintales?|baldes?|cartones?|botellas?|pares?)\b/,
+  );
+  if (!m || normalizeForMatch(clean).includes(m[1])) return clean;
+  const unit = m[2];
+  return normalizeForMatch(clean).startsWith(unit.replace(/s$/, ""))
+    ? `${m[1]} ${clean}`
+    : `${m[1]} ${unit} de ${clean}`;
+}
+
+/** A line of 50 or more units ("200 sacos de cemento", "100 baldes"): a big sale — a person right away. */
+export function bigQuantityLine(text: string): string | null {
+  for (const line of text.split("\n")) {
+    const m = normalizeForMatch(line).match(/^(\d+(?:[.,]\d+)?)\s*([a-z]+)?/);
+    if (!m) continue;
+    const qty = Number(m[1].replace(",", "."));
+    // Weights and small measures run high without being a big order.
+    if (qty >= 50 && !/^(g|gr|grs|gramos?|ml|cc|cm|mm|centimetros?|milimetros?|onzas?|oz|mililitros?)$/.test(m[2] ?? "")) {
+      return line.trim();
+    }
+  }
+  return null;
+}
+
+const DELIVERY_CITIES = [
+  "guayaquil", "quito", "loja", "machala", "azogues", "gualaceo", "paute", "canar", "biblian", "giron",
+  "santa isabel", "sigsig", "chordeleg", "macas", "ambato", "riobamba", "manta", "portoviejo",
+  "santo domingo", "ibarra", "esmeraldas", "babahoyo", "milagro", "la troncal", "limon", "mendez",
+  "zamora", "yantzaza", "pasaje", "el guabo", "huaquillas", "santa rosa", "pucara", "nabon", "ona",
+  "sevilla de oro", "el pan", "guachapala", "deleg", "suscal", "el tambo", "latacunga", "salinas",
+];
+
+/**
+ * Where to deliver, when that's all the message says (Nov 12: "a
+ * domicilio, pero fuera de cuenca" got "escríbame qué productos
+ * necesita"). Null for anything else.
+ */
+export function deliveryDestination(text: string): { note: string; outside: boolean } | null {
+  const t = normalizeForMatch(text);
+  if (!t || t.split(" ").length > 16 || /\d/.test(t)) return null;
+  const city = DELIVERY_CITIES.find((c) => new RegExp(`\\b${c}\\b`).test(t));
+  const cityName = city ? city.replace(/\b\p{L}/gu, (l) => l.toUpperCase()) : "";
+  if (/\bfuera de cuenca\b/.test(t)) {
+    return { note: `fuera de Cuenca${cityName ? ` (${cityName})` : ""}`, outside: true };
+  }
+  if (city && (/\b(envio|envios|enviar|envien|envian|entrega|entregar|entreguen|despacho|despachar|domicilio|llevar|lleven|mandar|manden)\b/.test(t) || t.split(" ").length <= 3)) {
+    return { note: `fuera de Cuenca (${cityName})`, outside: true };
+  }
+  if (/^(a|para|con) (domicilio|entrega a domicilio)( por favor| porfa)?$/.test(t) || /^(es |seria |lo quiero |la quiero )?(a|para) domicilio\b/.test(t) && t.split(" ").length <= 6) {
+    return { note: "a domicilio", outside: false };
+  }
+  return null;
+}
+
+/** "Te mando los datos", "ya le envío", "un momento" while registering: they're about to send them. */
+export function isAboutToSendData(text: string): boolean {
+  const t = normalizeForMatch(text);
+  return t.split(" ").length <= 10 &&
+    /\b((te|le|les) (mando|envio|paso|escribo)|ya (te|le|les) (mando|envio|paso)|ahi (te|le|les) (mando|envio|va|van)|un momento|un momentito|espere|espereme|ya va|ya mismo)\b/.test(t);
+}
+
 /** "Gracias, ya no necesito", "olvídelo": the customer drops the order. */
 export function isOrderCancel(text: string): boolean {
   const t = normalizeForMatch(text);
@@ -435,6 +523,14 @@ export function isShowMeRequest(text: string): boolean {
   if (/\b(tiene|tienes|tienen|enviar|enviarme|envie|envieme|mande|mandar|mandarme|pasar|pasarme|pase|ver|pido|regala|regaleme|hay)\b.{0,25}\b(fotos|fotitos|imagenes|fotografias)\b/.test(t)) return true;
   return t.length <= 80 &&
     /\b(muestreme|muestrame|muestre|muestreme|me muestra|me muesta|muetreme|mandeme fotos|envieme fotos|mande fotos|fotos de los|los que tiene|los q tiene|que opciones tiene|que modelos tiene|ver el catalogo|ver catalogo|ver los productos)\b/.test(t);
+}
+
+/** "¿Me puede enviar una foto del modelo?", "mándeme fotito de esa": a picture of what they're asking about. */
+export function isPhotoOfProductRequest(text: string): boolean {
+  const t = normalizeForMatch(text);
+  return t.split(" ").length <= 20 &&
+    /\b(enviar|enviarme|envie|envieme|mande|mandar|mandarme|mandeme|pasar|pasarme|pase|paseme|ver|tiene|tienen|regala|regaleme|puede|podria)\b.{0,25}\b(foto|fotos|fotito|fotitos|imagen|imagenes|fotografia)\b/.test(t) &&
+    !/\b(catalogo|todos los productos|toda la tienda)\b/.test(t);
 }
 
 /** "¿Dispone en este momento? Lo necesito hoy": whether it's there today — a person's call. */
@@ -967,6 +1063,16 @@ async function executeHandoff(
     const biz = await bizOf(db, run.account_id);
     const host = await activeHostFor(db, biz, { accountId: run.account_id, contactId: run.contact_id });
     if (host) resolvedNote = `${resolvedNote ?? ""}\n${hostGuestLine(biz, host)}`.trim();
+  }
+  // What the customer said about the order along the way: only a quote,
+  // where to deliver (Nov 12: "fuera de Cuenca" was lost).
+  if (cfg.create_order_card && cfg.card_board !== "services") {
+    const extra = [
+      run.vars.__quote_only ? "💲 SOLO COTIZACIÓN: el cliente quiere precios antes de decidir" : "",
+      typeof run.vars.delivery_note === "string" ? `🚚 Entrega: ${run.vars.delivery_note}` : "",
+      typeof run.vars.delivery_location === "string" ? `📍 Ubicación: ${run.vars.delivery_location}` : "",
+    ].filter(Boolean);
+    if (extra.length) resolvedNote = `${resolvedNote ?? ""}\n${extra.join("\n")}`.trim();
   }
   await logEvent(db, run.id, "handoff", node.node_key, {
     // Same gap as send_buttons/send_list (see comments there) — a note
@@ -1805,7 +1911,7 @@ async function startOrderFromFirstMessage(
     // "¿Disponen de este tipo de malla?" + the photo: the photo answers it.
     if (
       answer &&
-      ((await newerCustomerMessage(db, input.conversationId, input.message.meta_message_id)) ||
+      ((await newerCustomerMessageAfterPause(db, input.conversationId, input.message.meta_message_id)) ||
         (await waitForPointedPhoto(db, input.conversationId, input.message.meta_message_id, input.message.text)))
     ) {
       return { consumed: true, outcome: "no_match" };
@@ -1820,6 +1926,17 @@ async function startOrderFromFirstMessage(
       });
       if (answer.product) {
         const nodes = await loadAllNodes(db, defaultFlow.id);
+        // "Perfecto, anotamos comida para perro…" (Nov 12, Majo): the
+        // answer said it was written down, so it is — the list starts
+        // with it. Otherwise "sí, 2 fundas" writes it down.
+        if (claimsWrittenDown(answer.reply)) {
+          return startNewRun(
+            db,
+            defaultFlow,
+            { ...input, message: linesAsOrder([offeredLine(input.message.text, answer.product)], input.message.meta_message_id) },
+            nodes,
+          );
+        }
         await startNewRun(db, defaultFlow, input, nodes, {
           silent: true,
           vars: { __offered_product: answer.product },
@@ -3073,7 +3190,9 @@ export type TroubleReason =
   | "photo_question"
   | "formal_quote"
   | "price_request"
-  | "availability_today";
+  | "availability_today"
+  | "big_order"
+  | "photo_request";
 
 const TROUBLE_TEXT: Record<TroubleReason, string> = {
   edit_failed: "el bot no logra corregir la lista del cliente",
@@ -3086,6 +3205,8 @@ const TROUBLE_TEXT: Record<TroubleReason, string> = {
   formal_quote: "el cliente pide una cotización formal",
   price_request: "el cliente pide el precio",
   availability_today: "el cliente pregunta si lo tenemos para hoy",
+  big_order: "pedido o cotización GRANDE: responda primero",
+  photo_request: "el cliente pide fotos de los modelos que tenemos",
 };
 
 /**
@@ -3120,13 +3241,13 @@ async function alertTeamOfTrouble(
     accountId: run.account_id,
     conversationId: run.conversation_id,
     contactId: run.contact_id,
-    title: `⚠️ Ayuda al cliente: ${name}${phone ? ` (${phone})` : ""}`,
+    title: `${reason === "big_order" ? "💰 Pedido grande" : "⚠️ Ayuda al cliente"}: ${name}${phone ? ` (${phone})` : ""}`,
     body: `${TROUBLE_TEXT[reason][0].toUpperCase()}${TROUBLE_TEXT[reason].slice(1)}. Revise la conversación y escríbale.${said}`,
   }).catch(() => null);
   if (whatsapp) await notifyStaffOfHandoff(db, {
     accountId: run.account_id,
     contactName: name,
-    summary: `⚠️ CONVERSACIÓN COMPLICADA — ${TROUBLE_TEXT[reason]}${phone ? ` · ${phone}` : ""}${said}`,
+    summary: `${reason === "big_order" ? "💰 PEDIDO GRANDE" : "⚠️ CONVERSACIÓN COMPLICADA"} — ${TROUBLE_TEXT[reason]}${phone ? ` · ${phone}` : ""}${said}`,
     conversationId: run.conversation_id ?? undefined,
   }).catch(() => null);
   await logEvent(db, run.id, "node_entered", run.current_node_key, { reason: "trouble_alert", trouble: reason });
@@ -4390,6 +4511,10 @@ async function runNodeSideEffects(
       }
     }
     const refused = !fromForm && isRefusal(typed);
+    // Only that ("te mando los fatos" + "Datos"), no name or number yet.
+    const typedLines = typedAtStart.split("\n").map((l) => l.trim()).filter(Boolean);
+    const aboutToSend = !fromForm && typedLines.some(isAboutToSendData) &&
+      typedLines.filter((l) => !isAboutToSendData(l)).every((l) => !/\d/.test(l) && l.split(/\s+/).length === 1);
     const emailRequired = !cfg.profile_email_optional;
     let parsed = parseCustomerProfile(fromForm ? { fields } : { text: typed }, biz.phoneCountryCode, emailRequired);
     // A foreign number (a tourist; Wilson wrote from the US) has no
@@ -4426,7 +4551,10 @@ async function runNodeSideEffects(
       }
       vars = { ...run.vars, ...profileVars(parsed.profile, run.vars), profile_ok: "si", profile_problem: "" };
     } else {
-      const problem = foreign ? FOREIGN_PROFILE_PROBLEM : profileProblemText(parsed, emailRequired);
+      // "Te mando los datos" (Nov 12): they're coming — wait, don't scold.
+      const problem = aboutToSend
+        ? "Claro 🙂 Aquí lo espero."
+        : foreign ? FOREIGN_PROFILE_PROBLEM : profileProblemText(parsed, emailRequired);
       // Nothing new for the registration and nothing written down ("voy a
       // pasar viendo", "no gafas"): don't repeat the same reminder.
       const repeated = !noted.length && !corrected.length && problem === run.vars.__profile_last_problem;
@@ -4445,9 +4573,9 @@ async function runNodeSideEffects(
     }
     // Someone should help: three tries with data that still isn't
     // complete, or six rounds in all.
-    const triedData = typed !== String(run.vars.__profile_kept ?? "");
+    const triedData = typed !== String(run.vars.__profile_kept ?? "") && !aboutToSend;
     const attempts = parsed.ok || refused ? 0 : (Number(run.vars.__profile_attempts) || 0) + (triedData ? 1 : 0);
-    const rounds = parsed.ok || refused ? 0 : (Number(run.vars.__profile_rounds) || 0) + 1;
+    const rounds = parsed.ok || refused ? 0 : (Number(run.vars.__profile_rounds) || 0) + (aboutToSend ? 0 : 1);
     vars.__profile_attempts = attempts;
     vars.__profile_rounds = rounds;
     vars.__profile_kept = typed;
@@ -5112,6 +5240,17 @@ async function newerCustomerMessage(db: AdminClient, conversationId: string, met
     .limit(1);
   const last = ((data as { message_id: string | null }[] | null) ?? [])[0]?.message_id;
   return !!last && last !== metaMessageId;
+}
+
+/**
+ * The same, after a short pause: a message reaches the inbox a second or
+ * two after WhatsApp sends it, so one written while the AI was thinking
+ * (Nov 12: "¿cuántos necesita?" + "Anotado 100 baldes") is still on its way.
+ */
+async function newerCustomerMessageAfterPause(db: AdminClient, conversationId: string, metaMessageId: string): Promise<boolean> {
+  if (await newerCustomerMessage(db, conversationId, metaMessageId)) return true;
+  await new Promise((resolve) => setTimeout(resolve, 2_500));
+  return newerCustomerMessage(db, conversationId, metaMessageId);
 }
 
 /** "¿Tienen de estas bases?", "este tipo de malla": the photo usually comes next (Nov 11). */
@@ -5989,6 +6128,10 @@ async function captureTextIntoVar(
     captured_key: args.var_key,
     captured_length: captured.length,
   });
+  // "200 sacos de cemento" (Nov 12: answered 6 hours later): a big sale
+  // tells the team now, not after the customer registers and confirms.
+  const big = args.append ? bigQuantityLine(captured) : null;
+  if (big) await alertTeamOfTrouble(db, run, "big_order", big);
   return args.next_node_key;
 }
 
@@ -6322,6 +6465,25 @@ async function handleReplyForActiveRun(
     return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
   }
 
+  // "A domicilio, pero fuera de Cuenca" (Nov 12): where to deliver goes
+  // on the order (the team quotes the freight), never on the list.
+  const destination = message.kind === "text" && capturesOrderList && !run.vars.__pending_clarification &&
+      !looksLikeQuestion(message.text)
+    ? deliveryDestination(message.text)
+    : null;
+  if (destination) {
+    await saveVars(db, run, { ...run.vars, delivery_note: destination.note });
+    const listed = runHoldsList(run);
+    await sendEngineText(
+      db,
+      run,
+      currentNode.node_key,
+      `🚚 Anotado: entrega ${destination.note}.${destination.outside ? " El costo del envío se lo confirma un asesor 🙂" : ""}\n\n${listed ? "¿Algo más para su lista? Escríbalo, o toque *Ya terminé*." : "¿Qué productos necesita? Escríbamelos 🙂"}`,
+      "delivery_noted",
+    );
+    return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+  }
+
   // "¿Tienen canastas navideñas?": the campaign's own answer (Settings →
   // My business → Seasonal replies). "2 canastas" still goes on the list.
   if (message.kind === "text" && !run.vars.__pending_line_edit && run.conversation_id) {
@@ -6393,13 +6555,19 @@ async function handleReplyForActiveRun(
       ? ((currentNode.config as { buttons?: { reply_id: string; title: string; check_duplicates_var?: string }[] }).buttons ?? [])
           .find((b) => !!b.check_duplicates_var && b.reply_id === "ok")
       : undefined;
-    if (isPriceQuestion(message.text) && confirmButton) {
+    // "Solo necesito una cotización" (Nov 12) is the same — it used to
+    // reach the list editor, which turned 200 sacks into 1.
+    const quoteOnly = isQuoteOnly(message.text);
+    if ((isPriceQuestion(message.text) || quoteOnly) && confirmButton) {
+      if (quoteOnly) await saveVars(db, run, { ...run.vars, __quote_only: true });
       await sendEngineText(
         db,
         run,
         currentNode.node_key,
-        "💲 Con gusto: le envío su pedido a nuestro equipo para que le confirme disponibilidad y precio 🙂",
-        "price_sends_order",
+        quoteOnly
+          ? "💲 Con gusto: le envío su lista a nuestro equipo para que le prepare la cotización; le escribe por aquí 🙂"
+          : "💲 Con gusto: le envío su pedido a nuestro equipo para que le confirme disponibilidad y precio 🙂",
+        quoteOnly ? "quote_sends_order" : "price_sends_order",
       );
       return handleReplyForActiveRun(
         db,
@@ -6409,6 +6577,25 @@ async function handleReplyForActiveRun(
       );
     }
     if (isPriceQuestion(message.text)) {
+      // "Las 100 unidades, ¿qué valor tendrían?" (Nov 12): the quantity
+      // goes on the line just written, then a person quotes.
+      const qty = normalizeForMatch(message.text).match(/^(?:las |los |son |para |de )?(\d+)\s*(?:unidades|uds|und|u)?\b/)?.[1];
+      const listKey = (currentCollectCfg?.append ? currentCollectCfg : currentTextFallback)?.var_key;
+      const listNow = listKey && typeof run.vars[listKey] === "string" ? (run.vars[listKey] as string).trim() : "";
+      // Or the product just offered ("¿Cuántos baldes necesita?" → "las 100, ¿qué valor tendrían?").
+      if (qty && listKey && !listNow && offered && capturesOrderList) {
+        const line = `${qty} ${offered}`;
+        await saveVars(db, run, { ...run.vars, [listKey]: line, [`${listKey}_numbered`]: numberLines(line), [`${listKey}_last`]: line });
+        await sendEngineText(db, run, currentNode.node_key, `Anotado ✅ ${line}`, "offered_with_price_question");
+        if (bigQuantityLine(line)) await alertTeamOfTrouble(db, run, "big_order", line);
+      }
+      if (qty && listKey && listNow) {
+        const lines = listNow.split("\n");
+        lines[lines.length - 1] = withQuantity(lines[lines.length - 1], qty);
+        const list = lines.join("\n");
+        await saveVars(db, run, { ...run.vars, [listKey]: list, [`${listKey}_numbered`]: numberLines(list), [`${listKey}_last`]: lines.at(-1) });
+        if (bigQuantityLine(lines[lines.length - 1])) await alertTeamOfTrouble(db, run, "big_order", lines[lines.length - 1]);
+      }
       await alertTeamOfTrouble(db, run, "price_request", message.text);
       await sendCatalogButton(
         db,
@@ -6461,6 +6648,7 @@ async function handleReplyForActiveRun(
     !run.vars.__pending_list_answer &&
     !run.vars.__pending_disambiguation &&
     !isShowMeRequest(message.text) &&
+    !(isPhotoOfProductRequest(message.text) && (runHoldsList(run) || typeof run.vars.__offered_product === "string")) &&
     looksLikeQuestion(message.text)
   ) {
     const flow = await loadFlow(db, run.flow_id);
@@ -6470,15 +6658,21 @@ async function handleReplyForActiveRun(
     if (
       answer &&
       run.conversation_id &&
-      ((await newerCustomerMessage(db, run.conversation_id, message.meta_message_id)) ||
+      ((await newerCustomerMessageAfterPause(db, run.conversation_id, message.meta_message_id)) ||
         (await waitForPointedPhoto(db, run.conversation_id, message.meta_message_id, message.text)))
     ) {
       return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
     }
     if (answer) {
-      if (answer.product) await saveVars(db, run, { ...run.vars, __offered_product: answer.product });
       await sendEngineText(db, run, currentNode.node_key, answer.reply, "question_answered");
-      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+      // "Le anoto el pedido: 200 sacos de cemento Holcim" (Nov 12, Sharon):
+      // said, so done — the line goes on the list now.
+      if (answer.product && capturesOrderList && claimsWrittenDown(answer.reply)) {
+        message = linesAsOrder([offeredLine(message.text, answer.product)], message.meta_message_id);
+      } else {
+        if (answer.product) await saveVars(db, run, { ...run.vars, __offered_product: answer.product });
+        return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+      }
     }
   }
 
@@ -6512,6 +6706,25 @@ async function handleReplyForActiveRun(
     // A supplier or a sponsorship request: point them to the right contact.
     if (isVendorPitch(message.text)) {
       await sendEngineText(db, run, currentNode.node_key, bizForRules.texts.vendorReply, "vendor_pitch");
+      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
+    // "¿Me puede enviar una foto del modelo que dispone?" about a product
+    // already in the conversation (Nov 12, borlas): a person sends it —
+    // the bot can't, and the web may not have it.
+    if (
+      isPhotoOfProductRequest(message.text) &&
+      (runHoldsList(run) || typeof run.vars.__offered_product === "string") &&
+      run.contact_id &&
+      run.conversation_id
+    ) {
+      await alertTeamOfTrouble(db, run, "photo_request", message.text);
+      await sendEngineText(
+        db,
+        run,
+        currentNode.node_key,
+        "📷 Con gusto 🙂 Le pido a una persona de nuestro equipo que le envíe fotos de los modelos que tenemos; le escribe por aquí en breve.",
+        "photo_request_alerted",
+      );
       return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
     }
     // "Muéstreme los que tiene": the catalog with photos, and a person if they prefer.
@@ -6606,6 +6819,19 @@ async function handleReplyForActiveRun(
         await saveVars(db, run, { ...run.vars, __ack_after_alert_at: new Date().toISOString() });
         await sendEngineText(db, run, currentNode.node_key, "Con gusto 🙂 Una persona de nuestro equipo le escribe por aquí en breve.", "ack_after_alert");
       }
+      return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+    }
+    // "Es solo una cotización" while writing the list: said on the order
+    // (the card shows it), not a product.
+    if (current && !/\d/.test(message.text) && isQuoteOnly(message.text)) {
+      await saveVars(db, run, { ...run.vars, __quote_only: true });
+      await sendEngineText(
+        db,
+        run,
+        currentNode.node_key,
+        "💲 Entendido: se la paso como *cotización* 🙂\n\n¿Algo más para su lista? Escríbalo, o toque *Ya terminé*.",
+        "quote_only_noted",
+      );
       return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
     }
     // "Gracias" with nothing on the list is a goodbye, not "next product".

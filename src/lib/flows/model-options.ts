@@ -93,7 +93,7 @@ export async function modelOptionsNote(
   try {
     const found = await Promise.all(wanted.map((x) => modelNames(db, accountId, x.search)));
     const blocks = wanted
-      .map((x, i) => ({ line: x.line, search: x.search, names: found[i] }))
+      .map((x, i) => ({ line: x.line, search: x.search, names: matchingAsked(x.line, found[i]) }))
       .filter((x) => x.names.length > 0);
     if (blocks.length === 0) return { note: "", shown: [] };
     const body =
@@ -114,4 +114,33 @@ export async function modelOptionsNote(
 function productOf(line: string): string {
   const name = line.replace(/^\s*\d+([.,]\d+)?\s*/, "").replace(/\s*\(.*?\)\s*/g, " ").trim();
   return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+const COLORS = [
+  "blanco", "negro", "rojo", "azul", "verde", "amarillo", "gris", "cafe", "marron", "naranja", "rosado",
+  "morado", "plateado", "dorado", "transparente", "beige", "celeste", "crema",
+];
+
+/** "blancos" / "blanca" → "blanco". */
+function colorOf(word: string): string | null {
+  const w = word.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  return COLORS.find((c) => w === c || w === `${c}s` || w === `${c.slice(0, -1)}a` || w === `${c.slice(0, -1)}as`) ?? null;
+}
+
+/**
+ * Only the models that fit what was asked (Nov 12: "baldes 5 galones
+ * blancos" listed a yellow bucket and a 2-gallon one): the same size
+ * number, and no other color than the one asked for.
+ */
+export function matchingAsked(line: string, names: string[]): string[] {
+  const words = productOf(line).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const sizes = words.filter((w) => /^\d+$/.test(w)).map((w) => String(Number(w)));
+  const colors = words.map(colorOf).filter((c): c is string => !!c);
+  return names.filter((name) => {
+    const nameWords = name.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+    if (sizes.length && !nameWords.some((w) => /^\d+$/.test(w) && sizes.includes(String(Number(w))))) return false;
+    const nameColors = nameWords.map(colorOf).filter(Boolean);
+    if (colors.length && nameColors.length && !nameColors.some((c) => colors.includes(c!))) return false;
+    return true;
+  });
 }

@@ -103,6 +103,8 @@ export function parseReview(raw: string): ReviewVerdict | null {
 
 const REVIEW_TASK = `Eres un revisor de calidad de la atención por WhatsApp de esta tienda. Lees una conversación ya terminada entre un CLIENTE, el BOT automático y, a veces, un ASESOR (persona del equipo).
 Encuentra lo que salió MAL para el cliente: una pregunta que no se respondió o se respondió mal, un producto que se perdió, se cambió o se anotó sin pedirlo, una pregunta o un saludo anotado como producto, respuestas repetidas o sin sentido, el cliente confundido o atascado en un paso, pidió hablar con una persona y no se le atendió, esperó mucho a un asesor, se fue sin comprar por culpa de la atención, el bot dio precios o datos inventados.
+Al final viene "DATOS DEL SISTEMA": los avisos que recibió el equipo en esta sesión. Si el BOT prometió que un asesor o una persona le escribe ("un asesor le confirma…", "le anotamos…") y NO hubo ningún aviso al equipo ni escribió un ASESOR, es un problema de gravedad alta: el pedido o la consulta nunca llegó al equipo.
+No digas que la tienda no vende algo salvo que la información del negocio lo diga: es un supermercado de barrio y también vende alimentos frescos (carnes, pollo, embutidos, pan, frutas).
 No cuentes como problema lo que salió bien ni detalles sin importancia. Si todo salió bien, "problemas" va vacío y el veredicto es "bien".
 "resumen": una frase de qué quería el cliente y cómo terminó.
 Responde SOLO con JSON: {"veredicto":"bien"|"regular"|"mal","resumen":"...","problemas":[{"gravedad":"alta"|"media"|"baja","mensaje_cliente":"el mensaje del cliente donde falló","que_paso":"...","sugerencia":"cómo debería haber respondido"}]} (máximo 5 problemas).`;
@@ -115,6 +117,8 @@ export async function reviewSession(
   accountId: string,
   conversationId: string,
   messages: ReviewMessage[],
+  /** What the system did that the transcript doesn't show (alerts to the team). */
+  systemFacts = "",
 ): Promise<ReviewVerdict | null> {
   let config;
   try {
@@ -135,7 +139,7 @@ export async function reviewSession(
     apiKey: config.apiKey,
     model: config.model,
     systemPrompt: system,
-    messages: [{ role: "user" as const, content: transcript(messages) }],
+    messages: [{ role: "user" as const, content: `${transcript(messages)}${systemFacts ? `\n\nDATOS DEL SISTEMA:\n${systemFacts}` : ""}` }],
     timeoutMs: REVIEW_TIMEOUT_MS,
   };
   try {
@@ -217,7 +221,18 @@ export async function reviewDueConversations(
       break;
     }
     if (done) continue;
-    const verdict = await reviewSession(db, accountId, c.id, session);
+    // Nov 12: a request the bot said it "noted" never reached anyone, and
+    // the review called it fine — it now sees which alerts went out.
+    const { data: alerts } = await db
+      .from("notifications")
+      .select("title")
+      .eq("conversation_id", c.id)
+      .gte("created_at", sessionStart)
+      .limit(200);
+    const titles = [...new Set(((alerts ?? []) as { title: string }[]).map((a) => a.title.replace(/:.*$/, "").trim()))]
+      .filter((t) => !/^💬 Cliente escribiendo|^🧪/u.test(t));
+    const facts = `Avisos al equipo: ${titles.length ? titles.join(" · ") : "NINGUNO"}`;
+    const verdict = await reviewSession(db, accountId, c.id, session, facts);
     if (!verdict) break; // AI unavailable: try again next time
     reviewed++;
     const { error } = await db.from("conversation_reviews").insert({

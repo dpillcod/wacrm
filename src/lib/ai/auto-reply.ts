@@ -29,6 +29,27 @@ const HANDOFF_ACK_MESSAGE = 'Un momento por favor, en breve un encargado le va a
 
 /** How long after a team member's message the AI stays out of the conversation. */
 const HUMAN_RECENT_MS = 4 * 3_600_000
+/** How long to wait for a follow-up message before sending an answer. */
+const NEWER_MESSAGE_WAIT_MS = 2_500
+
+/** The customer's latest message in this conversation (its WhatsApp id). */
+async function latestCustomerMessageId(
+  db: ReturnType<typeof supabaseAdmin>,
+  conversationId: string,
+): Promise<string | null> {
+  try {
+    const { data } = await db
+      .from('messages')
+      .select('id')
+      .eq('conversation_id', conversationId)
+      .eq('sender_type', 'customer')
+      .order('created_at', { ascending: false })
+      .limit(1)
+    return ((data as { id: string }[] | null) ?? [])[0]?.id ?? null
+  } catch {
+    return null // best-effort: without it, the reply just goes out
+  }
+}
 
 /**
  * Hand a conversation off to a human: pause the bot (sticky until
@@ -195,6 +216,7 @@ export async function dispatchInboundToAiReply(
       return
     }
 
+    const answering = await latestCustomerMessageId(db, conversationId)
     const messages = await buildConversationContext(db, conversationId)
     if (messages.length === 0) {
       console.log('[ai auto-reply] skipped: buildConversationContext returned no messages')
@@ -308,6 +330,16 @@ export async function dispatchInboundToAiReply(
     )
     if (crossSell) {
       text = `${text}\n\n${crossSell}`
+    }
+
+    // "Como está" + "Me ayuda con una compra" a few seconds apart (Nov 12):
+    // the newer message gets the answer, with this one in its context —
+    // not two greetings in a row. A message lands in the inbox a second
+    // or two after WhatsApp sends it, hence the short wait.
+    if (answering) await new Promise((resolve) => setTimeout(resolve, NEWER_MESSAGE_WAIT_MS))
+    if (answering && (await latestCustomerMessageId(db, conversationId)) !== answering) {
+      console.log('[ai auto-reply] skipped: the customer wrote again; that message gets the reply')
+      return
     }
 
     // Atomically claim a reply slot: the cap check + increment happen in

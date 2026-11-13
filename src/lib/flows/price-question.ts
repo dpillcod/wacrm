@@ -72,6 +72,11 @@ const PRICE_QUESTION_PHRASES = [
   'cual seria el valor',
   'que valor tiene',
   'que valor tienen',
+  // "Las 100 unidades, ¿qué valor tendrían?" (Nov 12)
+  'que valor tendria',
+  'que valor tendrian',
+  'que valor seria',
+  'que valor serian',
   'saber precio',
   'saber el precio',
   'saber precios',
