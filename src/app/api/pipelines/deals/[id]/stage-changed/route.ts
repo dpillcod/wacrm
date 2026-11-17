@@ -5,6 +5,8 @@ import { engineSendInteractiveButtons, engineSendText } from '@/lib/flows/meta-s
 import { customerWindowOpen } from '@/lib/pipelines/order-cards'
 import { loadBusinessSettings } from '@/lib/business/settings'
 import { syncDealCalendar } from '@/lib/calendar/appointments'
+import { reportPurchase } from '@/lib/marketing/meta-conversions'
+import { markDelivered } from '@/lib/pipelines/review-request'
 import {
   CSAT_OPTIONS,
   csatReplyId,
@@ -71,6 +73,13 @@ export async function POST(
   const text = isOrders
     ? stageMessage(kind as ReturnType<typeof orderStageKind>, ref, biz)
     : serviceStageMessage(kind as ReturnType<typeof serviceStageKind>, ref, biz)
+  // A delivered order is a sale: tell Meta (Conversions API, when it's
+  // on in Mi negocio) so ads find people who buy. Once per card.
+  if (isOrders && kind === 'delivered') {
+    // …and, a couple of hours later, the Google review request (cron).
+    await markDelivered(db, deal.id)
+    await reportPurchase(db, deal.id).catch((err) => console.error('[stage-changed] conversion failed:', err))
+  }
   // Delivered order / finished service: thanks + satisfaction survey.
   const sendSurvey = isOrders ? kind === 'delivered' : kind === 'done'
   if (!text) return NextResponse.json({ sent: false, reason: 'no_message' })

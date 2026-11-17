@@ -665,6 +665,41 @@
       "lostThisMonth": "Perdidos este mes",
       "lostThisMonthTooltip": "Tarjetas marcadas como perdidas desde el primer día del mes.",
       "howCalculated": "Cómo se calcula {label}"
+    },
+    "quote": {
+      "open": "💲 Cotización en PDF",
+      "title": "Cotización",
+      "loading": "Cargando…",
+      "loadFailed": "No se pudo cargar la cotización",
+      "hint": "Escriba el precio de cada producto (con IVA). Se envía al cliente como PDF con los botones Acepto / Cambiar algo.",
+      "qty": "Cant.",
+      "description": "Descripción",
+      "unitPrice": "P. unit.",
+      "remove": "Quitar",
+      "addRow": "Agregar producto",
+      "delivery": "Envío ($)",
+      "validDays": "Válida (días)",
+      "customerName": "Cliente",
+      "customerId": "Cédula / RUC",
+      "notes": "Observaciones",
+      "notesPlaceholder": "Ej.: entrega en 2 días, precio por volumen…",
+      "total": "Total",
+      "viewPdf": "Ver PDF",
+      "save": "Guardar",
+      "send": "Enviar por WhatsApp",
+      "saved": "Cotización guardada (el valor de la tarjeta es el total)",
+      "sent": "Cotización enviada al cliente",
+      "windowClosed": "El cliente no escribió en las últimas 24 h: WhatsApp no deja enviarla gratis. Descargue el PDF y llámelo.",
+      "missingPrices": "Faltan precios en algunos productos.",
+      "noConversation": "Esta tarjeta no tiene conversación de WhatsApp.",
+      "sendFailed": "No se pudo enviar la cotización",
+      "noItems": "Agregue al menos un producto",
+      "status": {
+        "sent": "Enviada",
+        "accepted": "✅ Aceptada",
+        "change_requested": "✏️ Pidió cambios",
+        "draft": "Borrador"
+      }
     }
   },
   "Broadcasts": {
@@ -1941,7 +1976,6 @@
         },
         "csatQuestion": "Pregunta de la encuesta",
         "csatExcellent": "Respuesta a \"Excelente\"",
-        "csatExcellentHint": "La palabra resena entre llaves se cambia por el enlace de reseñas de Google.",
         "csatGood": "Respuesta a \"Bien\"",
         "csatBad": "Respuesta a \"Mal\"",
         "statusTitle": "Respuestas a \"¿Dónde está mi pedido?\"",
@@ -1953,11 +1987,49 @@
           "delivered": "El pedido fue entregado",
           "cancelled": "El pedido fue cancelado",
           "none": "No hay pedido reciente"
-        }
+        },
+        "reviewRequest": "Pedido de reseña de Google",
+        "reviewRequestHint": "Se envía a TODOS los clientes con pedido entregado (Google prohíbe pedirla solo a los contentos), una vez cada 90 días y solo si escribieron en las últimas 24 h. {resena} = enlace de reseñas, {negocio} = nombre.",
+        "reviewDelayHours": "Horas después de \"Entregado\"",
+        "reviewDelayHoursHint": "0 = no se pide la reseña."
       },
       "templates": {
         "allow": "Permitir plantillas (con costo)",
         "allowHint": "Las plantillas son los únicos mensajes que Meta cobra (escribir a quien no habló en 24 h, difusiones, publicidad). Apagado = nadie puede enviarlas desde el Inbox, difusiones, flujos ni automatizaciones. Las respuestas a clientes siguen siendo gratis."
+      },
+      "escalation": {
+        "title": "Escalar si nadie responde",
+        "desc": "Si después del segundo aviso nadie le escribe al cliente, se avisa a todo el equipo en el CRM y a estas personas por WhatsApp.",
+        "minutes": "Minutos desde el primer aviso",
+        "minutesHint": "0 = apagado. Cuenta también los pedidos nuevos sin atender.",
+        "phones": "Por WhatsApp a (uno por línea)",
+        "phonesHint": "Ej.: \"Diego 0981414182\". Solo reciben si escribieron al bot en las últimas 24 h (turno). Vacío = el personal de turno."
+      },
+      "quote": {
+        "title": "Cotizaciones en PDF",
+        "desc": "Datos que salen en la cotización que el personal envía desde la tarjeta del pedido.",
+        "legalName": "Razón social",
+        "taxId": "RUC",
+        "address": "Dirección",
+        "phone": "Teléfono",
+        "phoneHint": "Vacío = la línea directa.",
+        "email": "Correo",
+        "validDays": "Validez por defecto (días)",
+        "footer": "Nota al pie del PDF",
+        "message": "Mensaje con la cotización",
+        "messageHint": "{cotizacion} = C-0037, {total}, {validez} = fecha.",
+        "acceptedReply": "Respuesta a \"Acepto\"",
+        "changeReply": "Respuesta a \"Cambiar algo\""
+      },
+      "conversions": {
+        "title": "Ventas a Meta (anuncios)",
+        "desc": "Cuando un pedido pasa a \"Entregado\", se le avisa a Meta la venta y su valor para que los anuncios lleguen a gente que compra.",
+        "enabled": "Avisar a Meta las ventas",
+        "enabledHint": "Necesita el permiso whatsapp_business_manage_events en el token de WhatsApp. Gratis.",
+        "pageId": "ID de la página de Facebook (opcional)",
+        "pageIdHint": "Con él Meta reconoce también a clientes que no tocaron un anuncio.",
+        "datasetId": "Dataset de Meta",
+        "datasetIdHint": "Se completa solo la primera vez."
       }
     },
     "deals": {

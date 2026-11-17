@@ -168,10 +168,10 @@ export function parseCsatReplyId(replyId: string): { key: CsatKey; dealId: strin
 export function csatThanks(key: CsatKey, biz: BusinessSettings): string {
   const b = biz.orderBoard
   if (key === 'mal') return b.csatBad
-  // Happy customers are the ones worth asking for a public review — only
-  // when the business has set its review link.
-  if (key === 'excelente' && biz.googleReviewUrl) {
-    return renderText(b.csatExcellent, { resena: biz.googleReviewUrl })
-  }
+  // Never the review link here: sending it only to happy customers is
+  // "review gating", which Google forbids. Everyone gets the same review
+  // request later (lib/pipelines/review-request.ts). An older text that
+  // still carries {resena} falls back to the plain thanks.
+  if (key === 'excelente' && !b.csatExcellent.includes('{resena}')) return renderText(b.csatExcellent, {})
   return b.csatGood
 }

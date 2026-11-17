@@ -46,15 +46,17 @@ describe('csat reply ids', () => {
 })
 
 describe('csatThanks', () => {
-  it('asks only delighted customers for a Google review', () => {
+  // Google forbids "review gating": the survey's thanks never carry the
+  // review link — every customer gets the same request later (review-request.ts).
+  it('never puts the review link in the thanks, whatever the rating', () => {
     const url = DEMO_STORE.googleReviewUrl
-    expect(csatThanks('excelente', DEMO_STORE)).toContain(url)
-    expect(csatThanks('bien', DEMO_STORE)).not.toContain(url)
-    expect(csatThanks('mal', DEMO_STORE)).not.toContain(url)
+    for (const key of ['excelente', 'bien', 'mal'] as const) {
+      expect(csatThanks(key, DEMO_STORE)).not.toContain(url)
+    }
   })
 
-  it('skips the review ask when the business has no review link', () => {
-    expect(csatThanks('excelente', DEFAULT_BUSINESS_SETTINGS)).toBe(DEFAULT_BUSINESS_SETTINGS.orderBoard.csatGood)
+  it('thanks a delighted customer with its own text', () => {
+    expect(csatThanks('excelente', DEFAULT_BUSINESS_SETTINGS)).toBe(DEFAULT_BUSINESS_SETTINGS.orderBoard.csatExcellent)
   })
 })
 

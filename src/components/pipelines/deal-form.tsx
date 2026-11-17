@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
+import { QuoteEditor } from "./quote-editor";
 
 interface DealFormProps {
   open: boolean;
@@ -417,6 +418,19 @@ export function DealForm({
                 className="min-h-[100px] border-border bg-muted text-foreground"
               />
             </div>
+
+            {deal && (
+              <QuoteEditor
+                dealId={deal.id}
+                onTotal={(total) => setValue(String(total))}
+                onSent={() => {
+                  // The server changed the card (value, notes, column): close
+                  // without saving this form over it.
+                  onOpenChange(false);
+                  onSaved();
+                }}
+              />
+            )}
 
             {deal && (
               <div className="space-y-2 rounded-lg border border-border bg-muted/50 p-3">

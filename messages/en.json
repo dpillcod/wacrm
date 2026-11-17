@@ -665,6 +665,41 @@
       "lostThisMonth": "Lost This Month",
       "lostThisMonthTooltip": "Deals marked as Lost since the first day of the current month.",
       "howCalculated": "How {label} is calculated"
+    },
+    "quote": {
+      "open": "💲 PDF quote",
+      "title": "Quote",
+      "loading": "Loading…",
+      "loadFailed": "Could not load the quote",
+      "hint": "Write each product's price (tax included). It goes to the customer as a PDF with Accept / Change buttons.",
+      "qty": "Qty",
+      "description": "Description",
+      "unitPrice": "Unit price",
+      "remove": "Remove",
+      "addRow": "Add product",
+      "delivery": "Delivery ($)",
+      "validDays": "Valid (days)",
+      "customerName": "Customer",
+      "customerId": "ID / tax number",
+      "notes": "Notes",
+      "notesPlaceholder": "E.g. delivery in 2 days, volume price…",
+      "total": "Total",
+      "viewPdf": "View PDF",
+      "save": "Save",
+      "send": "Send on WhatsApp",
+      "saved": "Quote saved (the card's value is the total)",
+      "sent": "Quote sent to the customer",
+      "windowClosed": "The customer hasn't written in 24 h: WhatsApp won't send it for free. Download the PDF and call them.",
+      "missingPrices": "Some products have no price.",
+      "noConversation": "This card has no WhatsApp conversation.",
+      "sendFailed": "Could not send the quote",
+      "noItems": "Add at least one product",
+      "status": {
+        "sent": "Sent",
+        "accepted": "✅ Accepted",
+        "change_requested": "✏️ Changes requested",
+        "draft": "Draft"
+      }
     }
   },
   "Broadcasts": {
@@ -1941,7 +1976,6 @@
         },
         "csatQuestion": "Survey question",
         "csatExcellent": "Reply to \"Excellent\"",
-        "csatExcellentHint": "The word resena in curly braces becomes the Google review link.",
         "csatGood": "Reply to \"Good\"",
         "csatBad": "Reply to \"Bad\"",
         "statusTitle": "\"Where is my order?\" answers",
@@ -1953,11 +1987,49 @@
           "delivered": "Order was delivered",
           "cancelled": "Order was cancelled",
           "none": "No recent order"
-        }
+        },
+        "reviewRequest": "Google review request",
+        "reviewRequestHint": "Sent to EVERY customer with a delivered order (Google forbids asking only happy ones), once every 90 days and only if they wrote in the last 24 h. {resena} = review link, {negocio} = name.",
+        "reviewDelayHours": "Hours after \"Delivered\"",
+        "reviewDelayHoursHint": "0 = no review request."
       },
       "templates": {
         "allow": "Allow message templates (paid)",
         "allowHint": "Templates are the only messages Meta charges for (writing to someone silent for 24 h, broadcasts, marketing). Off = nobody can send them from the Inbox, broadcasts, flows or automations. Replies to customers stay free."
+      },
+      "escalation": {
+        "title": "Escalate when nobody answers",
+        "desc": "If nobody writes to the customer after the second alert, the whole team is told in the CRM and these people on WhatsApp.",
+        "minutes": "Minutes after the first alert",
+        "minutesHint": "0 = off. New unattended orders count too.",
+        "phones": "On WhatsApp to (one per line)",
+        "phonesHint": "E.g. \"Diego 0981414182\". Only while they wrote to the bot in the last 24 h. Empty = staff on shift."
+      },
+      "quote": {
+        "title": "PDF quotes",
+        "desc": "Details printed on the quote staff send from an order card.",
+        "legalName": "Legal name",
+        "taxId": "Tax id",
+        "address": "Address",
+        "phone": "Phone",
+        "phoneHint": "Empty = the direct line.",
+        "email": "Email",
+        "validDays": "Default validity (days)",
+        "footer": "PDF footer note",
+        "message": "Message with the quote",
+        "messageHint": "{cotizacion} = C-0037, {total}, {validez} = date.",
+        "acceptedReply": "Reply to \"Accept\"",
+        "changeReply": "Reply to \"Change something\""
+      },
+      "conversions": {
+        "title": "Sales to Meta (ads)",
+        "desc": "When an order reaches \"Delivered\", Meta is told the sale and its value so ads reach people who buy.",
+        "enabled": "Report sales to Meta",
+        "enabledHint": "Needs the whatsapp_business_manage_events permission on the WhatsApp token. Free.",
+        "pageId": "Facebook page id (optional)",
+        "pageIdHint": "Lets Meta match customers who didn't tap an ad.",
+        "datasetId": "Meta dataset",
+        "datasetIdHint": "Filled in automatically the first time."
       }
     },
     "deals": {

@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { resolveFallbackPolicy } from '@/lib/flows/fallback'
 import { sweepCartReminders } from '@/lib/flows/engine'
 import { sweepUnansweredAlerts } from '@/lib/flows/unanswered-alerts'
+import { sweepReviewRequests } from '@/lib/pipelines/review-request'
 import { sweepStaffShifts } from '@/lib/whatsapp/staff-notify'
 import { localPhone } from '@/lib/whatsapp/phone-utils'
 import { loadBusinessSettings } from '@/lib/business/settings'
@@ -75,6 +76,12 @@ export async function GET(request: Request) {
     return 0
   })
 
+  // Delivered orders: the Google review request, to every customer alike.
+  const reviewRequests = await sweepReviewRequests(admin).catch((err) => {
+    console.error('[flows/cron] review requests failed:', err)
+    return 0
+  })
+
   // Pull all currently-active runs along with their parent flow's
   // fallback_policy. Joined in one query — the small set of active
   // runs per tenant keeps this cheap.
@@ -89,7 +96,7 @@ export async function GET(request: Request) {
     console.error('[flows-cron] active-run scan failed:', error.message)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
-  if (!runs?.length) return NextResponse.json({ swept: 0, cartReminders, staffShifts, unanswered })
+  if (!runs?.length) return NextResponse.json({ swept: 0, cartReminders, staffShifts, unanswered, reviewRequests })
 
   type Row = {
     id: string
@@ -135,7 +142,7 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.json({ swept, cartReminders, staffShifts, unanswered })
+  return NextResponse.json({ swept, cartReminders, staffShifts, unanswered, reviewRequests })
 }
 
 async function sweepAllStaffShifts(admin: ReturnType<typeof supabaseAdmin>) {

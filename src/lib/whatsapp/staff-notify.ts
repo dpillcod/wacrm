@@ -278,10 +278,14 @@ export async function notifyStaffOfHandoff(
     summary: string
     /** The conversation, for an "open in the CRM" link in the text alert. */
     conversationId?: string | null
+    /** Other people instead of the staff list (same line format, e.g. the escalation list). */
+    recipients?: string[]
   },
 ): Promise<NotifyStaffResult> {
   const biz = await loadBusinessSettings(db, args.accountId)
-  const phones = getStaffPhones(biz)
+  const phones = args.recipients
+    ? [...new Set(args.recipients.map((l) => parseStaffLine(l.trim(), biz.phoneCountryCode)?.phone).filter((p): p is string => !!p))]
+    : getStaffPhones(biz)
   if (phones.length === 0) return { sent: [], failed: [], skipped: [] }
   const asTemplate = process.env.ORDER_NOTIFICATION_MODE === 'template' && biz.allowPaidTemplates
 

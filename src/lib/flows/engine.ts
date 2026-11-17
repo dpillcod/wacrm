@@ -59,6 +59,7 @@ import {
   type NotifyStaffResult,
 } from "../whatsapp/staff-notify";
 import { localPhone, toInternational } from "../whatsapp/phone-utils";
+import { handleQuoteReply } from "../pipelines/quote-reply";
 import { customerWindowOpen, findOrderPipeline, notifyAccountInApp, upsertOrderCard } from "../pipelines/order-cards";
 import {
   csatThanks,
@@ -3509,6 +3510,7 @@ async function dispatchInboundToFlowsInner(
       if (followUpResult) return followUpResult;
       const csatResult = await handleCsatReply(db, input, input.message.reply_id);
       if (csatResult) return csatResult;
+      if (await handleQuoteReply(db, input, input.message.reply_id)) return { consumed: true, outcome: "no_match" };
       const closingResult = await handleClosingReply(db, input, input.message.reply_id);
       if (closingResult) return closingResult;
       const nudgeResult = await handleNudgeReply(db, input, input.message.reply_id);

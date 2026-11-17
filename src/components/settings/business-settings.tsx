@@ -43,6 +43,7 @@ interface Draft {
   crossSell: string;
   seasonalReplies: string;
   menuPromos: string;
+  escalationPhones: string;
 }
 
 const DAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
@@ -125,6 +126,7 @@ function toDraft(settings: BusinessSettings): Draft {
     crossSell: settings.crossSell.map((r) => `${r.keyword} = ${r.suggestion}`).join("\n"),
     seasonalReplies: seasonalRepliesToText(settings.seasonalReplies),
     menuPromos: menuPromosToText(settings.menuPromos),
+    escalationPhones: settings.escalation.phones.join("\n"),
   };
 }
 
@@ -143,6 +145,7 @@ function fromDraft(d: Draft): BusinessSettings {
     crossSell,
     seasonalReplies: seasonalRepliesFromText(d.seasonalReplies),
     menuPromos: menuPromosFromText(d.menuPromos),
+    escalation: { ...d.settings.escalation, phones: lines(d.escalationPhones) },
   };
 }
 
@@ -215,6 +218,9 @@ export function BusinessSettingsPanel() {
   const set = (patch: Partial<BusinessSettings>) => edit({ settings: { ...s, ...patch } });
   const setText = (key: keyof Texts, value: string) => set({ texts: { ...s.texts, [key]: value } });
   const setBoard = (patch: Partial<Board>) => set({ orderBoard: { ...s.orderBoard, ...patch } });
+  const setQuote = (patch: Partial<BusinessSettings["quote"]>) => set({ quote: { ...s.quote, ...patch } });
+  const setConversions = (patch: Partial<BusinessSettings["metaConversions"]>) =>
+    set({ metaConversions: { ...s.metaConversions, ...patch } });
   const setServiceBoard = (patch: Partial<ServiceBoard>) =>
     set({ serviceBoard: { ...s.serviceBoard, ...patch } });
 
@@ -408,6 +414,86 @@ export function BusinessSettingsPanel() {
         </Field>
       </Section>
 
+      <Section title={t("escalation.title")} description={t("escalation.desc")}>
+        <Field label={t("escalation.minutes")} hint={t("escalation.minutesHint")}>
+          <Input
+            type="number"
+            min={0}
+            className="w-32"
+            value={s.escalation.minutes}
+            disabled={readOnly}
+            onChange={(e) => set({ escalation: { ...s.escalation, minutes: Number(e.target.value) || 0 } })}
+          />
+        </Field>
+        <Field label={t("escalation.phones")} hint={t("escalation.phonesHint")}>
+          {area(draft.escalationPhones, (v) => edit({ escalationPhones: v }), 2)}
+        </Field>
+      </Section>
+
+      <Section title={t("quote.title")} description={t("quote.desc")}>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label={t("quote.legalName")}>
+            <Input value={s.quote.legalName} disabled={readOnly} onChange={(e) => setQuote({ legalName: e.target.value })} />
+          </Field>
+          <Field label={t("quote.taxId")}>
+            <Input value={s.quote.taxId} disabled={readOnly} onChange={(e) => setQuote({ taxId: e.target.value })} />
+          </Field>
+          <Field label={t("quote.address")}>
+            <Input value={s.quote.address} disabled={readOnly} onChange={(e) => setQuote({ address: e.target.value })} />
+          </Field>
+          <Field label={t("quote.phone")} hint={t("quote.phoneHint")}>
+            <Input value={s.quote.phone} disabled={readOnly} onChange={(e) => setQuote({ phone: e.target.value })} />
+          </Field>
+          <Field label={t("quote.email")}>
+            <Input value={s.quote.email} disabled={readOnly} onChange={(e) => setQuote({ email: e.target.value })} />
+          </Field>
+          <Field label={t("quote.validDays")}>
+            <Input
+              type="number"
+              min={1}
+              className="w-32"
+              value={s.quote.validDays}
+              disabled={readOnly}
+              onChange={(e) => setQuote({ validDays: Number(e.target.value) || 1 })}
+            />
+          </Field>
+        </div>
+        <Field label={t("quote.footer")}>{area(s.quote.footer, (v) => setQuote({ footer: v }), 2)}</Field>
+        <Field label={t("quote.message")} hint={t("quote.messageHint")}>
+          {area(s.quote.message, (v) => setQuote({ message: v }), 2)}
+        </Field>
+        <Field label={t("quote.acceptedReply")}>{area(s.quote.acceptedReply, (v) => setQuote({ acceptedReply: v }), 2)}</Field>
+        <Field label={t("quote.changeReply")}>{area(s.quote.changeReply, (v) => setQuote({ changeReply: v }), 2)}</Field>
+      </Section>
+
+      <Section title={t("conversions.title")} description={t("conversions.desc")}>
+        <label className="flex items-start gap-2 text-sm text-foreground">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={s.metaConversions.enabled}
+            disabled={readOnly}
+            onChange={(e) => setConversions({ enabled: e.target.checked })}
+          />
+          <span>
+            {t("conversions.enabled")}
+            <span className="block text-xs text-muted-foreground">{t("conversions.enabledHint")}</span>
+          </span>
+        </label>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label={t("conversions.pageId")} hint={t("conversions.pageIdHint")}>
+            <Input
+              value={s.metaConversions.pageId}
+              disabled={readOnly}
+              onChange={(e) => setConversions({ pageId: e.target.value })}
+            />
+          </Field>
+          <Field label={t("conversions.datasetId")} hint={t("conversions.datasetIdHint")}>
+            <Input value={s.metaConversions.datasetId} disabled readOnly />
+          </Field>
+        </div>
+      </Section>
+
       <Section title={t("rules.title")} description={t("rules.desc")}>
         <Field label={t("rules.blockedTerms")} hint={t("rules.blockedTermsHint")}>
           {area(draft.blockedTerms, (v) => edit({ blockedTerms: v }), 3)}
@@ -526,7 +612,7 @@ export function BusinessSettingsPanel() {
         <Field label={t("board.csatQuestion")}>
           {area(s.orderBoard.csatQuestion, (v) => setBoard({ csatQuestion: v }), 2)}
         </Field>
-        <Field label={t("board.csatExcellent")} hint={t("board.csatExcellentHint")}>
+        <Field label={t("board.csatExcellent")}>
           {area(s.orderBoard.csatExcellent, (v) => setBoard({ csatExcellent: v }), 2)}
         </Field>
         <Field label={t("board.csatGood")}>
@@ -534,6 +620,19 @@ export function BusinessSettingsPanel() {
         </Field>
         <Field label={t("board.csatBad")}>
           {area(s.orderBoard.csatBad, (v) => setBoard({ csatBad: v }), 2)}
+        </Field>
+        <Field label={t("board.reviewRequest")} hint={t("board.reviewRequestHint")}>
+          {area(s.orderBoard.reviewRequest, (v) => setBoard({ reviewRequest: v }), 3)}
+        </Field>
+        <Field label={t("board.reviewDelayHours")} hint={t("board.reviewDelayHoursHint")}>
+          <Input
+            type="number"
+            min={0}
+            className="w-32"
+            value={s.orderBoard.reviewDelayHours}
+            disabled={readOnly}
+            onChange={(e) => setBoard({ reviewDelayHours: Number(e.target.value) || 0 })}
+          />
         </Field>
         <p className="pt-2 text-sm font-medium text-foreground">{t("board.statusTitle")}</p>
         {STATUS_KEYS.map((key) => (

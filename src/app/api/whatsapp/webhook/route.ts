@@ -26,6 +26,7 @@ import {
 import type { OrderItem, ParsedInbound } from '@/lib/flows/types'
 import { formatFormReply, parseFormReply } from '@/lib/whatsapp/flow-form'
 import { recordReferralOrigin, tagContact, type MetaReferral } from '@/lib/contacts/origin'
+import { recordAdClick } from '@/lib/marketing/meta-conversions'
 import { adOriginNote, adOriginTag, findAdLink, stripAdCode } from '@/lib/marketing/ad-links'
 import { loadBusinessSettings } from '@/lib/business/settings'
 import { GUEST_WELCOME_TAG, hostWelcomeText, isHostIntro, rememberAdContact, splitWelcome } from '@/lib/marketing/hosts'
@@ -882,6 +883,8 @@ async function processMessage(
       contactId: contactRecord.id,
       referral: message.referral,
     })
+    // The ad's click id, for reporting the sale to Meta later.
+    await recordAdClick(supabaseAdmin(), contactRecord.id, message.referral.ctwa_clid)
   }
 
   // Wrote through an advertising link ("… #TORTAS")? Tag where from and

@@ -219,16 +219,67 @@ export interface BusinessSettings {
     /** Sent when a card reaches that column; {servicio} = "N° S-0003" (may be empty). */
     messages: { scheduled: string; working: string; done: string; cancelled: string }
   }
+  /** Formal quotes (PDF) that staff prepare from an order card and send in the chat. */
+  quote: {
+    /** Seller shown on the PDF (legal name), its tax id (RUC), address, phone and email. */
+    legalName: string
+    taxId: string
+    address: string
+    phone: string
+    email: string
+    /** Days the prices hold. */
+    validDays: number
+    /** Small print at the bottom of the PDF. */
+    footer: string
+    /** Sent with the PDF; {cotizacion} = "C-0037", {total} = "$2.160,00", {validez} = "20/11/2026". */
+    message: string
+    /** "✅ Acepto" on the quote; the team is told. */
+    acceptedReply: string
+    /** "✏️ Cambiar algo" on the quote; the team is told. */
+    changeReply: string
+  }
+  /**
+   * Nobody answered a customer the team was called in for (after the
+   * "⏰ SIN RESPUESTA" second alert): tell the admins and these people.
+   */
+  escalation: {
+    /** Minutes after the first alert (0 = off). */
+    minutes: number
+    /** Who also gets it by WhatsApp (same format as the staff list; only while their 24 h window is open). */
+    phones: string[]
+  }
+  /**
+   * Conversions API: when an order card reaches "Entregado", tell Meta
+   * the sale and its value, so ads are shown to people who buy (not just
+   * people who write). Needs the whatsapp_business_manage_events
+   * permission on the WhatsApp token.
+   */
+  metaConversions: {
+    enabled: boolean
+    /** Facebook page id: lets Meta match customers who didn't come from an ad click (optional). */
+    pageId: string
+    /** Filled in automatically the first time (the WhatsApp account's dataset). */
+    datasetId: string
+  }
   orderBoard: {
     /** The pipeline whose cards are orders. */
     pipelineName: string
     /** Sent when a card reaches that column; {pedido} = "N° 0015" (may be empty). */
     messages: { paid: string; ready: string; delivered: string; cancelled: string }
     csatQuestion: string
-    /** {resena} = googleReviewUrl. */
+    /** Thanks for "Excelente" (no review link: see reviewRequest). */
     csatExcellent: string
     csatGood: string
     csatBad: string
+    /**
+     * The Google review request, sent to EVERY delivered order's customer
+     * (never only to happy ones: Google forbids that) reviewDelayHours
+     * after "Entregado", once per customer every 90 days, only inside the
+     * free 24 h window. {resena} = googleReviewUrl, {negocio} = name.
+     */
+    reviewRequest: string
+    /** Hours after delivery (0 = off). */
+    reviewDelayHours: number
     /** Replies to "¿dónde está mi pedido?" by the order's column. */
     statusReplies: {
       new: string
@@ -349,6 +400,20 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
       cancelled: 'Su servicio {servicio} fue cancelado. Si necesita algo, escríbanos por aquí 🙂',
     },
   },
+  quote: {
+    legalName: '',
+    taxId: '',
+    address: '',
+    phone: '',
+    email: '',
+    validDays: 3,
+    footer: 'Precios incluyen IVA. Sujeto a disponibilidad de stock al momento de confirmar el pedido.',
+    message: '🧾 Aquí tiene su cotización {cotizacion}: total *{total}*, válida hasta el {validez}. ¿Le parece bien?',
+    acceptedReply: '¡Gracias! 🙌 Un asesor le escribe por aquí para coordinar el pago y la entrega.',
+    changeReply: 'Claro 🙂 Escríbame qué desea cambiar y un asesor le actualiza la cotización.',
+  },
+  escalation: { minutes: 25, phones: [] },
+  metaConversions: { enabled: false, pageId: '', datasetId: '' },
   orderBoard: {
     pipelineName: 'Pedidos',
     messages: {
@@ -359,10 +424,13 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
       cancelled: 'Su pedido {pedido} fue cancelado. Si fue un error o necesita algo, escríbanos por aquí 🙂',
     },
     csatQuestion: '¿Cómo le atendimos? Su opinión nos ayuda a mejorar 🙏',
-    csatExcellent: '¡Muchas gracias! 🙂 Si tiene un minuto, nos ayudaría mucho su reseña en Google ⭐\n{resena}',
+    csatExcellent: '¡Muchas gracias! 🙂 Nos alegra mucho haberle atendido bien.',
     csatGood: '¡Muchas gracias por su calificación! 🙂',
     csatBad:
       'Lamentamos que no haya sido una buena experiencia 🙏 Una persona de nuestro equipo le escribirá para saber qué pasó.',
+    reviewRequest:
+      '¡Gracias por su compra en {negocio}! 🙌 Si le gustó el servicio, ¿nos ayuda con su opinión en Google? Le toma un minuto ⭐\n{resena}',
+    reviewDelayHours: 2,
     statusReplies: {
       new: 'Recibimos su pedido {pedido} y nuestro equipo lo está revisando 🙂 En breve le confirmamos el total.',
       quoted: 'Ya le enviamos el total de su pedido {pedido}. Cuando nos confirme el pago, lo preparamos 🙂',
@@ -448,6 +516,17 @@ export function sanitizeSettings(stored: unknown): BusinessSettings {
       freeDeliveryFrom: clampNumber(s.hostProgram.freeDeliveryFrom, 0, 10000),
       validDays: Math.round(clampNumber(s.hostProgram.validDays, 1, 90)),
       welcomeText: s.hostProgram.welcomeText.slice(0, 1000),
+    },
+    orderBoard: { ...s.orderBoard, reviewDelayHours: clampNumber(s.orderBoard.reviewDelayHours, 0, 72) },
+    quote: { ...s.quote, validDays: Math.round(clampNumber(s.quote.validDays, 1, 60)) },
+    escalation: {
+      minutes: Math.round(clampNumber(s.escalation.minutes, 0, 240)),
+      phones: strings(s.escalation.phones, 10),
+    },
+    metaConversions: {
+      enabled: s.metaConversions.enabled,
+      pageId: s.metaConversions.pageId.replace(/\D/g, ''),
+      datasetId: s.metaConversions.datasetId.replace(/\D/g, ''),
     },
     seasonalReplies: sanitizeSeasonalReplies(s.seasonalReplies),
     menuPromos: sanitizeMenuPromos(s.menuPromos),
