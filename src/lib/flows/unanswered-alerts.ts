@@ -22,7 +22,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadBusinessSettings } from "../business/settings";
 import { notifyAccountInApp } from "../pipelines/order-cards";
-import { notifyStaffOfHandoff } from "../whatsapp/staff-notify";
+import { activeClaim, notifyStaffOfHandoff } from "../whatsapp/staff-notify";
 import { localPhone } from "../whatsapp/phone-utils";
 import { isWithinBusinessHours } from "./store-policy";
 
@@ -117,17 +117,34 @@ export async function sweepUnansweredAlerts(db: SupabaseClient, now: Date = new 
 }
 
 /** The WhatsApp escalation: bold and loud, so nobody on the team can miss that it's late. */
-export function escalationText(args: { minutes: number; name: string; phone: string; what: string }): string {
-  return [
+export function escalationText(args: {
+  minutes: number;
+  name: string;
+  phone: string;
+  what: string;
+  /** Someone tapped "Yo lo atiendo" and still hasn't written. */
+  claimedBy?: { who: string; minutes: number } | null;
+}): string {
+  const lines = [
     `🚨🚨🚨 *¡URGENTE! CLIENTE SIN RESPUESTA HACE ${args.minutes} MIN* 🚨🚨🚨`,
     "",
     `🔴 *${args.name}${args.phone ? ` · ${args.phone}` : ""}*`,
     `🔴 *${args.what}*`,
     "",
-    "⚠️ *NADIE DEL EQUIPO LE HA ESCRITO.* ⚠️",
-    "👉 *¡Respóndale YA o avise quién lo atiende!*",
-  ].join("\n");
+  ];
+  if (args.claimedBy) {
+    lines.push(
+      `🙋 *Lo tomó ${args.claimedBy.who} hace ${args.claimedBy.minutes} min, pero todavía no le escribe.* ⚠️`,
+      `👉 *¡Recuérdenle a ${args.claimedBy.who} o atiéndalo otra persona YA!*`,
+    );
+  } else {
+    lines.push("⚠️ *NADIE DEL EQUIPO LE HA ESCRITO.* ⚠️", "👉 *¡Respóndale YA o avise quién lo atiende!*");
+  }
+  return lines.join("\n");
 }
+
+/** A customer just taken gets this long before the escalation names the person who took it. */
+const CLAIM_GRACE_MS = 10 * 60_000;
 
 /** Third step: nobody answered since the first alert → admins and the escalation list. */
 async function sweepEscalations(db: SupabaseClient, rows: AlertRow[], now: Date): Promise<number> {
@@ -153,6 +170,9 @@ async function sweepEscalations(db: SupabaseClient, rows: AlertRow[], now: Date)
     if ((answered ?? []).length > 0) continue;
     const { data: conv } = await db.from("conversations").select("status").eq("id", conversationId).maybeSingle();
     if ((conv as { status?: string } | null)?.status === "closed") continue;
+    const claim = await activeClaim(db, conversationId, now).catch(() => null);
+    const claimAge = claim ? now.getTime() - new Date(claim.at).getTime() : 0;
+    if (claim && claimAge < CLAIM_GRACE_MS) continue;
 
     const { data: contact } = alert.contact_id
       ? await db.from("contacts").select("name, phone").eq("id", alert.contact_id).maybeSingle()
@@ -167,13 +187,20 @@ async function sweepEscalations(db: SupabaseClient, rows: AlertRow[], now: Date)
       conversationId,
       contactId: alert.contact_id,
       title: `${ESCALATION_PREFIX} 🚨 ¡URGENTE! ${minutes} min sin respuesta: ${name}${phone ? ` (${phone})` : ""}`,
-      body: `Nadie le ha escrito en ${minutes} minutos. Primer aviso: ${what}.${alert.body ? `\n${alert.body.slice(0, 300)}` : ""}`,
+      body: `${claim ? `Lo tomó ${claim.who} y todavía no le escribe.` : "Nadie le ha escrito"} (${minutes} minutos). Primer aviso: ${what}.${alert.body ? `\n${alert.body.slice(0, 300)}` : ""}`,
     }).catch(() => null);
     await notifyStaffOfHandoff(db, {
       accountId: alert.account_id,
       contactName: name,
-      summary: escalationText({ minutes, name, phone, what }),
+      summary: escalationText({
+        minutes,
+        name,
+        phone,
+        what,
+        claimedBy: claim ? { who: claim.who, minutes: Math.round(claimAge / 60_000) } : null,
+      }),
       plain: true,
+      ignoreClaim: true,
       conversationId,
       ...(biz.escalation.phones.length ? { recipients: biz.escalation.phones } : {}),
     }).catch(() => null);

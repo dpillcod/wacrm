@@ -246,6 +246,118 @@ export async function sweepStaffShifts(
 /** Reply id of the "✅ Recibido" button on staff alerts — tapping it renews that person's 24h window. */
 export const STAFF_ACK_ID = 'staff_ack'
 const ACK_BUTTON = [{ id: STAFF_ACK_ID, title: '✅ Recibido' }]
+
+// ------------------------------------------------------------
+// "🙋 Yo lo atiendo": an alert about a customer carries that
+// conversation in its button. The first staff member who taps it takes
+// the customer — the others are told who has it — and for the next 3 h
+// the reminders about that customer go only to that person. The
+// escalation still goes to everyone ("lo tomó X y sigue sin
+// respuesta"), so a forgotten customer never stays forgotten.
+// The claim is a CRM notification "🙋 Lo atiende …" (no new table).
+// ------------------------------------------------------------
+
+export const CLAIM_PREFIX = '🙋 Lo atiende'
+const CLAIM_MS = 3 * 3_600_000
+
+export function claimAckId(conversationId: string): string {
+  return `${STAFF_ACK_ID}:${conversationId}`
+}
+
+/** A tap on a staff alert button: null if it isn't one; conversationId null for the plain "Recibido". */
+export function parseStaffAckId(id: string | null | undefined): { conversationId: string | null } | null {
+  if (!id) return null
+  if (id === STAFF_ACK_ID) return { conversationId: null }
+  if (id.startsWith(`${STAFF_ACK_ID}:`)) return { conversationId: id.slice(STAFF_ACK_ID.length + 1) || null }
+  return null
+}
+
+export interface StaffClaim {
+  /** International digits. */
+  phone: string
+  /** Name on the staff list, or the local number. */
+  who: string
+  at: string
+}
+
+export function claimTitle(who: string, customer: string): string {
+  return `${CLAIM_PREFIX} ${who}: ${customer}`
+}
+
+export function claimBody(who: string, staffPhone: string): string {
+  return `${who} tomó a este cliente desde el aviso de WhatsApp.\nPersonal: +${staffPhone}`
+}
+
+/** Pure: the claim stored in a "🙋 Lo atiende …" notification. */
+export function parseClaim(row: { title: string; body: string | null; created_at: string }): StaffClaim | null {
+  if (!row.title.startsWith(CLAIM_PREFIX)) return null
+  const phone = row.body?.match(/Personal: \+(\d{8,15})/)?.[1]
+  if (!phone) return null
+  const who = row.title.slice(CLAIM_PREFIX.length).replace(/:[^:]*$/, '').trim()
+  return { phone, who, at: row.created_at }
+}
+
+/** Who took this customer in the last 3 h, if anyone. */
+export async function activeClaim(db: SupabaseClient, conversationId: string, now: Date = new Date()): Promise<StaffClaim | null> {
+  const { data } = await db
+    .from('notifications')
+    .select('title, body, created_at')
+    .eq('conversation_id', conversationId)
+    .like('title', `${CLAIM_PREFIX}%`)
+    .gte('created_at', new Date(now.getTime() - CLAIM_MS).toISOString())
+    .order('created_at', { ascending: false })
+    .limit(1)
+  const row = ((data ?? []) as { title: string; body: string | null; created_at: string }[])[0]
+  return row ? parseClaim(row) : null
+}
+
+/** "14:05" in the business's local time. */
+export function localClock(iso: string, utcOffsetHours: number): string {
+  const d = new Date(new Date(iso).getTime() + utcOffsetHours * 3_600_000)
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
+}
+
+/** What the rest of the team gets when someone takes a customer. */
+export function claimedText(who: string, customer: string, customerPhone: string): string {
+  return [
+    `🙋 *${who} atiende a ${customer}*${customerPhone ? ` (${customerPhone})` : ''}.`,
+    '',
+    '🤝 *Ayúdenle a que no se le olvide.* Si el cliente sigue sin respuesta, les vuelvo a avisar a todos.',
+  ].join('\n')
+}
+
+/** A plain text to the staff on shift (no button), e.g. "X atiende a Y". */
+export async function notifyStaffPlain(
+  db: SupabaseClient,
+  accountId: string,
+  text: string,
+  exclude: string[] = [],
+): Promise<number> {
+  const biz = await loadBusinessSettings(db, accountId)
+  const phones = getStaffPhones(biz).filter((p) => !exclude.includes(p))
+  if (!phones.length) return 0
+  const { data: config } = await db
+    .from('whatsapp_config')
+    .select('phone_number_id, access_token')
+    .eq('account_id', accountId)
+    .maybeSingle()
+  if (!config) return 0
+  const accessToken = decrypt(config.access_token)
+  let sent = 0
+  await Promise.all(
+    phones.map(async (phone) => {
+      const open = await lastInboundWithinWindow(db, accountId, phone).catch(() => null)
+      if (!open) return
+      try {
+        await sendTextMessage({ phoneNumberId: config.phone_number_id, accessToken, to: phone, text })
+        sent += 1
+      } catch (err) {
+        console.error(`[staff-notify] plain text to ${phone} failed:`, err instanceof Error ? err.message : err)
+      }
+    }),
+  )
+  return sent
+}
 // Meta's limit for an interactive message's body.
 const BUTTON_BODY_MAX = 1024
 
@@ -284,6 +396,8 @@ export async function notifyStaffOfHandoff(
     recipients?: string[]
     /** The summary carries its own heading (escalations): no "Aviso para el personal" line. */
     plain?: boolean
+    /** Send to everyone even if someone took this customer (the escalation). */
+    ignoreClaim?: boolean
   },
 ): Promise<NotifyStaffResult> {
   const biz = await loadBusinessSettings(db, args.accountId)
@@ -327,17 +441,32 @@ export async function notifyStaffOfHandoff(
   // running order shouldn't blow past that and fail every send.
   const summary = sanitizeForTemplateParam(args.summary).slice(0, 900) || '(sin detalle)'
 
+  // Someone already took this customer: the reminders go to that person
+  // only (if their window is open — otherwise to everyone, as before).
+  let targets = onShift
+  let claimNote = ''
+  if (args.conversationId && !args.recipients && !args.ignoreClaim) {
+    const claim = await activeClaim(db, args.conversationId).catch(() => null)
+    if (claim && onShift.includes(claim.phone)) {
+      targets = [claim.phone]
+      claimNote = `🙋 *Este cliente lo atiende usted* (lo tomó a las ${localClock(claim.at, biz.utcOffsetHours)}).\n\n`
+    }
+  }
+
   const text = staffAlertText({
     contactName: args.contactName,
-    summary: args.summary,
+    summary: claimNote + args.summary,
     plain: args.plain,
     link: args.conversationId && biz.publicAppUrl ? `${biz.publicAppUrl}/inbox?c=${args.conversationId}` : null,
   })
+  const buttons = args.conversationId
+    ? [{ id: claimAckId(args.conversationId), title: claimNote ? '✅ Recibido' : '🙋 Yo lo atiendo' }]
+    : ACK_BUTTON
 
   const sent: { phone: string; messageId: string }[] = []
   const failed: { phone: string; error: string }[] = []
   await Promise.all(
-    onShift.map(async (phone) => {
+    targets.map(async (phone) => {
       try {
         const { messageId } = asTemplate
           ? await sendTemplateMessage({
@@ -348,7 +477,7 @@ export async function notifyStaffOfHandoff(
               language: templateLanguage,
               params: [sanitizeForTemplateParam(args.contactName) || 'Cliente', summary],
             })
-          : await sendAlertWithAck(config.phone_number_id, accessToken, phone, text)
+          : await sendAlertWithAck(config.phone_number_id, accessToken, phone, text, buttons)
         sent.push({ phone, messageId })
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
@@ -371,17 +500,20 @@ async function sendAlertWithAck(
   accessToken: string,
   to: string,
   text: string,
+  buttons: { id: string; title: string }[] = ACK_BUTTON,
 ): Promise<{ messageId: string }> {
   if (text.length <= BUTTON_BODY_MAX) {
-    return sendInteractiveButtons({ phoneNumberId, accessToken, to, bodyText: text, buttons: ACK_BUTTON })
+    return sendInteractiveButtons({ phoneNumberId, accessToken, to, bodyText: text, buttons })
   }
   const first = await sendTextMessage({ phoneNumberId, accessToken, to, text })
   await sendInteractiveButtons({
     phoneNumberId,
     accessToken,
     to,
-    bodyText: 'Toque *Recibido* cuando lo vea 🙂 (así sus avisos siguen activos).',
-    buttons: ACK_BUTTON,
+    bodyText: buttons[0]?.id.includes(':')
+      ? 'Toque *Yo lo atiendo* si lo toma usted 🙂 (así sus avisos siguen activos).'
+      : 'Toque *Recibido* cuando lo vea 🙂 (así sus avisos siguen activos).',
+    buttons,
   }).catch((err) => console.error('[staff-notify] ack button failed:', err instanceof Error ? err.message : err))
   return first
 }

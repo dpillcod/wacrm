@@ -61,6 +61,13 @@ describe("escalation", () => {
     expect(alert).toContain("*Eduardo · 0991234567*");
     expect(alert).toContain("*NADIE DEL EQUIPO LE HA ESCRITO.*");
   });
+
+  it("names the person who took the customer and didn't write", () => {
+    const text = escalationText({ minutes: 30, name: "Ana", phone: "", what: "🧾 Pedido N° 0042", claimedBy: { who: "Diego", minutes: 12 } });
+    expect(text).toContain("*Lo tomó Diego hace 12 min, pero todavía no le escribe.*");
+    expect(text).toContain("¡Recuérdenle a Diego o atiéndalo otra persona YA!");
+    expect(text).not.toContain("NADIE DEL EQUIPO");
+  });
 });
 
 describe("sales to Meta", () => {

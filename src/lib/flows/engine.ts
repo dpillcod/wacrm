@@ -52,9 +52,16 @@ import {
   type CatalogProductCandidate,
 } from "../ai/catalog";
 import {
+  activeClaim,
+  claimBody,
+  claimedText,
+  claimTitle,
+  getStaffList,
   getStaffPhones,
-  STAFF_ACK_ID,
+  localClock,
   notifyStaffOfHandoff,
+  notifyStaffPlain,
+  parseStaffAckId,
   sanitizeForTemplateParam,
   type NotifyStaffResult,
 } from "../whatsapp/staff-notify";
@@ -5441,9 +5448,10 @@ async function handleStaffCheckIn(
   // (re)opens the free 24h window for that staff member's alerts.
   // "Recibido" typed instead of tapped counts too, but only from staff.
   const typedAck = input.message.kind === "text" && /^(ok )?recibido$/.test(normalizeForMatch(input.message.text));
+  const ack = input.message.kind === "interactive_reply" ? parseStaffAckId(input.message.reply_id) : null;
   const isCheckIn =
     (input.message.kind === "text" && isStaffCheckInText(biz, input.message.text)) ||
-    (input.message.kind === "interactive_reply" && input.message.reply_id === STAFF_ACK_ID) ||
+    !!ack ||
     typedAck;
   const typo = !isCheckIn && input.message.kind === "text" && isStaffCheckInTypo(biz, input.message.text);
   if (!isCheckIn && !typo) return null;
@@ -5481,6 +5489,8 @@ async function handleStaffCheckIn(
     }
     return { consumed: true, outcome: "no_match" };
   }
+  // "🙋 Yo lo atiendo" on an alert about a customer: take that customer.
+  if (ack?.conversationId) return handleStaffClaim(db, input, biz, phone, ack.conversationId);
   const last = lastCheckInReply.get(input.contactId) ?? 0;
   if (Date.now() - last < 60_000) return { consumed: true, outcome: "no_match" };
   lastCheckInReply.set(input.contactId, Date.now());
@@ -5494,6 +5504,76 @@ async function handleStaffCheckIn(
     });
   } catch (err) {
     console.error("[flows] staff check-in reply failed:", err);
+  }
+  return { consumed: true, outcome: "no_match" };
+}
+
+/**
+ * A staff member tapped "🙋 Yo lo atiendo": the first one takes the
+ * customer, the rest of the team is told who has it ("ayúdenle a que no
+ * se le olvide"), and later taps hear who already took it. The reminders
+ * about that customer then go only to that person; the escalation still
+ * goes to everyone (see staff-notify / unanswered-alerts).
+ */
+async function handleStaffClaim(
+  db: AdminClient,
+  input: DispatchInboundInput,
+  biz: BusinessSettings,
+  staffPhone: string,
+  conversationId: string,
+): Promise<DispatchInboundResult> {
+  const reply = (text: string) =>
+    engineSendText({
+      accountId: input.accountId,
+      userId: input.userId,
+      conversationId: input.conversationId,
+      contactId: input.contactId,
+      text,
+    });
+  try {
+    const { data: conv } = await db
+      .from("conversations")
+      .select("account_id, contact_id")
+      .eq("id", conversationId)
+      .maybeSingle();
+    const c0 = conv as { account_id?: string; contact_id?: string | null } | null;
+    if (!c0 || c0.account_id !== input.accountId) {
+      await reply(checkInReply(biz));
+      return { consumed: true, outcome: "no_match" };
+    }
+    const { data: contact } = c0.contact_id
+      ? await db.from("contacts").select("name, phone").eq("id", c0.contact_id).maybeSingle()
+      : { data: null };
+    const c = contact as { name?: string | null; phone?: string | null } | null;
+    const customer = c?.name?.trim() || "el cliente";
+    const customerPhone = c?.phone ? localPhone(c.phone.replace(/^\+/, ""), biz.phoneCountryCode) : "";
+    const me = getStaffList(biz).find((s) => s.phone === staffPhone);
+    const who = me?.name || localPhone(staffPhone, biz.phoneCountryCode);
+    const link = biz.publicAppUrl ? `${biz.publicAppUrl}/inbox?c=${conversationId}` : "";
+
+    const existing = await activeClaim(db, conversationId);
+    if (existing && existing.phone !== staffPhone) {
+      await reply(`👍 A *${customer}* ya lo atiende *${existing.who}* (desde las ${localClock(existing.at, biz.utcOffsetHours)}). ¡Gracias igual!`);
+      return { consumed: true, outcome: "no_match" };
+    }
+    if (existing) {
+      await reply(`✅ *${customer}* ya está a su cargo.${link ? `\n👉 ${link}` : ""}`);
+      return { consumed: true, outcome: "no_match" };
+    }
+    await notifyAccountInApp(db, {
+      accountId: input.accountId,
+      conversationId,
+      contactId: c0.contact_id ?? null,
+      title: claimTitle(who, customer),
+      body: claimBody(who, staffPhone),
+    });
+    await reply(
+      `✅ *${customer} queda a su cargo.*\nEscríbale desde el CRM${link ? `:\n👉 ${link}` : "."}\n\n` +
+        "Ya les avisé a sus compañeros. Si el cliente sigue sin respuesta, aviso a todo el equipo.",
+    );
+    await notifyStaffPlain(db, input.accountId, claimedText(who, customer, customerPhone), [staffPhone]);
+  } catch (err) {
+    console.error("[flows] staff claim failed:", err);
   }
   return { consumed: true, outcome: "no_match" };
 }
