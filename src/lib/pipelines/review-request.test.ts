@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { reviewDecision } from "./review-request";
 import { csatThanks } from "./order-stages";
 import { DEFAULT_BUSINESS_SETTINGS, sanitizeSettings } from "../business/settings";
-import { escalates, needsAnswer } from "../flows/unanswered-alerts";
+import { escalates, escalationText, needsAnswer } from "../flows/unanswered-alerts";
+import { staffAlertText } from "../whatsapp/staff-notify";
 import { purchaseEvent, sha256 } from "../marketing/meta-conversions";
 
 const base = {
@@ -49,6 +50,16 @@ describe("escalation", () => {
     expect(escalates("🧾 Comprobante de pago")).toBe(false);
     expect(escalates("💬 Cliente escribiendo: Ana")).toBe(false);
     expect(escalates("✅ Cotización aceptada: Ana")).toBe(false);
+    expect(escalates("🔴 ESCALADO 🚨 ¡URGENTE! 25 min sin respuesta: Eduardo")).toBe(false);
+  });
+
+  it("the WhatsApp escalation is loud, in bold and opens with the alarm", () => {
+    const text = escalationText({ minutes: 25, name: "Eduardo", phone: "0991234567", what: "🧾 Pedido N° 0041" });
+    const alert = staffAlertText({ contactName: "Eduardo", summary: text, plain: true });
+    expect(alert.startsWith("🚨🚨🚨 *¡URGENTE! CLIENTE SIN RESPUESTA HACE 25 MIN* 🚨🚨🚨")).toBe(true);
+    expect(alert).not.toContain("Aviso para el personal");
+    expect(alert).toContain("*Eduardo · 0991234567*");
+    expect(alert).toContain("*NADIE DEL EQUIPO LE HA ESCRITO.*");
   });
 });
 

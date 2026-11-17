@@ -250,12 +250,14 @@ const ACK_BUTTON = [{ id: STAFF_ACK_ID, title: '✅ Recibido' }]
 const BUTTON_BODY_MAX = 1024
 
 /** The plain-text staff alert: who, what (multi-line is fine here), and a link to the chat. */
-export function staffAlertText(args: { contactName: string; summary: string; link?: string | null }): string {
-  const lines = [
-    `🔔 *Aviso para el personal*${args.contactName.trim() ? ` — ${args.contactName.trim()}` : ''}`,
-    '',
-    args.summary.trim() || '(sin detalle)',
-  ]
+export function staffAlertText(args: { contactName: string; summary: string; link?: string | null; plain?: boolean }): string {
+  const lines = args.plain
+    ? [args.summary.trim() || '(sin detalle)']
+    : [
+        `🔔 *Aviso para el personal*${args.contactName.trim() ? ` — ${args.contactName.trim()}` : ''}`,
+        '',
+        args.summary.trim() || '(sin detalle)',
+      ]
   if (args.link) lines.push('', `👉 Abrir en el CRM: ${args.link}`)
   // WhatsApp's text limit is 4096 characters.
   return lines.join('\n').slice(0, 4000)
@@ -280,6 +282,8 @@ export async function notifyStaffOfHandoff(
     conversationId?: string | null
     /** Other people instead of the staff list (same line format, e.g. the escalation list). */
     recipients?: string[]
+    /** The summary carries its own heading (escalations): no "Aviso para el personal" line. */
+    plain?: boolean
   },
 ): Promise<NotifyStaffResult> {
   const biz = await loadBusinessSettings(db, args.accountId)
@@ -326,6 +330,7 @@ export async function notifyStaffOfHandoff(
   const text = staffAlertText({
     contactName: args.contactName,
     summary: args.summary,
+    plain: args.plain,
     link: args.conversationId && biz.publicAppUrl ? `${biz.publicAppUrl}/inbox?c=${args.conversationId}` : null,
   })
 

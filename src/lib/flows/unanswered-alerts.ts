@@ -116,6 +116,19 @@ export async function sweepUnansweredAlerts(db: SupabaseClient, now: Date = new 
   return sent + (await sweepEscalations(db, all, now));
 }
 
+/** The WhatsApp escalation: bold and loud, so nobody on the team can miss that it's late. */
+export function escalationText(args: { minutes: number; name: string; phone: string; what: string }): string {
+  return [
+    `🚨🚨🚨 *¡URGENTE! CLIENTE SIN RESPUESTA HACE ${args.minutes} MIN* 🚨🚨🚨`,
+    "",
+    `🔴 *${args.name}${args.phone ? ` · ${args.phone}` : ""}*`,
+    `🔴 *${args.what}*`,
+    "",
+    "⚠️ *NADIE DEL EQUIPO LE HA ESCRITO.* ⚠️",
+    "👉 *¡Respóndale YA o avise quién lo atiende!*",
+  ].join("\n");
+}
+
 /** Third step: nobody answered since the first alert → admins and the escalation list. */
 async function sweepEscalations(db: SupabaseClient, rows: AlertRow[], now: Date): Promise<number> {
   const first = new Map<string, AlertRow>();
@@ -153,13 +166,14 @@ async function sweepEscalations(db: SupabaseClient, rows: AlertRow[], now: Date)
       accountId: alert.account_id,
       conversationId,
       contactId: alert.contact_id,
-      title: `${ESCALATION_PREFIX} (${minutes} min sin respuesta): ${name}${phone ? ` (${phone})` : ""}`,
+      title: `${ESCALATION_PREFIX} 🚨 ¡URGENTE! ${minutes} min sin respuesta: ${name}${phone ? ` (${phone})` : ""}`,
       body: `Nadie le ha escrito en ${minutes} minutos. Primer aviso: ${what}.${alert.body ? `\n${alert.body.slice(0, 300)}` : ""}`,
     }).catch(() => null);
     await notifyStaffOfHandoff(db, {
       accountId: alert.account_id,
       contactName: name,
-      summary: `${ESCALATION_PREFIX}: ${minutes} min sin respuesta — ${what}${phone ? ` · ${phone}` : ""}\nNadie del equipo le ha escrito. Por favor atiéndalo o asígnelo ahora.`,
+      summary: escalationText({ minutes, name, phone, what }),
+      plain: true,
       conversationId,
       ...(biz.escalation.phones.length ? { recipients: biz.escalation.phones } : {}),
     }).catch(() => null);
