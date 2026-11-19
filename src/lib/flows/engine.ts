@@ -979,6 +979,7 @@ async function sendIntroCta(
         bodyText: text,
         buttonText: cta.button_text,
         url,
+        headerImageUrl: cta.header_image_url || undefined,
       });
       await logEvent(db, run.id, "message_sent", nodeKey, { node_type: "intro_cta", whatsapp_message_id });
       return;

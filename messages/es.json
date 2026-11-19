@@ -1837,6 +1837,8 @@
         "shopButtonHint": "El botón de WhatsApp que abre el catálogo. Máximo 20 caracteres (ej.: ⚡ RAPIDITO).",
         "shopTagline": "Promesa del catálogo",
         "shopTaglineHint": "Una línea en la cabecera de la página, debajo del nombre (ej.: Pida en 1 minuto, recíbalo hoy en Cuenca). Vacío = no se muestra.",
+        "shopLogoUrl": "Logo del catálogo",
+        "shopLogoUrlHint": "Enlace https a un PNG con letras blancas (va sobre fondo azul oscuro en la cabecera de la página). Vacío = el nombre en texto.",
         "shopSameDayCutoff": "Hora límite para entrega el mismo día",
         "shopSameDayCutoffHint": "Hora local (1-23). Antes de esa hora la página dice \"Pida en 2 h 15 min y le llega HOY\"; después, \"le llega mañana temprano\". 0 = no se muestra.",
         "idNumberField": "Campo de la cédula",

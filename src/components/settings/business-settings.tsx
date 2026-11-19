@@ -330,6 +330,9 @@ export function BusinessSettingsPanel() {
           <Field label={t("links.shopTagline")} hint={t("links.shopTaglineHint")}>
             {text("shopTagline")}
           </Field>
+          <Field label={t("links.shopLogoUrl")} hint={t("links.shopLogoUrlHint")}>
+            {text("shopLogoUrl", { placeholder: "https://…/logo.png" })}
+          </Field>
           <Field label={t("links.shopSameDayCutoff")} hint={t("links.shopSameDayCutoffHint")}>
             <Input
               type="number"

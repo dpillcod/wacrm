@@ -131,6 +131,7 @@ export function ShopPicker({
   deliveryNote,
   brand = "",
   tagline = "",
+  logoUrl = "",
   sameDay = null,
 }: {
   token: string;
@@ -139,6 +140,8 @@ export function ShopPicker({
   brand?: string;
   /** The promise under the name ('' = none). */
   tagline?: string;
+  /** The picker's logo, white on dark, shown in the promise band ('' = none). */
+  logoUrl?: string;
   /** Same-day delivery cut-off (local hour) and the business's UTC offset; null = no countdown. */
   sameDay?: { cutoffHour: number; utcOffsetHours: number } | null;
   customerName: string;
@@ -157,7 +160,8 @@ export function ShopPicker({
   const minute = useSyncExternalStore(subscribeMinute, currentMinute, noMinute);
   const sameDayInfo =
     sameDay && minute !== null ? sameDayLine(new Date(minute * 60_000), sameDay.utcOffsetHours, sameDay.cutoffHour) : null;
-  const title = brand || storeName;
+  // With a logo the band carries the name, and the title is the store.
+  const title = logoUrl ? storeName : brand || storeName;
   const who = customerName ? `Pedido de ${customerName}` : "Su pedido llega a su chat";
   const [filters, setFilters] = useState<Filters>({ q: "", dep: null, cat: null, sort: "pop", sale: false });
   const [typed, setTyped] = useState("");
@@ -455,7 +459,7 @@ export function ShopPicker({
           </a>
           <h1>
             {title}
-            <small>{brand && brand !== storeName ? `${storeName} · ${who}` : who}</small>
+            <small>{!logoUrl && brand && brand !== storeName ? `${storeName} · ${who}` : who}</small>
           </h1>
           <div className={styles.icons}>
             <button type="button" className={styles.ib} onClick={() => setSheet("cart")} aria-label={`Ver mi pedido, ${units} productos`}>
@@ -476,8 +480,12 @@ export function ShopPicker({
             </button>
           </div>
         </div>
-        {(tagline || sameDayInfo) && (
+        {(logoUrl || tagline || sameDayInfo) && (
           <p className={styles.promise}>
+            {logoUrl && (
+              // eslint-disable-next-line @next/next/no-img-element -- the business's own logo, any host
+              <img className={styles.logo} src={logoUrl} alt={brand || storeName} />
+            )}
             {tagline && <strong>{tagline}</strong>}
             {sameDayInfo && <span className={sameDayInfo.today ? styles.today : undefined}>{sameDayInfo.text}</span>}
           </p>

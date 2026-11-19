@@ -152,6 +152,7 @@ export default async function PedirPage({ params }: { params: Promise<{ token: s
         deliveryNote={biz.shopDeliveryNote}
         brand={biz.shopName}
         tagline={biz.shopTagline}
+        logoUrl={biz.shopLogoUrl}
         sameDay={biz.shopSameDayCutoff ? { cutoffHour: biz.shopSameDayCutoff, utcOffsetHours: biz.utcOffsetHours } : null}
       />
     </div>

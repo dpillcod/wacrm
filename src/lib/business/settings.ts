@@ -70,6 +70,8 @@ export interface BusinessSettings {
   shopButton: string
   /** The picker's promise, under its name in the page header ('' = none). */
   shopTagline: string
+  /** Logo for the picker's header, white on dark (public https URL; '' = the name as text). */
+  shopLogoUrl: string
   /** Same-day delivery cut-off hour (local, 1-23): the page says "pida en 2 h 15 min y le llega HOY" / "mañana temprano". 0 = off. */
   shopSameDayCutoff: number
   /** Contact custom field that keeps the customer's ID number (cédula / RUC) for invoices. */
@@ -337,6 +339,7 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
   shopName: 'Catálogo express',
   shopButton: '🛒 CATÁLOGO EXPRESS',
   shopTagline: '',
+  shopLogoUrl: '',
   shopSameDayCutoff: 0,
   woocommerceUrl: '',
   publicAppUrl: '',
@@ -522,6 +525,7 @@ export function sanitizeSettings(stored: unknown): BusinessSettings {
     shopName: s.shopName.trim().slice(0, 40) || DEFAULT_BUSINESS_SETTINGS.shopName,
     shopButton: [...(s.shopButton.trim() || DEFAULT_BUSINESS_SETTINGS.shopButton)].slice(0, 20).join(''),
     shopTagline: s.shopTagline.trim().slice(0, 120),
+    shopLogoUrl: /^https:\/\/[^\s]+$/.test(s.shopLogoUrl.trim()) ? s.shopLogoUrl.trim() : '',
     shopSameDayCutoff: Math.round(clampNumber(s.shopSameDayCutoff, 0, 23)),
     // Seven days or none (= always open); a partial week is padded closed.
     openingHours: hours.length ? [...hours, ...Array(7 - hours.length).fill(null)] : [],

@@ -1837,6 +1837,8 @@
         "shopButtonHint": "The WhatsApp button that opens the catalog. 20 characters max (e.g. ⚡ RAPIDITO).",
         "shopTagline": "Catalog promise",
         "shopTaglineHint": "One line in the page header, under the name (e.g. Order in 1 minute, get it today). Empty = hidden.",
+        "shopLogoUrl": "Catalog logo",
+        "shopLogoUrlHint": "https link to a PNG with white lettering (shown on a dark blue band in the page header). Empty = the name as text.",
         "shopSameDayCutoff": "Same-day delivery cut-off hour",
         "shopSameDayCutoffHint": "Local hour (1-23). Before it the page says \"order within 2 h 15 min and get it TODAY\"; after it, \"tomorrow morning\". 0 = hidden.",
         "idNumberField": "ID number field",
