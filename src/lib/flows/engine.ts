@@ -533,6 +533,17 @@ export function isShowMeRequest(text: string): boolean {
     /\b(muestreme|muestrame|muestre|muestreme|me muestra|me muesta|muetreme|mandeme fotos|envieme fotos|mande fotos|fotos de los|los que tiene|los q tiene|que opciones tiene|que modelos tiene|ver el catalogo|ver catalogo|ver los productos)\b/.test(t);
 }
 
+/**
+ * "Rapidito" / "el rapidito": the catalog's own name (Mi negocio → shopName
+ * or shopButton) typed on its own — the customer wants that button.
+ */
+export function isShopKeyword(biz: Pick<BusinessSettings, "shopName" | "shopButton">, text: string): boolean {
+  const t = normalizeForMatch(text).replace(/^((el|la|al|ver|abrir|quiero|deseo|el|me|da|de) )+/, "").trim();
+  if (!t) return false;
+  const names = [biz.shopName, biz.shopButton].map((n) => normalizeForMatch(n).trim()).filter((n) => n.length >= 4);
+  return names.includes(t);
+}
+
 /** "¿Me puede enviar una foto del modelo?", "mándeme fotito de esa": a picture of what they're asking about. */
 export function isPhotoOfProductRequest(text: string): boolean {
   const t = normalizeForMatch(text);
@@ -3898,6 +3909,13 @@ async function dispatchInboundToFlowsInner(
       if (status) return status;
     }
 
+    // "Rapidito" as the first message (or after a person took the chat):
+    // straight to the catalog button, as if it was picked on the menu.
+    if (input.message.kind === "text") {
+      const shop = await startAtShopKeyword(db, input);
+      if (shop) return shop;
+    }
+
     // No active run → look for a flow whose entry trigger matches.
     const flow = await findEntryFlow(
       db,
@@ -5224,6 +5242,7 @@ async function sendCatalogButton(
   if (link) {
     await saveVars(db, run, { ...run.vars, __catalog_button_at: new Date().toISOString() });
     try {
+      const headerImageUrl = await catalogHeaderImage(db, run.flow_id);
       const { whatsapp_message_id } = await engineSendCtaUrl({
         accountId: run.account_id,
         userId: run.user_id,
@@ -5232,6 +5251,7 @@ async function sendCatalogButton(
         bodyText: withLink,
         buttonText: biz.shopButton,
         url: link,
+        headerImageUrl,
       });
       await logEvent(db, run.id, "message_sent", nodeKey, { reason, whatsapp_message_id });
       return;
@@ -5240,6 +5260,15 @@ async function sendCatalogButton(
     }
   }
   await sendEngineText(db, run, nodeKey, lead, reason);
+}
+
+/** The picture the flow's own catalog button carries (a send_cta_url node with catalog_link), if any. */
+async function catalogHeaderImage(db: AdminClient, flowId: string): Promise<string | undefined> {
+  const { data } = await db.from("flow_nodes").select("config").eq("flow_id", flowId).eq("node_type", "send_cta_url");
+  for (const row of (data as { config: { catalog_link?: boolean; header_image_url?: string } }[] | null) ?? []) {
+    if (row.config?.catalog_link && row.config.header_image_url) return row.config.header_image_url;
+  }
+  return undefined;
 }
 
 /** Whether the customer wrote again after this message (it's answered there, with this one in context). */
@@ -6815,7 +6844,9 @@ async function handleReplyForActiveRun(
       return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
     }
     // "Muéstreme los que tiene": the catalog with photos, and a person if they prefer.
-    if (isShowMeRequest(message.text) && run.contact_id && run.conversation_id) {
+    // "Rapidito" in the middle of an order too (at the menu it's the menu's option).
+    const shopWord = capturesOrderList && isShopKeyword(bizForRules, message.text);
+    if ((isShowMeRequest(message.text) || shopWord) && run.contact_id && run.conversation_id) {
       await sendCatalogButton(
         db,
         run,
@@ -7484,6 +7515,34 @@ async function handleReplyForActiveRun(
   // action.type === 'end'
   await endRun(db, run.id, "completed", "fallback_exhausted_end");
   return { consumed: true, flow_run_id: run.id, outcome: "completed" };
+}
+
+/**
+ * The catalog's name typed with no conversation open: open the main menu
+ * silently and take the word as the menu choice (its row alias), so the
+ * customer gets the catalog button — with its picture — without the menu
+ * first. Only when the menu really has that word as an option.
+ */
+async function startAtShopKeyword(
+  db: AdminClient,
+  input: DispatchInboundInput & { isFirstInboundMessage: boolean },
+): Promise<DispatchInboundResult | null> {
+  if (input.message.kind !== "text") return null;
+  const biz = await bizOf(db, input.accountId);
+  if (!isShopKeyword(biz, input.message.text)) return null;
+  const flow = await findDefaultEntryFlow(db, input.accountId);
+  if (!flow?.entry_node_id) return null;
+  const nodes = await loadAllNodes(db, flow.id);
+  const entry = nodes.get(flow.entry_node_id);
+  const said = normalizeForMatch(input.message.text).trim();
+  const rows = ((entry?.config as { sections?: { rows?: { aliases?: string[] }[] }[] } | undefined)?.sections ?? [])
+    .flatMap((s) => s.rows ?? []);
+  if (!rows.some((r) => (r.aliases ?? []).some((a) => normalizeForMatch(a).trim() === said))) return null;
+  const started = await startNewRun(db, flow, input, nodes, { silent: true });
+  if (!started.flow_run_id) return started;
+  const { data: run } = await db.from("flow_runs").select("*").eq("id", started.flow_run_id).maybeSingle();
+  if (!run) return started;
+  return handleReplyForActiveRun(db, run as FlowRunRow, input.message, nodes);
 }
 
 async function startNewRun(
