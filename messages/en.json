@@ -1933,6 +1933,7 @@
         "closingPromo": "Closing promotion: once a week when an order ends well or with the \"thanks\" reply ({promo} = menu promotion if they didn't see it; empty = off)",
         "closingInstall": "Installation offer when an order with a lock, faucet, socket, etc. closes, with Yes/No buttons ({producto} = the order line; empty = off)",
         "closingInstallYes": "Reply when the customer taps \"Yes, install it\" (the team is alerted)",
+        "shopWelcome": "Welcome when the customer asks for the catalog by its name (\"rapidito\") without the menu: goes above the catalog button ({nombre} = customer's name; {promo} = the menu promotion; empty = off)",
         "closingCatalogTip": "Catalog tip ({catalogo} = its name) in the closing promotion when the order was typed (sent with the catalog button; empty = off)",
         "totalPending": "\"What's the total?\" after the order went to staff",
         "thanksReply": "\"Thanks\" after the order went to staff",

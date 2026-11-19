@@ -201,6 +201,13 @@ export interface BusinessSettings {
      * in the catalog), sent with the catalog button. '' = off.
      */
     closingCatalogTip: string
+    /**
+     * Top of the catalog button when the customer asked for it by name
+     * ("rapidito") and skipped the menu — "{{vars.shop_intro}}" in the
+     * flow's catalog node. {nombre} = " Juan" or "", {promo} = the menu
+     * promotion. '' = off.
+     */
+    shopWelcome: string
     /** "¿Cuánto es el total?" after the order went to staff; {pedido} = the order number. */
     totalPending: string
     /** "Gracias" / "ok" after the order went to staff. */
@@ -396,6 +403,7 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
       '🔧 *¿Se lo instalamos?* Uno de nuestros técnicos le instala: _{producto}_ en su casa. El día y el costo se los confirma el técnico.',
     closingInstallYes: '✅ ¡Listo! Le pasé su pedido de instalación a nuestro equipo; le confirman el día y el costo por aquí 🙂',
     closingCatalogTip: '⚡ La próxima vez pida en 1 minuto, con fotos y precios, en nuestro *{catalogo}* 👇',
+    shopWelcome: '¡Hola{nombre}! 👋 Gracias por escribirnos 🙌\n\n{promo}',
     totalPending:
       'Su asesor está preparando el total de su pedido {pedido} y se lo envía por aquí en unos minutos 🙂 Mientras tanto, ¿desea agregar algo más?',
     thanksReply: '¡Con gusto! 🙂 Cualquier cosa, aquí estamos.',

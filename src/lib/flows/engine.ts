@@ -538,10 +538,27 @@ export function isShowMeRequest(text: string): boolean {
  * or shopButton) typed on its own — the customer wants that button.
  */
 export function isShopKeyword(biz: Pick<BusinessSettings, "shopName" | "shopButton">, text: string): boolean {
-  const t = normalizeForMatch(text).replace(/^((el|la|al|ver|abrir|quiero|deseo|el|me|da|de) )+/, "").trim();
-  if (!t) return false;
+  return shopKeywordOf(biz, text) !== null;
+}
+
+// Greeting and "I want to order" words around the catalog's name.
+const SHOP_FILLER = new Set(
+  "hola holi buenas buenos buen dia dias tarde tardes noche noches quiero quisiera queria deseo deseaba hacer realizar un una mi pedido pedir por favor porfa el la al ver abrir me da de en con compra comprar usar".split(" "),
+);
+
+/**
+ * The catalog's name (normalized) when the message is just that name,
+ * maybe with a greeting and "quiero hacer un pedido" around it — the
+ * web's and the ads' RAPIDITO button send "Hola, quiero hacer un pedido
+ * RAPIDITO ⚡". Null for anything else ("rapidito, necesito arroz").
+ */
+export function shopKeywordOf(biz: Pick<BusinessSettings, "shopName" | "shopButton">, text: string): string | null {
+  const t = normalizeForMatch(text);
+  if (t.length > 80) return null;
+  const rest = t.split(" ").filter((w) => w && !SHOP_FILLER.has(w)).join(" ");
+  if (!rest) return null;
   const names = [biz.shopName, biz.shopButton].map((n) => normalizeForMatch(n).trim()).filter((n) => n.length >= 4);
-  return names.includes(t);
+  return names.includes(rest) ? rest : null;
 }
 
 /** "¿Me puede enviar una foto del modelo?", "mándeme fotito de esa": a picture of what they're asking about. */
@@ -3601,6 +3618,20 @@ async function dispatchInboundToFlowsInner(
           flow_run_id: activeRun.id,
           outcome: "duplicate_inbound_ignored",
         };
+      }
+
+      // "Hola, quiero hacer un pedido RAPIDITO" while an old run waits
+      // with nothing written down (Nov 19: the run left open by an
+      // earlier "rapidito" took it as a product): start over with the
+      // catalog welcome. At the menu, the bare word is the menu's option.
+      if (input.message.kind === "text" && !runHoldsList(activeRun)) {
+        const word = shopKeywordOf(await bizOf(db, input.accountId), input.message.text);
+        const atEntry = word ? (await loadFlow(db, activeRun.flow_id))?.entry_node_id === activeRun.current_node_key : false;
+        if (word && !(atEntry && normalizeForMatch(input.message.text).trim() === word)) {
+          await endRun(db, activeRun.id, "timed_out", "restarted_by_keyword");
+          const fresh = await startAtShopKeyword(db, input);
+          if (fresh) return fresh;
+        }
       }
 
       // A customer stuck on an abandoned or confusing step can restart
@@ -7529,20 +7560,31 @@ async function startAtShopKeyword(
 ): Promise<DispatchInboundResult | null> {
   if (input.message.kind !== "text") return null;
   const biz = await bizOf(db, input.accountId);
-  if (!isShopKeyword(biz, input.message.text)) return null;
+  const said = shopKeywordOf(biz, input.message.text);
+  if (!said) return null;
   const flow = await findDefaultEntryFlow(db, input.accountId);
   if (!flow?.entry_node_id) return null;
   const nodes = await loadAllNodes(db, flow.id);
   const entry = nodes.get(flow.entry_node_id);
-  const said = normalizeForMatch(input.message.text).trim();
   const rows = ((entry?.config as { sections?: { rows?: { aliases?: string[] }[] }[] } | undefined)?.sections ?? [])
     .flatMap((s) => s.rows ?? []);
   if (!rows.some((r) => (r.aliases ?? []).some((a) => normalizeForMatch(a).trim() === said))) return null;
-  const started = await startNewRun(db, flow, input, nodes, { silent: true });
+  // The menu was skipped: "{{vars.shop_intro}}" on the catalog button
+  // carries the greeting, the thanks and today's promotion instead.
+  const start = await customerStartVars(db, input.accountId, input.contactId);
+  const shopIntro = renderText(biz.texts.shopWelcome, {
+    nombre: String(start.contact_name ?? ""),
+    promo: String(start.promo ?? ""),
+  }).trim();
+  const started = await startNewRun(db, flow, input, nodes, {
+    silent: true,
+    vars: { shop_intro: shopIntro ? `${shopIntro}\n\n` : "" },
+  });
   if (!started.flow_run_id) return started;
   const { data: run } = await db.from("flow_runs").select("*").eq("id", started.flow_run_id).maybeSingle();
   if (!run) return started;
-  return handleReplyForActiveRun(db, run as FlowRunRow, input.message, nodes);
+  // Taken as the menu's own option (its alias), whatever words came around it.
+  return handleReplyForActiveRun(db, run as FlowRunRow, { ...input.message, text: said }, nodes);
 }
 
 async function startNewRun(

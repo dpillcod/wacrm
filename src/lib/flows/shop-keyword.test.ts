@@ -9,6 +9,11 @@ describe("catalog name typed on its own", () => {
     expect(isShopKeyword(rapidito, "El rapidito")).toBe(true);
     expect(isShopKeyword(rapidito, "quiero ver el rapidito")).toBe(true);
   });
+  it("takes the web's pre-filled message", () => {
+    expect(isShopKeyword(rapidito, "Hola, quiero hacer un pedido RAPIDITO ⚡")).toBe(true);
+    expect(isShopKeyword(rapidito, "Buenas tardes, quisiera pedir por rapidito")).toBe(true);
+    expect(isShopKeyword(rapidito, "quiero hacer un pedido")).toBe(false);
+  });
   it("doesn't take sentences or other words", () => {
     expect(isShopKeyword(rapidito, "rapidito por favor necesito arroz")).toBe(false);
     expect(isShopKeyword(rapidito, "hola")).toBe(false);
