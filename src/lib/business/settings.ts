@@ -64,6 +64,14 @@ export interface BusinessSettings {
   birthdayFieldName: string
   /** One line about delivery shown in the product picker's cart ('' = none). */
   shopDeliveryNote: string
+  /** The product picker's name, as the bot writes it ("Catálogo express", "RAPIDITO ⚡"). */
+  shopName: string
+  /** Text of the WhatsApp button that opens the picker (20 characters max). */
+  shopButton: string
+  /** The picker's promise, under its name in the page header ('' = none). */
+  shopTagline: string
+  /** Same-day delivery cut-off hour (local, 1-23): the page says "pida en 2 h 15 min y le llega HOY" / "mañana temprano". 0 = off. */
+  shopSameDayCutoff: number
   /** Contact custom field that keeps the customer's ID number (cédula / RUC) for invoices. */
   idNumberFieldName: string
   /** WooCommerce store URL (keys stay in the server environment). */
@@ -326,6 +334,10 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
   birthdayFieldName: 'Fecha de nacimiento',
   idNumberFieldName: 'Cédula',
   shopDeliveryNote: '',
+  shopName: 'Catálogo express',
+  shopButton: '🛒 CATÁLOGO EXPRESS',
+  shopTagline: '',
+  shopSameDayCutoff: 0,
   woocommerceUrl: '',
   publicAppUrl: '',
   shopFeedUrl: '',
@@ -380,7 +392,7 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
     closingInstall:
       '🔧 *¿Se lo instalamos?* Uno de nuestros técnicos le instala: _{producto}_ en su casa. El día y el costo se los confirma el técnico.',
     closingInstallYes: '✅ ¡Listo! Le pasé su pedido de instalación a nuestro equipo; le confirman el día y el costo por aquí 🙂',
-    closingCatalogTip: '⚡ La próxima vez pida en 1 minuto, con fotos y precios, en nuestro *Catálogo express* 👇',
+    closingCatalogTip: '⚡ La próxima vez pida en 1 minuto, con fotos y precios, en nuestro *{catalogo}* 👇',
     totalPending:
       'Su asesor está preparando el total de su pedido {pedido} y se lo envía por aquí en unos minutos 🙂 Mientras tanto, ¿desea agregar algo más?',
     thanksReply: '¡Con gusto! 🙂 Cualquier cosa, aquí estamos.',
@@ -507,6 +519,10 @@ export function sanitizeSettings(stored: unknown): BusinessSettings {
     newConversationAlert: (['off', 'app', 'whatsapp'] as const).includes(s.newConversationAlert) ? s.newConversationAlert : 'off',
     publicAppUrl: s.publicAppUrl.trim().replace(/\/+$/, ''),
     shopFeedUrl: s.shopFeedUrl.trim(),
+    shopName: s.shopName.trim().slice(0, 40) || DEFAULT_BUSINESS_SETTINGS.shopName,
+    shopButton: [...(s.shopButton.trim() || DEFAULT_BUSINESS_SETTINGS.shopButton)].slice(0, 20).join(''),
+    shopTagline: s.shopTagline.trim().slice(0, 120),
+    shopSameDayCutoff: Math.round(clampNumber(s.shopSameDayCutoff, 0, 23)),
     // Seven days or none (= always open); a partial week is padded closed.
     openingHours: hours.length ? [...hours, ...Array(7 - hours.length).fill(null)] : [],
     staffPhones: strings(s.staffPhones, 20),

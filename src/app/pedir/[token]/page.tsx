@@ -19,10 +19,15 @@ const barlowCond = Barlow_Semi_Condensed({ subsets: ["latin"], weight: ["700"], 
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = {
-  title: "Elegir productos",
-  robots: { index: false, follow: false },
-};
+// The tab shows the picker's name and promise ("RAPIDITO ⚡ — Pida en 1 minuto…").
+export async function generateMetadata({ params }: { params: Promise<{ token: string }> }): Promise<Metadata> {
+  const robots = { index: false, follow: false };
+  const check = readOrderLinkToken((await params).token);
+  if (!check.ok) return { title: "Pedir en línea", robots };
+  const biz = await loadBusinessSettings(supabaseAdmin(), check.link.accountId).catch(() => null);
+  const name = biz?.shopName || "Pedir en línea";
+  return { title: biz?.shopTagline ? `${name} — ${biz.shopTagline}` : name, robots };
+}
 
 export const viewport: Viewport = {
   themeColor: "#ffffff",
@@ -145,6 +150,9 @@ export default async function PedirPage({ params }: { params: Promise<{ token: s
         serverCart={serverCart}
         usual={usual}
         deliveryNote={biz.shopDeliveryNote}
+        brand={biz.shopName}
+        tagline={biz.shopTagline}
+        sameDay={biz.shopSameDayCutoff ? { cutoffHour: biz.shopSameDayCutoff, utcOffsetHours: biz.utcOffsetHours } : null}
       />
     </div>
   );

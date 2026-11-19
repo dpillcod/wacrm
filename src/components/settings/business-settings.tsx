@@ -321,6 +321,25 @@ export function BusinessSettingsPanel() {
           <Field label={t("links.shopDeliveryNote")} hint={t("links.shopDeliveryNoteHint")}>
             {text("shopDeliveryNote")}
           </Field>
+          <Field label={t("links.shopName")} hint={t("links.shopNameHint")}>
+            {text("shopName", { placeholder: "Catálogo express" })}
+          </Field>
+          <Field label={t("links.shopButton")} hint={t("links.shopButtonHint")}>
+            {text("shopButton", { placeholder: "🛒 CATÁLOGO EXPRESS" })}
+          </Field>
+          <Field label={t("links.shopTagline")} hint={t("links.shopTaglineHint")}>
+            {text("shopTagline")}
+          </Field>
+          <Field label={t("links.shopSameDayCutoff")} hint={t("links.shopSameDayCutoffHint")}>
+            <Input
+              type="number"
+              min={0}
+              max={23}
+              value={s.shopSameDayCutoff}
+              disabled={readOnly}
+              onChange={(e) => set({ shopSameDayCutoff: Number(e.target.value) || 0 })}
+            />
+          </Field>
           <Field label={t("links.shopFeedUrl")} hint={t("links.shopFeedUrlHint")}>
             {text("shopFeedUrl", { placeholder: "https://…/feed-whatsapp.csv" })}
           </Field>

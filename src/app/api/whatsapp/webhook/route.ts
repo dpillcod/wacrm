@@ -930,7 +930,7 @@ async function processMessage(
         try {
           const catalog = main.length <= 1024 ? await customerCatalogLink(accountId, contactRecord.id, conversation.id) : ''
           if (catalog) {
-            await engineSendCtaUrl({ ...send, bodyText: main, headerImageUrl: piece?.url, buttonText: '🛒 CATÁLOGO EXPRESS', url: catalog })
+            await engineSendCtaUrl({ ...send, bodyText: main, headerImageUrl: piece?.url, buttonText: biz.shopButton, url: catalog })
           } else if (piece && main.length <= 1024) {
             await engineSendMedia({ ...send, kind: 'image', link: piece.url, caption: main })
           } else {

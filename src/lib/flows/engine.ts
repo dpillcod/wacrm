@@ -2503,7 +2503,7 @@ async function closingMessageFor(db: AdminClient, run: FlowRunRow): Promise<Clos
   // Typed the whole order: next time the catalog is quicker — said with
   // its button.
   let catalogUrl = "";
-  const tip = biz.texts.closingCatalogTip.trim();
+  const tip = renderText(biz.texts.closingCatalogTip, { catalogo: biz.shopName }).trim();
   if (tip && !run.vars.__from_catalog) {
     const url = await catalogLink(db, run.account_id, run.contact_id, run.conversation_id);
     if (/^https:\/\/[^\s/]+/.test(url)) {
@@ -2555,7 +2555,7 @@ async function sendClosingMessage(db: AdminClient, run: FlowRunRow, msg: Closing
         conversationId: run.conversation_id!,
         contactId: run.contact_id!,
         bodyText: text,
-        buttonText: "🛒 CATÁLOGO EXPRESS",
+        buttonText: (await bizOf(db, run.account_id)).shopButton,
         url: msg.catalogUrl,
       });
       await logEvent(db, run.id, "message_sent", null, { reason, whatsapp_message_id });
@@ -5206,10 +5206,14 @@ async function sendCatalogButton(
   withLink: string,
   reason: string,
 ): Promise<void> {
+  // The picker's name and button come from Mi negocio ("{catalogo}" in the texts).
+  const biz = await bizOf(db, run.account_id);
+  lead = lead.replaceAll("{catalogo}", `*${biz.shopName}*`);
+  withLink = withLink.replaceAll("{catalogo}", `*${biz.shopName}*`);
   // Sent a moment ago: point to it instead of a second identical button.
   const lastAt = typeof run.vars.__catalog_button_at === "string" ? new Date(run.vars.__catalog_button_at).getTime() : 0;
   if (Date.now() - lastAt < 15 * 60_000) {
-    const pointer = "👆 Toque el botón *CATÁLOGO EXPRESS* de arriba: ahí ve fotos y precios. Si prefiere, escriba *asesor* y una persona le envía opciones 🙂";
+    const pointer = `👆 Toque el botón *${biz.shopButton.replace(/^[^\p{L}\p{N}]+/u, "")}* de arriba: ahí ve fotos y precios. Si prefiere, escriba *asesor* y una persona le envía opciones 🙂`;
     await sendEngineText(db, run, nodeKey, lead.startsWith("Con gusto") ? pointer : `${lead}\n\n${pointer}`, reason);
     return;
   }
@@ -5225,7 +5229,7 @@ async function sendCatalogButton(
         conversationId: run.conversation_id!,
         contactId: run.contact_id!,
         bodyText: withLink,
-        buttonText: "🛒 CATÁLOGO EXPRESS",
+        buttonText: biz.shopButton,
         url: link,
       });
       await logEvent(db, run.id, "message_sent", nodeKey, { reason, whatsapp_message_id });
@@ -6684,7 +6688,7 @@ async function handleReplyForActiveRun(
         run,
         currentNode.node_key,
         "💲 Le pido a una persona de nuestro equipo que le confirme el precio por aquí en breve 🙂",
-        "💲 Le pido a una persona de nuestro equipo que le confirme el precio por aquí en breve 🙂\n\nMientras tanto, en nuestro *CATÁLOGO EXPRESS* puede ver fotos y precios 👇",
+        "💲 Le pido a una persona de nuestro equipo que le confirme el precio por aquí en breve 🙂\n\nMientras tanto, en {catalogo} puede ver fotos y precios 👇",
         "price_request_alerted",
       );
       return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
@@ -6816,7 +6820,7 @@ async function handleReplyForActiveRun(
         run,
         currentNode.node_key,
         "Con gusto 🙂 Escriba *asesor* y una persona de nuestro equipo le envía opciones por aquí.",
-        "🛍️ En nuestro *CATÁLOGO EXPRESS* ve los productos con fotos y precios, y su pedido llega a este chat 👇\n\nSi prefiere, escriba *asesor* y una persona le envía opciones por aquí 🙂",
+        "🛍️ En {catalogo} ve los productos con fotos y precios, y su pedido llega a este chat 👇\n\nSi prefiere, escriba *asesor* y una persona le envía opciones por aquí 🙂",
         "show_catalog",
       );
       return { consumed: true, flow_run_id: run.id, outcome: "no_match" };

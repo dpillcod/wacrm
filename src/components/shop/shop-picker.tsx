@@ -6,8 +6,9 @@
 // customer's WhatsApp chat (prices are taken again on the server).
 // Built for everyone: big touch targets, plain words, list view first.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ShopFacets, ShopItem, ShopSort } from "@/lib/catalog/shop-search";
+import { sameDayLine } from "@/lib/catalog/same-day";
 import styles from "./shop-picker.module.css";
 
 const SORTS: { key: ShopSort; label: string }[] = [
@@ -17,6 +18,14 @@ const SORTS: { key: ShopSort; label: string }[] = [
   { key: "az", label: "A-Z" },
 ];
 const MAX_QTY = 999;
+
+/** The current minute, client-side only (null while rendering on the server). */
+function subscribeMinute(onChange: () => void): () => void {
+  const id = window.setInterval(onChange, 20_000);
+  return () => window.clearInterval(id);
+}
+const currentMinute = () => Math.floor(Date.now() / 60_000);
+const noMinute = () => null;
 const SALE = "__sale__";
 
 type CartLine = { qty: number; title: string; price: number; thumb: string | null };
@@ -120,9 +129,18 @@ export function ShopPicker({
   serverCart,
   usual,
   deliveryNote,
+  brand = "",
+  tagline = "",
+  sameDay = null,
 }: {
   token: string;
   storeName: string;
+  /** The picker's name ("RAPIDITO ⚡"); '' = the store name. */
+  brand?: string;
+  /** The promise under the name ('' = none). */
+  tagline?: string;
+  /** Same-day delivery cut-off (local hour) and the business's UTC offset; null = no countdown. */
+  sameDay?: { cutoffHour: number; utcOffsetHours: number } | null;
   customerName: string;
   backHref: string;
   /** Any product on offer? Without, the "Ofertas" filter is hidden. */
@@ -136,6 +154,11 @@ export function ShopPicker({
   deliveryNote: string;
 }) {
   const storageKey = `pedir:${token.slice(-22)}`;
+  const minute = useSyncExternalStore(subscribeMinute, currentMinute, noMinute);
+  const sameDayInfo =
+    sameDay && minute !== null ? sameDayLine(new Date(minute * 60_000), sameDay.utcOffsetHours, sameDay.cutoffHour) : null;
+  const title = brand || storeName;
+  const who = customerName ? `Pedido de ${customerName}` : "Su pedido llega a su chat";
   const [filters, setFilters] = useState<Filters>({ q: "", dep: null, cat: null, sort: "pop", sale: false });
   const [typed, setTyped] = useState("");
   const [items, setItems] = useState<ShopItem[]>(initial.items);
@@ -431,8 +454,8 @@ export function ShopPicker({
             <BackIcon />
           </a>
           <h1>
-            {storeName}
-            <small>{customerName ? `Pedido de ${customerName}` : "Su pedido llega a su chat"}</small>
+            {title}
+            <small>{brand && brand !== storeName ? `${storeName} · ${who}` : who}</small>
           </h1>
           <div className={styles.icons}>
             <button type="button" className={styles.ib} onClick={() => setSheet("cart")} aria-label={`Ver mi pedido, ${units} productos`}>
@@ -453,6 +476,12 @@ export function ShopPicker({
             </button>
           </div>
         </div>
+        {(tagline || sameDayInfo) && (
+          <p className={styles.promise}>
+            {tagline && <strong>{tagline}</strong>}
+            {sameDayInfo && <span className={sameDayInfo.today ? styles.today : undefined}>{sameDayInfo.text}</span>}
+          </p>
+        )}
         <form
           className={styles.search}
           role="search"
