@@ -129,6 +129,9 @@ import { loadBusinessSettings, renderText, type BusinessSettings } from "../busi
 import { findSeasonalReply, localDate } from "../business/seasonal-replies";
 import { activeMenuPromo } from "../business/menu-promos";
 import { activeHostFor, hostGuestLine } from "../marketing/hosts";
+import { adLineOf, lineTag, parseWebServiceRequest } from "./ad-lines";
+import { tagContact } from "../contacts/origin";
+import { listLibrary } from "../media/library";
 import {
   type CollectInputNodeConfig,
   type ConditionNodeConfig,
@@ -1082,6 +1085,20 @@ async function executeHandoff(
   node: FlowNodeRow,
 ): Promise<void> {
   const cfg = node.config as unknown as HandoffNodeConfig;
+  // "servicio-{{vars.svc_tipo_choice}}" → tag "servicio-gasfiteria".
+  if (cfg.tag && run.contact_id) {
+    const used = [...cfg.tag.matchAll(/\{\{vars\.([a-zA-Z0-9_]+)\}\}/g)].map((m) => run.vars[m[1]]);
+    const tagName = normalizeForMatch(interpolateVars(cfg.tag, run.vars)).replace(/ /g, "-").slice(0, 40);
+    if (tagName && used.every((v) => typeof v === "string" && v.trim())) {
+      await tagContact(db, {
+        accountId: run.account_id,
+        userId: run.user_id,
+        contactId: run.contact_id,
+        tagName,
+        color: "#0ea5e9",
+      }).catch((err) => console.error("[flows] handoff tag failed:", err));
+    }
+  }
   const convUpdate: Record<string, unknown> = {
     status: "pending",
     updated_at: new Date().toISOString(),
@@ -1626,6 +1643,11 @@ async function advanceFromNodeKey(
       // Send the prompt and suspend. Customer's next TEXT reply will
       // wake us up via handleReplyForActiveRun's collect_input branch.
       const cfg = node.config as unknown as CollectInputNodeConfig;
+      // Already answered elsewhere (a web form's summary): don't ask again.
+      if (prefilledVar(run, cfg.var_key) && cfg.next_node_key) {
+        currentKey = cfg.next_node_key;
+        continue;
+      }
       const known = run.vars[cfg.var_key];
       if (cfg.ai_guide && typeof known === "string" && known.trim()) {
         // The job is already described: go straight to the advisor's
@@ -1765,6 +1787,11 @@ async function advanceFromNodeKey(
       continue;
     }
     if (node.node_type === "send_buttons") {
+      const buttonFallback: { var_key?: string; next_node_key?: string } | undefined = (node.config as { text_fallback?: { var_key?: string; next_node_key?: string } }).text_fallback;
+      if (buttonFallback?.next_node_key && prefilledVar(run, buttonFallback.var_key)) {
+        currentKey = buttonFallback.next_node_key;
+        continue;
+      }
       await sendButtonsAndSuspend(db, run, node);
       // Persist the new current_node_key via optimistic UPDATE.
       const advanced = await advanceCurrentNodeKey(
@@ -3596,6 +3623,13 @@ async function dispatchInboundToFlowsInner(
       if (answered) return answered;
     }
 
+    // "Hola, pedí un técnico en la web (SW-0007)" + the form's summary:
+    // confirm, ask only for the photo, and pass it to the team.
+    if (input.message.kind === "text" && parseWebServiceRequest(input.message.text)) {
+      const web = await startWebServiceRequest(db, input);
+      if (web) return web;
+    }
+
     const activeRun = await loadActiveRunForContact(
       db,
       input.accountId,
@@ -3943,6 +3977,12 @@ async function dispatchInboundToFlowsInner(
     // "Rapidito" as the first message (or after a person took the chat):
     // straight to the catalog button, as if it was picked on the menu.
     if (input.message.kind === "text") {
+      // "Plomero", "necesito un electricista": the home-service request.
+      const service = await startAtServiceWord(db, input);
+      if (service) return service;
+      // A "click to WhatsApp" ad or "quiero ver juguetes": that line's answer.
+      const line = await answerAdLine(db, input);
+      if (line) return line;
       const shop = await startAtShopKeyword(db, input);
       if (shop) return shop;
     }
@@ -4876,14 +4916,18 @@ async function assignServiceNumber(db: AdminClient, run: FlowRunRow): Promise<vo
  * human reference, never a key.
  */
 async function nextRunNumber(db: AdminClient, accountId: string, varKey: string, prefix = ""): Promise<string> {
+  // Only numbers with this prefix: a web form's "SW-0007" kept as the
+  // service number doesn't move the bot's own "S-" count.
+  const own = `${prefix}%`;
   const used = db.from("flow_runs").select("id", { count: "exact", head: true }).eq("account_id", accountId);
   const [{ count }, { data: top }] = await Promise.all([
-    used.not(`vars->>${varKey}`, "is", null),
+    used.not(`vars->>${varKey}`, "is", null).like(`vars->>${varKey}`, own),
     db
       .from("flow_runs")
       .select(`n:vars->>${varKey}`)
       .eq("account_id", accountId)
       .not(`vars->>${varKey}`, "is", null)
+      .like(`vars->>${varKey}`, own)
       .order(`vars->>${varKey}`, { ascending: false })
       .limit(20),
   ]);
@@ -7546,6 +7590,205 @@ async function handleReplyForActiveRun(
   // action.type === 'end'
   await endRun(db, run.id, "completed", "fallback_exhausted_end");
   return { consumed: true, flow_run_id: run.id, outcome: "completed" };
+}
+
+/** A var filled before the run reached its question (see `__prefilled`). */
+function prefilledVar(run: FlowRunRow, key: string | undefined): boolean {
+  const list = run.vars.__prefilled;
+  const value = key ? run.vars[key] : undefined;
+  return !!key && Array.isArray(list) && list.includes(key) && typeof value === "string" && !!value.trim();
+}
+
+type ListRow = { title?: string; reply_id?: string; aliases?: string[]; next_node_key?: string };
+
+function listRows(node: FlowNodeRow | undefined): ListRow[] {
+  const cfg = node?.config as { sections?: { rows?: ListRow[] }[] } | undefined;
+  return (cfg?.sections ?? []).flatMap((s) => s.rows ?? []);
+}
+
+const SERVICE_FILLER = new Set(
+  "hola buenas buenos buen dia dias tardes noches necesito necesitaria busco requiero quiero quisiera un una el la de por favor urgente".split(" "),
+);
+
+/**
+ * "Plomero", "necesito un electricista": a word of the service menu (Mi
+ * negocio → serviceBoard.entryNode, e.g. "Gasfitería" with alias
+ * "plomero") on its own starts that kind of request directly.
+ */
+async function startAtServiceWord(
+  db: AdminClient,
+  input: DispatchInboundInput & { isFirstInboundMessage: boolean },
+): Promise<DispatchInboundResult | null> {
+  if (input.message.kind !== "text") return null;
+  const rest = normalizeForMatch(input.message.text).split(" ").filter((w) => w && !SERVICE_FILLER.has(w)).join(" ");
+  if (!rest || rest.split(" ").length > 3) return null;
+  const biz = await bizOf(db, input.accountId);
+  const entryKey = biz.serviceBoard.entryNode;
+  const flow = entryKey ? await findDefaultEntryFlow(db, input.accountId) : null;
+  if (!flow || !entryKey) return null;
+  const nodes = await loadAllNodes(db, flow.id);
+  const row = listRows(nodes.get(entryKey)).find(
+    (r) => r.next_node_key && nodes.has(r.next_node_key) && (r.aliases ?? []).some((a) => normalizeForMatch(a) === rest),
+  );
+  if (!row) return null;
+  return startNewRun(db, flow, input, nodes, {
+    startAt: row.next_node_key,
+    vars: { [`${entryKey}_choice`]: row.title ?? rest },
+  });
+}
+
+/**
+ * The summary a web store's "ask for a technician" form has the customer
+ * send. Starts the home-service request with what came in it (kind of
+ * job, sector, day) marked as answered, so the bot only asks for the
+ * photo; the number is the web's code.
+ */
+async function startWebServiceRequest(
+  db: AdminClient,
+  input: DispatchInboundInput & { isFirstInboundMessage: boolean },
+): Promise<DispatchInboundResult | null> {
+  if (input.message.kind !== "text") return null;
+  const req = parseWebServiceRequest(input.message.text);
+  if (!req) return null;
+  const biz = await bizOf(db, input.accountId);
+  const entryKey = biz.serviceBoard.entryNode;
+  const flow = entryKey ? await findDefaultEntryFlow(db, input.accountId) : null;
+  if (!flow || !entryKey) return null;
+  const nodes = await loadAllNodes(db, flow.id);
+  const entry = nodes.get(entryKey);
+  if (!entry) return null;
+  const said = normalizeForMatch(req.service);
+  const row = listRows(entry).find(
+    (r) => normalizeForMatch(r.title ?? "") === said || (r.aliases ?? []).some((a) => normalizeForMatch(a) === said),
+  );
+  const fallback = (entry.config as { text_fallback?: { var_key?: string; next_node_key?: string } }).text_fallback;
+  const startAt = row?.next_node_key ?? fallback?.next_node_key;
+  if (!startAt || !nodes.has(startAt)) return null;
+
+  // Walk the request's questions and fill the ones the form answered.
+  const problemVar = fallback?.var_key ?? "svc_problema";
+  const job = [req.job, req.detail].filter(Boolean).join(". ") || req.service;
+  const vars: Record<string, unknown> = {
+    [`${entryKey}_choice`]: row?.title ?? req.service,
+    [problemVar]: job,
+    [`${problemVar}_resumen`]: req.job ? `${req.service} — ${req.job}` : req.service,
+    service_number: req.code,
+    web_service_ref: req.code,
+  };
+  const prefilled = [problemVar];
+  let key: string | undefined = startAt;
+  for (let i = 0; key && i < 15; i++) {
+    const node = nodes.get(key);
+    if (!node) break;
+    const cfg = node.config as { var_key?: string; next_node_key?: string; text_fallback?: { var_key?: string; next_node_key?: string } };
+    const varKey = node.node_type === "collect_input" ? cfg.var_key : cfg.text_fallback?.var_key;
+    if (varKey && req.sector && /direccion|ubicacion|sector|address/.test(varKey) && !prefilled.includes(varKey)) {
+      vars[varKey] = `Sector: ${req.sector}`;
+      prefilled.push(varKey);
+    } else if (varKey && req.when && /horario|dia|fecha|cuando/.test(varKey) && !prefilled.includes(varKey)) {
+      vars[varKey] = req.when;
+      prefilled.push(varKey);
+    }
+    if (node.node_type === "handoff") break;
+    key = cfg.next_node_key ?? cfg.text_fallback?.next_node_key;
+  }
+  vars.__prefilled = prefilled;
+
+  const active = await loadActiveRunForContact(db, input.accountId, input.contactId);
+  if (active) await endRun(db, active.id, "timed_out", "superseded_by_web_service");
+  const start = await customerStartVars(db, input.accountId, input.contactId);
+  const confirm = renderText(biz.texts.webServiceReceived, {
+    nombre: String(start.contact_name ?? ""),
+    codigo: req.code,
+    servicio: String(vars[`${problemVar}_resumen`]),
+  }).trim();
+  if (confirm) {
+    try {
+      await engineSendText({
+        accountId: input.accountId,
+        userId: input.userId,
+        conversationId: input.conversationId,
+        contactId: input.contactId,
+        text: confirm,
+      });
+    } catch (err) {
+      console.error("[flows] web service confirmation failed:", err);
+    }
+  }
+  return startNewRun(db, flow, input, nodes, { startAt, vars });
+}
+
+/** Lines answered recently, so a second "hola, juguetes" isn't answered twice. */
+const recentLineAnswers = new Map<string, number>();
+
+/**
+ * A campaign line (Mi negocio → adLines) named by the ad the customer
+ * came from or by their first message: the line's answer, its pictures
+ * from the media library, the catalog button, and — for a line that needs
+ * advice (gifts, toys, parties) — a person asked to help.
+ */
+async function answerAdLine(
+  db: AdminClient,
+  input: DispatchInboundInput & { isFirstInboundMessage: boolean },
+): Promise<DispatchInboundResult | null> {
+  if (input.message.kind !== "text") return null;
+  const biz = await bizOf(db, input.accountId);
+  const line = adLineOf(biz.adLines, input.message.text, input.referral);
+  if (!line) return null;
+  const onceKey = `${input.contactId}|${line.key}`;
+  if (Date.now() - (recentLineAnswers.get(onceKey) ?? 0) < 6 * 3_600_000) return null;
+  recentLineAnswers.set(onceKey, Date.now());
+  const send = {
+    accountId: input.accountId,
+    userId: input.userId,
+    conversationId: input.conversationId,
+    contactId: input.contactId,
+  };
+  await tagContact(db, { ...send, tagName: lineTag(line.key), color: "#ec4899" }).catch((err) =>
+    console.error("[flows] line tag failed:", err),
+  );
+  const start = await customerStartVars(db, input.accountId, input.contactId);
+  try {
+    await engineSendText({ ...send, text: renderText(line.reply, { nombre: String(start.contact_name ?? "") }).trim() });
+    if (line.photoTag) {
+      const pieces = (await listLibrary(db, input.accountId, localDate(biz.utcOffsetHours)).catch(() => []))
+        .filter((p) => p.tags.includes(line.photoTag) && p.mime_type.startsWith("image/"))
+        .slice(0, 3);
+      for (const p of pieces) await engineSendMedia({ ...send, kind: "image", link: p.url, caption: p.caption ?? undefined });
+    }
+    const link = await catalogLink(db, input.accountId, input.contactId, input.conversationId);
+    const lead = renderText(biz.texts.adLineCatalog, { catalogo: `*${biz.shopName}*` }).trim();
+    if (link && lead) {
+      await engineSendCtaUrl({ ...send, bodyText: lead, buttonText: biz.shopButton, url: link });
+    }
+  } catch (err) {
+    console.error("[flows] campaign line answer failed:", err);
+  }
+  if (line.toPerson) {
+    const { data: contact } = await db.from("contacts").select("name, phone").eq("id", input.contactId).maybeSingle();
+    const c = contact as { name?: string | null; phone?: string | null } | null;
+    const phone = c?.phone ? localPhone(c.phone.replace(/^\+/, ""), biz.phoneCountryCode) : "";
+    const said = input.message.text.replace(/\s+/g, " ").slice(0, 160);
+    await notifyAccountInApp(db, {
+      accountId: input.accountId,
+      conversationId: input.conversationId,
+      contactId: input.contactId,
+      title: `📣 Cliente de la campaña ${line.key}: ${c?.name?.trim() || "Cliente"}${phone ? ` (${phone})` : ""}`,
+      body: `Escribió: "${said}". Ayúdele a elegir por aquí.`,
+    });
+    await notifyStaffOfHandoff(db, {
+      accountId: input.accountId,
+      contactName: c?.name?.trim() || "Cliente",
+      summary: `📣 CAMPAÑA ${line.key.toUpperCase()} — ${phone}\n"${said}"\n👉 Ayúdele a elegir`,
+      conversationId: input.conversationId,
+    }).catch(() => null);
+    // A person helps from here: the chat AI steps aside.
+    await db
+      .from("conversations")
+      .update({ status: "pending", ai_autoreply_disabled: true, updated_at: new Date().toISOString() })
+      .eq("id", input.conversationId);
+  }
+  return { consumed: true, outcome: "no_match" };
 }
 
 /**

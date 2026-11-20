@@ -79,6 +79,8 @@ const TEXT_KEYS: (keyof Texts)[] = [
   "closingInstallYes",
   "closingCatalogTip",
   "shopWelcome",
+  "webServiceReceived",
+  "adLineCatalog",
   "totalPending",
   "thanksReply",
   "callRequestOpen",

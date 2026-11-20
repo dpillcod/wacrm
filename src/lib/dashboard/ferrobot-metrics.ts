@@ -23,6 +23,8 @@ export interface MetricsDay {
 
 export interface FerrobotMetrics {
   days: MetricsDay[]
+  /** Chats per campaign line ("Línea: juguetes" → "juguetes") and service kind ("servicio-pintura"), in the period. */
+  lines: { line: string; chats: number }[]
   top_products: TopProduct[]
   hours: { hour: number; inbound: number }[]
   first_response_minutes: number | null
@@ -41,6 +43,15 @@ export interface MetricsInput {
   webOrders: { at: string; lines: string[] }[]
   /** Handoffs to a person that weren't an order. */
   handoffs: { at: string; conversationId: string | null }[]
+  /** Contacts tagged with a campaign line or a service kind in the period (tag name). */
+  lineTags?: string[]
+}
+
+/** "Línea: juguetes" → "juguetes", "servicio-pintura" stays; other tags → null. */
+export function lineOfTag(name: string): string | null {
+  if (name.startsWith('Línea: ')) return name.slice('Línea: '.length).trim() || null
+  if (/^servicio-[a-z0-9-]+$/.test(name)) return name
+  return null
 }
 
 export function emptyDays(days: number, now: Date, utcOffsetHours: number): MetricsDay[] {
@@ -147,8 +158,14 @@ export function ferrobotMetrics(
   }
 
   const recentMessages = input.messages.filter((m) => isRecent(m.created_at))
+  const lineCounts = new Map<string, number>()
+  for (const t of input.lineTags ?? []) {
+    const line = lineOfTag(t)
+    if (line) lineCounts.set(line, (lineCounts.get(line) ?? 0) + 1)
+  }
   return {
     days: series,
+    lines: [...lineCounts].map(([line, chats]) => ({ line, chats })).sort((a, b) => b.chats - a.chats),
     top_products: topProducts(lines, 20),
     hours,
     first_response_minutes: firstResponseMinutes(recentMessages, utcOffsetHours),

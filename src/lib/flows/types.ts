@@ -340,6 +340,11 @@ export interface HandoffNodeConfig {
   /** Optional internal note written to flow_run_events.payload.note. */
   note?: string;
   /**
+   * Tag put on the contact, e.g. "servicio-{{vars.svc_tipo_choice}}"
+   * (folded to "servicio-gasfiteria"); skipped when a var is empty.
+   */
+  tag?: string;
+  /**
    * Optional agent user_id to assign on the conversation when this
    * node fires. Leave unset to flip the status without assignment.
    */
@@ -837,6 +842,8 @@ export interface DispatchInboundInput {
   contactId: string;
   conversationId: string;
   message: ParsedInbound;
+  /** The ad or post the customer came from (Meta's referral), if any. */
+  referral?: { headline?: string; body?: string; source_type?: string } | null;
 }
 
 export interface DispatchInboundResult {

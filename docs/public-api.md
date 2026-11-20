@@ -381,6 +381,7 @@ are in the business's local time.
   "top_products": [ { "label": "Arroz blanco", "count": 3 } ],  // last 30 days, max 20
   "hours": [ { "hour": 9, "inbound": 93 } ],                     // customer messages per local hour, last 30 days (0–23)
   "first_response_minutes": 0.1                                   // median, first answer (bot or person) to the day's first message, last 30 days; null if none
+  "lines": [ { "line": "juguetes", "chats": 12 }, { "line": "servicio-pintura", "chats": 3 } ]  // chats per campaign line (Mi negocio → adLines) and service kind in the period
 } }
 ```
 

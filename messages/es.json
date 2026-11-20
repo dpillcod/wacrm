@@ -1933,6 +1933,8 @@
         "closingPromo": "Promoción de cierre: 1 vez por semana al terminar bien un pedido o con el \"gracias\" ({promo} = promoción del menú si no la vio; vacío = apagado)",
         "closingInstall": "Oferta de instalación al cerrar un pedido con chapa, llave, tomacorriente, etc., con botones Sí/No ({producto} = la línea del pedido; vacío = apagado)",
         "closingInstallYes": "Respuesta cuando el cliente toca \"Sí, instálenlo\" (el equipo recibe el aviso)",
+        "webServiceReceived": "Confirmación del pedido de técnico hecho en la web ({nombre}, {codigo} = su código, {servicio} = el trabajo); después se pide la foto",
+        "adLineCatalog": "Botón del catálogo después de la respuesta de una línea de campaña (juguetes, fiestas…) ({catalogo} = su nombre; vacío = sin botón)",
         "shopWelcome": "Bienvenida cuando el cliente pide el catálogo por su nombre (\"rapidito\") sin pasar por el menú: va arriba del botón del catálogo ({nombre} = nombre del cliente; {promo} = promoción del menú; vacío = apagado)",
         "closingCatalogTip": "Consejo del catálogo ({catalogo} = su nombre) en la promoción de cierre, si el pedido fue escrito (sale con el botón del catálogo; vacío = apagado)",
         "totalPending": "\"¿Cuánto es el total?\" después de pasar el pedido al personal",

@@ -16,6 +16,7 @@ import { sanitizeAdLinks, type AdLink } from '@/lib/marketing/ad-links'
 
 import { sanitizeSeasonalReplies, type SeasonalReply } from './seasonal-replies'
 import { sanitizeMenuPromos, type MenuPromo } from './menu-promos'
+import { sanitizeAdLines, type AdLine } from '@/lib/flows/ad-lines'
 
 export interface CrossSellRule {
   keyword: string
@@ -101,6 +102,8 @@ export interface BusinessSettings {
   allowPaidTemplates: boolean
   /** Advertising links (Advertising page); changed only through /api/marketing/links. */
   adLinks: AdLink[]
+  /** Campaign lines for ads and first messages (see flows/ad-lines.ts). */
+  adLines: AdLine[]
   /**
    * Partner program for Airbnb hosts (Advertising page → Hosts): guests
    * who write through a host's QR get the discount while their stay
@@ -208,6 +211,13 @@ export interface BusinessSettings {
      * promotion. '' = off.
      */
     shopWelcome: string
+    /**
+     * Confirmation of a web form's technician request; {nombre}, {codigo}
+     * (its code), {servicio} (kind of job). The photo question follows.
+     */
+    webServiceReceived: string
+    /** Catalog button after a campaign line's answer; {catalogo} = its name. '' = no button. */
+    adLineCatalog: string
     /** "¿Cuánto es el total?" after the order went to staff; {pedido} = the order number. */
     totalPending: string
     /** "Gracias" / "ok" after the order went to staff. */
@@ -355,6 +365,7 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
   newConversationAlert: 'off',
   allowPaidTemplates: false,
   adLinks: [],
+  adLines: [],
   hostProgram: {
     discountPct: 5,
     freeDeliveryFrom: 0,
@@ -404,6 +415,9 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
     closingInstallYes: '✅ ¡Listo! Le pasé su pedido de instalación a nuestro equipo; le confirman el día y el costo por aquí 🙂',
     closingCatalogTip: '⚡ La próxima vez pida en 1 minuto, con fotos y precios, en nuestro *{catalogo}* 👇',
     shopWelcome: '¡Hola{nombre}! 👋 Gracias por escribirnos 🙌\n\n{promo}',
+    webServiceReceived:
+      '✅ ¡Hola{nombre}! Recibimos su pedido de técnico de la web *{codigo}*: {servicio}. Ya tenemos sus datos, no hace falta repetirlos 🙂',
+    adLineCatalog: '¿Ya sabe lo que quiere? Pídalo en 1 minuto en {catalogo} 👇',
     totalPending:
       'Su asesor está preparando el total de su pedido {pedido} y se lo envía por aquí en unos minutos 🙂 Mientras tanto, ¿desea agregar algo más?',
     thanksReply: '¡Con gusto! 🙂 Cualquier cosa, aquí estamos.',
@@ -539,6 +553,7 @@ export function sanitizeSettings(stored: unknown): BusinessSettings {
     openingHours: hours.length ? [...hours, ...Array(7 - hours.length).fill(null)] : [],
     staffPhones: strings(s.staffPhones, 20),
     adLinks: sanitizeAdLinks(s.adLinks),
+    adLines: sanitizeAdLines(s.adLines),
     hostProgram: {
       discountPct: clampNumber(s.hostProgram.discountPct, 0, 50),
       freeDeliveryFrom: clampNumber(s.hostProgram.freeDeliveryFrom, 0, 10000),

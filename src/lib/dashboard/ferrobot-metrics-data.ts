@@ -124,5 +124,23 @@ export async function loadFerrobotMetrics(
     lines: webOrderLines(r.vars?.order_items_summary),
   }))
 
-  return ferrobotMetrics({ messages, whatsappOrders, webOrders, handoffs }, days, now, biz.utcOffsetHours)
+  // Chats per campaign line / service kind: tags put in the period.
+  const { data: tagRows } = await db
+    .from('tags')
+    .select('id, name')
+    .eq('account_id', accountId)
+    .or('name.like.Línea: %,name.like.servicio-%')
+  const lineTags: string[] = []
+  const tagList = (tagRows ?? []) as { id: string; name: string }[]
+  if (tagList.length) {
+    const { data: tagged } = await db
+      .from('contact_tags')
+      .select('tag_id')
+      .in('tag_id', tagList.map((t) => t.id))
+      .gte('created_at', since)
+      .limit(20_000)
+    const names = new Map(tagList.map((t) => [t.id, t.name]))
+    for (const r of (tagged ?? []) as { tag_id: string }[]) lineTags.push(names.get(r.tag_id) ?? '')
+  }
+  return ferrobotMetrics({ messages, whatsappOrders, webOrders, handoffs, lineTags }, days, now, biz.utcOffsetHours)
 }

@@ -23,6 +23,7 @@ describe('ferrobot metrics', () => {
           { at: '2026-11-19T15:00:00Z', conversationId: 'a' },
           { at: '2026-11-19T15:10:00Z', conversationId: 'a' },
         ],
+        lineTags: ['Línea: juguetes', 'Línea: juguetes', 'servicio-pintura', 'VIP'],
       },
       3,
       now,
@@ -35,6 +36,7 @@ describe('ferrobot metrics', () => {
     expect(m.hours[9].inbound).toBe(2)
     expect(m.hours[22].inbound).toBe(1)
     expect(m.first_response_minutes).toBe(0.5)
+    expect(m.lines).toEqual([{ line: 'juguetes', chats: 2 }, { line: 'servicio-pintura', chats: 1 }])
   })
 
   it('first response: median, unanswered ones left out', () => {

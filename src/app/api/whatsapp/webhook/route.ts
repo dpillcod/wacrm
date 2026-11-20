@@ -978,6 +978,7 @@ async function processMessage(
     contactId: contactRecord.id,
     conversationId: conversation.id,
     message: toFlowInbound(message, flowText, mediaUrl, interactiveReplyId, orderItems, formData),
+    referral: message.referral ?? null,
   }
   const quietStart = guestWelcomed ? await openOrderQuietly(flowInput) : null
   const flowResult = quietStart?.consumed
