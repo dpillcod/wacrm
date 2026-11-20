@@ -25,6 +25,7 @@ export const API_SCOPES = [
   'broadcasts:draft',
   'marketing:read',
   'media:write',
+  'metrics:read',
 ] as const;
 
 export type ApiScope = (typeof API_SCOPES)[number];
@@ -42,6 +43,7 @@ export const SCOPE_DESCRIPTIONS: Record<ApiScope, string> = {
   'broadcasts:draft': 'Leave broadcast drafts for a person to review and send (cannot send)',
   'marketing:read': 'Read partner hosts (QR links, results) and the host program',
   'media:write': 'Add finished pieces (images) to the media library agents send from (cannot send)',
+  'metrics:read': 'Read aggregated WhatsApp and bot numbers (no contact data)',
 };
 
 /** Type-narrow an unknown value into a valid `ApiScope`. */

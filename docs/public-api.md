@@ -54,6 +54,7 @@ it. Grant the minimum.
 | `broadcasts:draft`   | Leave broadcast drafts (cannot send)     |
 | `marketing:read`     | Read partner hosts and their QR links    |
 | `media:write`        | Add images to the media library (cannot send) |
+| `metrics:read`       | Read aggregated WhatsApp and bot numbers (no contact data) |
 
 A key with **no scopes** still authenticates and can call
 `GET /api/v1/me` — useful for verifying a key works.
@@ -358,6 +359,30 @@ Print `scan_url` (or `qr_svg`) exactly: that link counts the scan and
 gives the guest the discount — a QR made from a plain `wa.me` link does
 neither. Never returns the host's phone or agreed reward. Best sellers
 first.
+
+### `GET /api/v1/metrics`
+
+Aggregated numbers of the WhatsApp channel and the bot, for a partner
+app's results screen. **Only numbers**: no phones, names or message
+text. Scope `metrics:read`. `?days=60` (1–90, default 60); days and hours
+are in the business's local time.
+
+```json
+{ "data": {
+  "days": [
+    { "day": "2026-11-18",
+      "conversations": 17,      // conversations with a customer message that day
+      "inbound_messages": 72,   // customer messages
+      "orders_whatsapp": 1,     // orders taken on WhatsApp (order-card handoffs)
+      "orders_web": 1,          // web store orders the bot received
+      "bot_orders": 1,          // WhatsApp orders the bot took to a confirmed list itself
+      "handoffs": 2 }           // conversations a person was called into (once per day)
+  ],
+  "top_products": [ { "label": "Arroz blanco", "count": 3 } ],  // last 30 days, max 20
+  "hours": [ { "hour": 9, "inbound": 93 } ],                     // customer messages per local hour, last 30 days (0–23)
+  "first_response_minutes": 0.1                                   // median, first answer (bot or person) to the day's first message, last 30 days; null if none
+} }
+```
 
 ### `POST /api/v1/media`
 
