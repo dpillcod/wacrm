@@ -81,7 +81,9 @@ export function CoexistenceSignup({ hasNumber, onConnected }: { hasNumber: boole
           setResult({ ok: false, text: t('cancelled') });
           return;
         }
-        if (data.data?.waba_id) session.current = { waba_id: data.data.waba_id, phone_number_id: data.data.phone_number_id };
+        // v4 sends data.waba_id; v5 sends data.messaging_account_ids (array).
+        const wabaId = data.data?.waba_id ?? (Array.isArray(data.data?.messaging_account_ids) ? data.data.messaging_account_ids[0] : undefined);
+        if (wabaId) session.current = { waba_id: wabaId, phone_number_id: data.data?.phone_number_id };
       } catch {
         // other postMessage traffic from facebook.com
       }
@@ -143,10 +145,15 @@ export function CoexistenceSignup({ hasNumber, onConnected }: { hasNumber: boole
           config_id: config.configId,
           response_type: 'code',
           override_default_response_type: true,
+          // Embedded Signup v5: onboarding an existing WhatsApp Business
+          // app number is on by default. Without `version`, Meta opens the
+          // retired v2/v3 flow (dead since Oct 15, 2026), which only offers
+          // a new number verified by SMS — that would take the number off
+          // the phone app.
           extras: {
+            version: 'v5',
             setup: {},
             featureType: 'whatsapp_business_app_onboarding',
-            sessionInfoVersion: '3',
           },
         },
       );
