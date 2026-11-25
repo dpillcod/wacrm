@@ -23,7 +23,8 @@ import {
  * for Business configuration id of type "WhatsApp Embedded Signup").
  */
 
-const SDK_GRAPH_VERSION = 'v21.0'
+// Meta's Embedded Signup docs: initialize the JS SDK with the latest Graph version.
+const SDK_GRAPH_VERSION = 'v27.0'
 
 function admin() {
   return createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
