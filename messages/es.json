@@ -1952,6 +1952,8 @@
         "answerQuestionsHint": "\"¿Tiene grilón?\" o \"¿Hacen entregas?\" se responde (y se ofrece el producto), nunca se anota como producto.",
         "reviewConversations": "Revisar cada conversación",
         "reviewConversationsHint": "Cuando el cliente deja de escribir (30 min), la IA revisa la conversación y le avisa a los administradores si algo salió mal: preguntas sin respuesta, productos perdidos, clientes confundidos. Cuesta muy poco (modelo económico).",
+        "modelOptions": "Mostrar modelos del producto",
+        "modelOptionsHint": "Tras anotar un producto con varias opciones, el bot lista hasta 3 modelos que hay en stock (\"🔎 Algunos modelos que tenemos\"). Apáguelo si prefiere que el asesor ayude a elegir.",
         "readImages": "Leer fotos",
         "readImagesHint": "La foto de una lista escrita, o de un producto, se convierte en líneas del pedido.",
         "transcribeAudio": "Entender notas de voz",

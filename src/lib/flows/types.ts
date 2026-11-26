@@ -140,7 +140,15 @@ export interface SendListNodeConfig {
    * may be a whole `{{vars.x}}` (pair it with `catalog_link: true` on
    * this node); without a usable https link only `text` goes out.
    */
-  intro_cta?: { text: string; button_text: string; url: string; /** Optional image header (public https URL). */ header_image_url?: string };
+  intro_cta?: {
+    text: string;
+    button_text: string;
+    url: string;
+    /** Optional image header (public https URL). */
+    header_image_url?: string;
+    /** Send it right after `text` (a separate, eye-catching message) instead of before. */
+    after?: boolean;
+  };
 }
 
 /**
@@ -332,7 +340,7 @@ export interface HandoffFollowUpConfig {
   every_minutes: number;
   /** Most times the customer is asked, and the most staff reminders. */
   max: number;
-  /** Asked with [✅ Sí] [⏳ Aún no] buttons, e.g. "¿Ya le respondió nuestro asesor?". */
+  /** Asked with [✅ Sí] [⏳ Aún no] buttons, e.g. "¿Ya le respondió nuestro asesor?". Empty = staff reminders only, nothing to the customer. */
   question: string;
 }
 

@@ -18,6 +18,7 @@ import {
   checkInReply,
   extractValidInput,
   optionByNumber,
+  timeOfDayGreeting,
   parseOptionNumber,
   numberLines,
   textFallbackOf,
@@ -305,6 +306,27 @@ describe("option numbers typed instead of tapped", () => {
     };
     expect(optionByNumber(buttons, "1")?.reply_id).toBe("x");
     expect(optionByNumber({ node_type: "collect_input", config: {} }, "1")).toBeNull();
+  });
+
+  it("greets by the shop's local hour", () => {
+    expect(timeOfDayGreeting(8)).toBe("Buenos días");
+    expect(timeOfDayGreeting(13)).toBe("Buenas tardes");
+    expect(timeOfDayGreeting(20)).toBe("Buenas noches");
+    expect(timeOfDayGreeting(-3)).toBe("Buenas noches"); // 21:00 the day before
+    expect(timeOfDayGreeting(30)).toBe("Buenos días"); // 06:00 the next day
+  });
+
+  it("a text menu only answers to the numbers it shows", () => {
+    const rows = [
+      { reply_id: "tecnico", title: "Técnico", next_node_key: "a" },
+      { reply_id: "pasteleria", title: "Pastelería", next_node_key: "b" },
+    ];
+    const menu = (text: string) => ({ node_type: "send_list", config: { send_as_text: true, text, sections: [{ rows }] } });
+    expect(optionByNumber(menu("O elija:\n1️⃣ 🔧 Técnico\n2️⃣ 🎂 Pastelería"), "2")?.reply_id).toBe("pasteleria");
+    expect(optionByNumber(menu("1. Técnico\n2) Pastelería"), "1")?.reply_id).toBe("tecnico");
+    // A plain greeting lists nothing: "2" is a quantity, not the hidden row.
+    expect(optionByNumber(menu("¡Buenas tardes! 😊 ¿Qué necesita hoy?"), "2")).toBeNull();
+    expect(optionByNumber(menu("Tenemos 2 opciones"), "2")).toBeNull();
   });
 });
 

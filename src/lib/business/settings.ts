@@ -134,6 +134,8 @@ export interface BusinessSettings {
     answerQuestions: boolean
     /** Review each conversation with AI once the customer stops writing; admins hear about problems. */
     reviewConversations: boolean
+    /** After a product is written down, list a few real models of it ("🔎 Algunos modelos que tenemos"). */
+    modelOptions: boolean
   }
   /** Bakery orders (cakes, party snacks, bread). */
   bakery: {
@@ -374,7 +376,7 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
       '🏠 ¡Bienvenido/a! Por hospedarse en *{alojamiento}*, tiene *{descuento} de descuento* en sus compras en {negocio} durante su estadía{envio}.\n\n' +
       '🇬🇧 Welcome! As a guest of {alojamiento} you get *{descuento} off* your purchases at {negocio} during your stay{envio_en}. Just send us your list here.',
   },
-  aiFeatures: { readImages: true, transcribeAudio: true, entryRouter: true, audioDailyLimit: 200, answerQuestions: true, reviewConversations: false },
+  aiFeatures: { readImages: true, transcribeAudio: true, entryRouter: true, audioDailyLimit: 200, answerQuestions: true, reviewConversations: false, modelOptions: true },
   bakery: { entryNode: '' },
   texts: {
     idleNudge: '¿Sigue ahí? Si tiene alguna duda, dígame y seguimos con su pedido 🙂',

@@ -238,12 +238,19 @@ export function optionByNumber(
   if (node.node_type === "send_buttons") {
     options = (node.config as unknown as SendButtonsNodeConfig).buttons ?? [];
   } else if (node.node_type === "send_list") {
-    options = ((node.config as unknown as SendListNodeConfig).sections ?? []).flatMap(
-      (section) => section.rows ?? [],
-    );
+    const cfg = node.config as unknown as SendListNodeConfig;
+    // A text menu only answers to the numbers it shows: a greeting that
+    // lists no options must not turn "2" into the second (hidden) row.
+    if (cfg.send_as_text && !textListsNumber(cfg.text ?? "", index + 1)) return null;
+    options = (cfg.sections ?? []).flatMap((section) => section.rows ?? []);
   }
   const hit = options[index];
   return hit ? { reply_id: hit.reply_id, title: hit.title } : null;
+}
+
+/** "1️⃣ …", "1. …", "*1)* …" at the start of a line of a text menu. */
+export function textListsNumber(text: string, n: number): boolean {
+  return new RegExp(`(^|\\n)\\s*[*_]?${n}(\\uFE0F?\\u20E3|[.)-]|\\s)`).test(text);
 }
 
 function optionsOf(node: {
@@ -1030,7 +1037,7 @@ async function sendListAndSuspend(
   node: FlowNodeRow,
 ): Promise<{ outcome: "advanced"; node_key: string }> {
   const cfg = node.config as unknown as SendListNodeConfig;
-  if (cfg.intro_cta) await sendIntroCta(db, run, node.node_key, cfg.intro_cta);
+  if (cfg.intro_cta && !cfg.intro_cta.after) await sendIntroCta(db, run, node.node_key, cfg.intro_cta);
   const { whatsapp_message_id } = cfg.send_as_text
     ? // A plain numbered menu (the customer replies with a number — see
       // optionByNumber). `text` must already list the options in row
@@ -1065,6 +1072,8 @@ async function sendListAndSuspend(
     node_type: "send_list",
     whatsapp_message_id,
   });
+  // A separate, eye-catching link message after the greeting.
+  if (cfg.intro_cta?.after) await sendIntroCta(db, run, node.node_key, cfg.intro_cta);
   const { data: msg } = await db
     .from("messages")
     .select("id")
@@ -2538,9 +2547,14 @@ async function closingMessageFor(db: AdminClient, run: FlowRunRow): Promise<Clos
     .gte("vars->>__closing_promo_at", since)
     .limit(1);
   if ((recent ?? []).length > 0) return null;
-  // The campaign line only for whoever didn't see it on the menu today.
+  // The campaign line only for whoever didn't see it on the menu today
+  // (when the menu carries it at all — a short greeting leaves it here).
   const flow = await loadFlow(db, run.flow_id);
-  const { data: menuSent } = flow?.entry_node_id
+  const { data: entryNode } = flow?.entry_node_id
+    ? await db.from("flow_nodes").select("config").eq("flow_id", run.flow_id).eq("node_key", flow.entry_node_id).maybeSingle()
+    : { data: null };
+  const menuShowsPromo = JSON.stringify((entryNode as { config?: unknown } | null)?.config ?? {}).includes("vars.promo");
+  const { data: menuSent } = flow?.entry_node_id && menuShowsPromo
     ? await db
         .from("flow_run_events")
         .select("id")
@@ -2860,21 +2874,32 @@ async function customerStartVars(
   // "{{vars.promo}}" at the top of the menu: today's campaign line and a
   // blank line after it, or nothing at all once the campaign is over.
   let promo = "";
+  // "{{vars.saludo}}": "Buenos días" / "Buenas tardes" / "Buenas noches" at the shop's local time.
+  let saludo = timeOfDayGreeting(new Date().getUTCHours() - 5);
   try {
     const biz = await bizOf(db, accountId);
+    saludo = timeOfDayGreeting(new Date().getUTCHours() + biz.utcOffsetHours);
     const line = activeMenuPromo(biz.menuPromos, localDate(biz.utcOffsetHours));
     promo = line ? `${line}
 
 ` : "";
     const profile = await loadCustomerProfile(db, accountId, contactId, biz.idNumberFieldName);
-    if (profile) return { contact_name: contactName, promo, ...profileVars(profile, { contact_name: contactName }) };
+    if (profile) return { contact_name: contactName, promo, saludo, ...profileVars(profile, { contact_name: contactName }) };
   } catch (err) {
     console.error("[flows] customer profile lookup failed:", err);
   }
   // Not registered (yet): a list reached some other way (repeat an
   // order, a catalog cart) shows "Consumidor final" — "Otros datos"
   // changes it — never an empty invoice line.
-  return { contact_name: contactName, promo, billing_info: "Consumidor final", billing_line: "Consumidor final" };
+  return { contact_name: contactName, promo, saludo, billing_info: "Consumidor final", billing_line: "Consumidor final" };
+}
+
+/** The greeting a shop clerk would use at this local hour (any integer, wrapped to 0-23). */
+export function timeOfDayGreeting(localHour: number): string {
+  const h = ((Math.floor(localHour) % 24) + 24) % 24;
+  if (h >= 5 && h < 12) return "Buenos días";
+  if (h >= 12 && h < 19) return "Buenas tardes";
+  return "Buenas noches";
 }
 
 /** The customer's personal product-picker link (24 h), or "" when the CRM has no public address. */
@@ -4228,7 +4253,7 @@ async function clarifyCapturedBatch(
   let vars = previous
     ? withReplacedLines(run.vars, cfg.var_key, lines.length + 1, [previous, ...review.lines])
     : withReplacedLines(run.vars, cfg.var_key, lines.length, review.lines);
-  if (!review.question) {
+  if (!review.question && (await bizOf(db, run.account_id)).aiFeatures.modelOptions) {
     // Settled: a few real models of what has a choice to make.
     const { note, shown } = await modelOptionsNote(
       db,
@@ -5125,7 +5150,10 @@ async function runFollowUp(db: AdminClient, runId: string): Promise<void> {
   // "we'll attend you when we open" note.
   if (!isWithinBusinessHours(await bizOf(db, run.account_id)) || (await humanHasTakenOver(db, run))) return;
 
-  if (state.asked < state.max) {
+  // An empty question: staff reminders only — asking the customer "¿ya le
+  // respondieron?" feels like an answering machine.
+  const askCustomer = Boolean(state.question?.trim());
+  if (askCustomer && state.asked < state.max) {
     state.asked += 1;
     try {
       await engineSendInteractiveButtons({
@@ -5145,7 +5173,7 @@ async function runFollowUp(db: AdminClient, runId: string): Promise<void> {
   }
   if (state.reminded < state.max) await remindStaff(db, run, state);
   await saveVars(db, run, { ...run.vars, __follow_up: state });
-  if (state.asked < state.max) scheduleFollowUp(db, run.id, state.every_minutes);
+  if (askCustomer ? state.asked < state.max : state.reminded < state.max) scheduleFollowUp(db, run.id, state.every_minutes);
 }
 
 /** Handles a tap on a follow-up question; null if it isn't one. */
@@ -7202,7 +7230,7 @@ async function handleReplyForActiveRun(
         newLines,
       );
       // Answered: a few real models, and the advisor takes it from there.
-      const models = answered
+      const models = answered && (await bizOf(db, run.account_id)).aiFeatures.modelOptions
         ? await modelOptionsNote(db, run.account_id, answered.lines, answered.search, modelsShown(run.vars))
         : null;
       if (models?.note) {

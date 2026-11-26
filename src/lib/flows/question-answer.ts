@@ -248,7 +248,7 @@ export async function answerInFlow(
   const recent = conversationId ? await recentMessages(db, conversationId, question) : [];
   const previousAsk = [...recent].reverse().find((m) => m.who === "Cliente")?.text ?? "";
   const searches = [productSearchText(question) || question];
-  if (previousAsk && (productSearchText(question) || question).split(" ").length <= 3) {
+  if (previousAsk && (productSearchText(question) || question).split(" ").length <= 4) {
     searches.unshift(`${productSearchText(previousAsk)} ${productSearchText(question)}`.trim());
   }
   const found = await Promise.all(searches.map((q) => retrieveCatalogProducts(db, accountId, q, 8).catch(() => [])));
@@ -262,7 +262,8 @@ export async function answerInFlow(
     `Reglas:
 - NUNCA des precios, rangos ni costos de envío: los confirma un asesor.
 - Usa solo la información del negocio y las referencias del catálogo de abajo; no inventes datos. Si no sabes, dilo y ofrece que un asesor lo confirme.
-- No ofrezcas servicios que no estén en la información del negocio (impresiones, copias, envíos especiales…): si preguntan por uno, di que un asesor le confirma. El "técnico a domicilio" es SOLO para trabajos en la casa del cliente (gasfitería, electricidad, pintura, reparaciones): nunca lo sugieras para otra cosa.
+- No ofrezcas servicios que no estén en la información del negocio (impresiones, copias, envíos especiales…): si preguntan por uno, di que un asesor le confirma. El "técnico a domicilio" es SOLO para trabajos en la casa del cliente (gasfitería, electricidad, pintura, reparaciones): nunca lo sugieras para otra cosa. "Ayudarme con unas cosas a domicilio", "unos artículos a domicilio", "me traen/mandan…" es pedir PRODUCTOS con entrega a domicilio: invita a escribir lo que necesita, sin mencionar al técnico.
+- Si el mensaje solo da presentación, tamaño o cantidad ("¿tendrá de 5,5 kilos en polvo?", "¿y la de 3 litros?"), se refiere al producto del que se venía hablando en la conversación reciente (ahí: detergente en polvo de 5,5 kilos). Nunca ofrezcas opciones de otra categoría (polvo de tiza, canela).
 - Si pregunta si tenemos un producto: di que sí lo manejamos SOLO si una referencia del catálogo es claramente ese producto (no algo con nombre parecido: "grillete" no es "grilón"); no prometas stock exacto. Si no está claro en las referencias, di con amabilidad que no lo ves en el catálogo pero que lo anotas para que el asesor confirme. En ambos casos ofrece anotarlo preguntando la cantidad.
 - Si el producto tiene muchos modelos (una chapa, una llave, un foco, una pintura) y el cliente no dijo para qué es, haz UNA sola pregunta general con 2 o 3 opciones de uso o tipo (ej. "¿La chapa es para dormitorio, baño o puerta principal?"). Nunca preguntes color, marca, modelo ni medidas: eso lo ve el asesor.
 - "product": el producto por el que pregunta, nombre corto y claro (ej. "garbanzo", "timer digital"), SIEMPRE que pregunte por un producto, lo tengamos o no (si pregunta por varios, el primero). Si no pregunta por un producto, null.

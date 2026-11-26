@@ -1952,6 +1952,8 @@
         "answerQuestionsHint": "\"Do you have Grilon?\" or \"Do you deliver?\" is answered (and the product offered), never written down as a product.",
         "reviewConversations": "Review each conversation",
         "reviewConversationsHint": "When the customer stops writing (30 min), the AI reviews the conversation and tells the admins if something went wrong: unanswered questions, lost products, confused customers. Costs very little (budget model).",
+        "modelOptions": "Show product models",
+        "modelOptionsHint": "After writing down a product that comes in several kinds, the bot lists up to 3 models in stock (\"🔎 Some models we have\"). Turn it off to let the advisor help choose.",
         "readImages": "Read photos",
         "readImagesHint": "A photo of a written list, or of a product, becomes lines of the order.",
         "transcribeAudio": "Understand voice notes",
