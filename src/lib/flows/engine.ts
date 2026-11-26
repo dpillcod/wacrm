@@ -2077,6 +2077,9 @@ export function looksLikeSeveralItems(text: string, voice: boolean): boolean {
 }
 
 /** A payment receipt photo: thank the customer, tell the team. */
+const receiptAcked = new Map<string, number>();
+const RECEIPT_ACK_EVERY_MS = 10 * 60_000;
+
 async function acknowledgeReceipt(
   db: AdminClient,
   input: DispatchInboundInput,
@@ -2084,16 +2087,31 @@ async function acknowledgeReceipt(
   run: FlowRunRow | null,
 ): Promise<void> {
   const biz = await bizOf(db, input.accountId);
-  try {
-    await engineSendText({
+  // Several receipts in a row (two transfers, a blurry one again): one thank-you.
+  const last = receiptAcked.get(input.conversationId) ?? 0;
+  if (Date.now() - last > RECEIPT_ACK_EVERY_MS) {
+    receiptAcked.set(input.conversationId, Date.now());
+    const send = {
       accountId: input.accountId,
       userId: input.userId,
       conversationId: input.conversationId,
       contactId: input.contactId,
-      text: biz.texts.receiptReceived,
-    });
-  } catch (err) {
-    console.error("[flows] receipt acknowledgement failed:", err);
+    };
+    try {
+      // The thank-you closes with the catalog button ("next time, quicker")
+      // when the text invites it ({catalogo}) and the shop link is usable.
+      const text = renderText(biz.texts.receiptReceived, { catalogo: biz.shopName }).trim();
+      const url = biz.texts.receiptReceived.includes("{catalogo}")
+        ? await catalogLink(db, input.accountId, input.contactId, input.conversationId)
+        : "";
+      if (/^https:\/\/[^\s/]+/.test(url)) {
+        await engineSendCtaUrl({ ...send, bodyText: text, buttonText: biz.shopButton, url });
+      } else {
+        await engineSendText({ ...send, text });
+      }
+    } catch (err) {
+      console.error("[flows] receipt acknowledgement failed:", err);
+    }
   }
   const imageUrl = input.message.kind === "image" ? input.message.media_url : "";
   const body = `El cliente envió un comprobante de pago${reading.summary ? `: ${reading.summary}` : ""}.\n${imageUrl}`;
