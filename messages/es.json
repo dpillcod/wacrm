@@ -1943,7 +1943,9 @@
         "callRequestClosed": "El cliente pide que lo llamen (cerrado)",
         "cartReminder": "Carrito abandonado en el catálogo",
         "cartView": "\"Ver carrito\" en ese recordatorio",
-        "cartEmpty": "Carrito ya enviado o vacío"
+        "cartEmpty": "Carrito ya enviado o vacío",
+        "welcomeBack": "Saludo corto cuando el cliente vuelve a escribir después de que lo atendió una persona (en vez del menú completo)",
+        "waitingAck": "Al cliente que escribe mientras lo atiende una persona y nadie le contesta (a los 10 minutos)"
       },
       "ai": {
         "title": "IA con fotos, notas de voz y primeros mensajes",

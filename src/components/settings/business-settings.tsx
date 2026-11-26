@@ -88,6 +88,8 @@ const TEXT_KEYS: (keyof Texts)[] = [
   "cartReminder",
   "cartView",
   "cartEmpty",
+  "welcomeBack",
+  "waitingAck",
 ];
 const AI_FEATURE_KEYS: ("readImages" | "transcribeAudio" | "entryRouter" | "answerQuestions" | "reviewConversations" | "modelOptions")[] = [
   "answerQuestions",

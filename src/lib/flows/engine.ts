@@ -47,6 +47,7 @@ import { pickCrossSellSuggestion } from "../ai/cross-sell";
 import { installableLine, listAsksInstallation } from "./install-offer";
 import { modelOptionsNote } from "./model-options";
 import { needsAnswer } from "./unanswered-alerts";
+import { humanIsAttending, loadHumanState, watchCustomerWaiting } from "./human-pause";
 import {
   retrieveCatalogProducts,
   type CatalogProductCandidate,
@@ -3139,16 +3140,9 @@ async function askedAboutThisJustBefore(db: AdminClient, conversationId: string)
   });
 }
 
-/** A team member wrote in this conversation in the last 3 hours. */
-async function teamRecentlyActive(db: AdminClient, conversationId: string): Promise<boolean> {
-  const { data } = await db
-    .from("messages")
-    .select("id")
-    .eq("conversation_id", conversationId)
-    .eq("sender_type", "agent")
-    .gte("created_at", new Date(Date.now() - 3 * 3_600_000).toISOString())
-    .limit(1);
-  return (data ?? []).length > 0;
+/** A team member is attending this customer (answered within Mi negocio → humanPause.minutes). */
+async function teamRecentlyActive(db: AdminClient, accountId: string, conversationId: string): Promise<boolean> {
+  return humanIsAttending(db, accountId, conversationId);
 }
 
 /**
@@ -3167,13 +3161,13 @@ async function waitingOnTeam(db: AdminClient, run: FlowRunRow): Promise<boolean>
       .limit(50);
     alerted = ((data ?? []) as { title: string }[]).some((n) => needsAnswer(n.title));
   }
-  return alerted && !(await teamRecentlyActive(db, run.conversation_id));
+  return alerted && !(await teamRecentlyActive(db, run.account_id, run.conversation_id));
 }
 
 /** The team was alerted about this run, or someone from it wrote in the chat lately. */
 async function personIsOnIt(db: AdminClient, run: FlowRunRow): Promise<boolean> {
   if (Array.isArray(run.vars.__trouble_alerts) && run.vars.__trouble_alerts.length > 0) return true;
-  return !!run.conversation_id && (await teamRecentlyActive(db, run.conversation_id));
+  return !!run.conversation_id && (await teamRecentlyActive(db, run.account_id, run.conversation_id));
 }
 
 /** "Buenas tardes" right after placing an order: its status instead of the menu. */
@@ -3873,15 +3867,35 @@ async function dispatchInboundToFlowsInner(
       return { consumed: false, outcome: "no_match" };
     }
 
-    // A person from the team is talking with this customer (wrote in the
-    // last 3 h): "Buenas tardes, ¿qué precio tiene?" is for them — never
-    // the menu on top of their conversation. "menú" still restarts the bot.
-    if (
-      input.message.kind === "text" &&
-      !isMenuCommand(input.message.text) &&
-      (await teamRecentlyActive(db, input.conversationId))
-    ) {
-      return { consumed: false, outcome: "no_match" };
+    // A person from the team is attending this customer (answered them
+    // lately — see human-pause.ts): "Buenas tardes, ¿qué precio tiene?" is
+    // for them, never the menu on top of their conversation; if nobody
+    // answers, the team is alerted. "menú" still restarts the bot.
+    if (input.message.kind === "text" && !isMenuCommand(input.message.text)) {
+      const human = await loadHumanState(db, input.accountId, input.conversationId);
+      if (human.attending) {
+        await watchCustomerWaiting(db, {
+          accountId: input.accountId,
+          userId: input.userId,
+          conversationId: input.conversationId,
+          contactId: input.contactId,
+          said: input.message.text,
+        }).catch((err) => console.error("[flows] waiting watch failed:", err));
+        return { consumed: false, outcome: "no_match" };
+      }
+      // The person finished a while ago and the customer greets again:
+      // a short "¿algo más?", not the whole menu.
+      const welcomeBack = (await bizOf(db, input.accountId)).texts.welcomeBack.trim();
+      if (human.welcomeBack && welcomeBack && isPlainGreeting(input.message.text)) {
+        await engineSendText({
+          accountId: input.accountId,
+          userId: input.userId,
+          conversationId: input.conversationId,
+          contactId: input.contactId,
+          text: welcomeBack,
+        });
+        return { consumed: true, outcome: "no_match" };
+      }
     }
     // A shared location with no bot conversation open: kept for the
     // order just sent, or for the one they're about to place.

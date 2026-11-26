@@ -1943,7 +1943,9 @@
         "callRequestClosed": "Customer asks to be called (closed)",
         "cartReminder": "Cart left in the product picker",
         "cartView": "\"See cart\" on that reminder",
-        "cartEmpty": "Cart already sent or empty"
+        "cartEmpty": "Cart already sent or empty",
+        "welcomeBack": "Short greeting when the customer writes again after a person attended them (instead of the whole menu)",
+        "waitingAck": "To a customer who writes while a person attends them and nobody answers (after 10 minutes)"
       },
       "ai": {
         "title": "AI with photos, voice notes and first messages",

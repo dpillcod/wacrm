@@ -234,6 +234,10 @@ export interface BusinessSettings {
     cartView: string
     /** "Enviar mi pedido" when the cart was already sent or is empty. */
     cartEmpty: string
+    /** A greeting after a person attended this customer (the pause is over): short, instead of the whole menu. */
+    welcomeBack: string
+    /** The customer wrote while a person attends them and nobody answered for a while. */
+    waitingAck: string
   }
   /** Home services (plumbing, electricity, painting, locks…): their own board. */
   serviceBoard: {
@@ -276,6 +280,17 @@ export interface BusinessSettings {
     minutes: number
     /** Who also gets it by WhatsApp (same format as the staff list; only while their 24 h window is open). */
     phones: string[]
+  }
+  /**
+   * A person from the team answering a customer (from the CRM or the
+   * phone app): the bot and the AI keep quiet that long after their last
+   * reply. A message the team sends first (a cashier's "gracias por
+   * preferirnos") doesn't count — only answering what the customer wrote.
+   */
+  humanPause: {
+    minutes: number
+    /** The customer writes during the pause and nobody answers: alert the team after this many minutes, and tell the customer after twice that (0 = off). */
+    waitAlertMinutes: number
   }
   /**
    * Conversions API: when an order card reaches "Entregado", tell Meta
@@ -428,6 +443,8 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
     cartReminder: '🛒 Dejó {productos} en su carrito del catálogo ({total}). ¿Se los envío a nuestro asesor?',
     cartView: 'Aquí está su carrito, tal como lo dejó 👇',
     cartEmpty: 'Su carrito ya fue enviado o está vacío 🙂 Si necesita algo más, escríbame.',
+    welcomeBack: '¡Hola de nuevo! ¿En qué más le podemos ayudar? 🙂',
+    waitingAck: 'Ya le aviso a mi compañero, en un momento le responde 🙂',
   },
   serviceBoard: {
     pipelineName: 'Servicios',
@@ -452,6 +469,7 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
     changeReply: 'Claro 🙂 Escríbame qué desea cambiar y un asesor le actualiza la cotización.',
   },
   escalation: { minutes: 25, phones: [] },
+  humanPause: { minutes: 180, waitAlertMinutes: 5 },
   metaConversions: { enabled: false, pageId: '', datasetId: '' },
   orderBoard: {
     pipelineName: 'Pedidos',
@@ -567,6 +585,10 @@ export function sanitizeSettings(stored: unknown): BusinessSettings {
     escalation: {
       minutes: Math.round(clampNumber(s.escalation.minutes, 0, 240)),
       phones: strings(s.escalation.phones, 10),
+    },
+    humanPause: {
+      minutes: Math.round(clampNumber(s.humanPause.minutes, 5, 720)),
+      waitAlertMinutes: Math.round(clampNumber(s.humanPause.waitAlertMinutes, 0, 60)),
     },
     metaConversions: {
       enabled: s.metaConversions.enabled,

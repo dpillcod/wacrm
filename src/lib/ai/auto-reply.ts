@@ -15,6 +15,7 @@ import { logAiUsage } from './usage'
 import { latestUserMessage } from './query'
 import { engineSendText, engineSendProduct, engineSendProductList } from '@/lib/flows/meta-send'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { humanIsAttending } from '@/lib/flows/human-pause'
 
 /**
  * Sent to the customer right before a handoff takes over. Without
@@ -27,8 +28,6 @@ import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
  */
 const HANDOFF_ACK_MESSAGE = 'Un momento por favor, en breve un encargado le va a ayudar 🙂'
 
-/** How long after a team member's message the AI stays out of the conversation. */
-const HUMAN_RECENT_MS = 4 * 3_600_000
 /** How long to wait for a follow-up message before sending an answer. */
 const NEWER_MESSAGE_WAIT_MS = 2_500
 
@@ -182,14 +181,9 @@ export async function dispatchInboundToAiReply(
     // A person from the team wrote here recently (without taking the
     // conversation): they're talking with the customer — the bot keeps
     // quiet instead of answering on top of them.
-    const { data: lastAgent } = await db
-      .from('messages')
-      .select('created_at')
-      .eq('conversation_id', conversationId)
-      .eq('sender_type', 'agent')
-      .gte('created_at', new Date(Date.now() - HUMAN_RECENT_MS).toISOString())
-      .limit(1)
-    if (lastAgent?.length) {
+    // Same rule as the flows: only a reply to the customer counts, for
+    // Mi negocio → humanPause.minutes (see flows/human-pause.ts).
+    if (await humanIsAttending(db, accountId, conversationId)) {
       console.log('[ai auto-reply] skipped: a team member replied recently')
       return
     }
