@@ -1847,6 +1847,8 @@
         "whatsappNumberHint": "Digits with country code, e.g. 593999999999. Used for the \"Back to WhatsApp\" button.",
         "shopFeedUrl": "Web shop product feed (CSV)",
         "shopFeedUrlHint": "The file the product picker reads (photos, prices, sections). Leave empty to turn the picker off.",
+        "shopFeedStatusUrl": "Product feed status (optional)",
+        "shopFeedStatusUrlHint": "An address that tells when the file was generated (field \"generado\"). With it the scheduled reload only downloads the file when it changed, so it can run every 15 minutes.",
         "birthdayField": "Birthday custom field",
         "birthdayFieldHint": "Contact field (MM-DD) the daily birthday flow looks at."
       },

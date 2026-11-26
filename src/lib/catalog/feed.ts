@@ -66,6 +66,8 @@ export interface ShopProductRow {
   price: number;
   sale_price: number | null;
   image_url: string | null;
+  /** Only when the feed has an `image_small` column (needs migration 055). */
+  image_small?: string | null;
   link: string | null;
   department: string | null;
   category: string | null;
@@ -97,6 +99,7 @@ export function feedToProducts(rows: string[][]): ShopProductRow[] {
     price: col("price"),
     sale: col("sale_price"),
     image: col("image_link"),
+    small: col("image_small"),
     link: col("link"),
     availability: col("availability"),
     brand: col("brand"),
@@ -118,13 +121,17 @@ export function feedToProducts(rows: string[][]): ShopProductRow[] {
     const sale = idx.sale >= 0 ? parsePrice(r[idx.sale]) : null;
     const image = idx.image >= 0 ? (r[idx.image] ?? "").trim() : "";
     const link = idx.link >= 0 ? (r[idx.link] ?? "").trim() : "";
+    // The shop's generic "no photo" image counts as no photo.
+    const realPhoto = (u: string) => (/^https:\/\//.test(u) && !/placeholder/i.test(u) ? u : null);
+    const image_url = realPhoto(image);
+    const small = idx.small >= 0 ? (r[idx.small] ?? "").trim() : "";
     out.push({
       sku,
       title,
       price,
       sale_price: sale !== null && sale > 0 && sale < price ? sale : null,
-      // The shop's generic "no photo" image counts as no photo.
-      image_url: /^https:\/\//.test(image) && !/placeholder/i.test(image) ? image : null,
+      image_url,
+      ...(idx.small >= 0 ? { image_small: image_url ? realPhoto(small) : null } : {}),
       link: /^https:\/\//.test(link) ? link : null,
       department,
       category,

@@ -44,7 +44,7 @@ export async function searchShop(
   const page = Math.max(0, Math.min(200, Math.floor(query.page ?? 0)));
   let q = db
     .from("shop_products")
-    .select("sku, title, price, sale_price, image_url, department, category", { count: "exact" })
+    .select("sku, title, price, sale_price, image_url, image_small, department, category", { count: "exact" })
     .eq("account_id", accountId)
     .eq("in_stock", true)
     .or("erp_stock.is.null,erp_stock.gt.0");
@@ -78,6 +78,7 @@ export async function searchShop(
     price: number | string;
     sale_price: number | string | null;
     image_url: string | null;
+    image_small: string | null;
     department: string | null;
     category: string | null;
   }[]).map((r) => {
@@ -87,7 +88,8 @@ export async function searchShop(
       title: r.title,
       price: Number(r.price),
       salePrice: r.sale_price === null ? null : Number(r.sale_price),
-      thumb: thumbnailUrl(image),
+      // The feed's own small copy when it has one; else WordPress's usual 300×300 name.
+      thumb: image ? realImage(r.image_small) ?? thumbnailUrl(image) : null,
       image,
       department: r.department,
       category: r.category,

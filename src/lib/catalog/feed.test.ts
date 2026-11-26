@@ -72,3 +72,17 @@ describe("thumbnailUrl", () => {
     expect(thumbnailUrl(null)).toBeNull();
   });
 });
+
+describe("feedToProducts image_small", () => {
+  it("keeps the small photo only when the feed has the column and the product a real photo", () => {
+    const withSmall = feedToProducts([
+      ["id", "title", "price", "image_link", "image_small"],
+      ["1", "Arroz", "1.00 USD", "https://x.com/a.jpg", "https://x.com/a-300x225.jpg"],
+      ["2", "Pan", "0.15 USD", "https://x.com/placeholder.png", "https://x.com/placeholder-300x300.png"],
+    ]);
+    expect(withSmall[0].image_small).toBe("https://x.com/a-300x225.jpg");
+    expect(withSmall[1].image_small).toBeNull();
+    const without = feedToProducts([["id", "title", "price", "image_link"], ["1", "Arroz", "1.00 USD", "https://x.com/a.jpg"]]);
+    expect("image_small" in without[0]).toBe(false);
+  });
+});

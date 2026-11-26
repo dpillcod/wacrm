@@ -1847,6 +1847,8 @@
         "whatsappNumberHint": "Con código de país, solo números, por ejemplo 593999999999. Se usa en el botón \"Volver a WhatsApp\".",
         "shopFeedUrl": "Archivo de productos de la tienda web (CSV)",
         "shopFeedUrlHint": "El archivo que lee el catálogo (fotos, precios, secciones). Déjelo vacío para apagar el catálogo.",
+        "shopFeedStatusUrl": "Estado del archivo de productos (opcional)",
+        "shopFeedStatusUrlHint": "Dirección que dice cuándo se generó el archivo (campo \"generado\"). Con ella la recarga programada solo baja el archivo si cambió, así puede correr cada 15 minutos.",
         "birthdayField": "Campo de cumpleaños",
         "birthdayFieldHint": "Campo del contacto (MM-DD) que revisa el flujo diario de cumpleaños."
       },

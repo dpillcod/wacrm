@@ -76,6 +76,48 @@ async function doSync(db: SupabaseClient, accountId: string): Promise<ShopSyncRe
   return { ok: true, products: products.length, removed, ms: Date.now() - started };
 }
 
+/** The feed's `generado` already loaded, per account (in memory: a restart reloads once). */
+const loadedGeneration = new Map<string, string>();
+
+/** When the feed was generated, from shopFeedStatusUrl; null when unknown. */
+async function feedGeneration(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${url}${url.includes("?") ? "&" : "?"}nc=${Date.now()}`, { signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { generado?: unknown };
+    return typeof body.generado === "string" && body.generado.trim() ? body.generado.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The scheduled sync: with a feed status address (Mi negocio), reload only
+ * when the shop generated a new file — or the stored copy is getting old.
+ */
+export async function syncShopIfChanged(
+  db: SupabaseClient,
+  accountId: string,
+): Promise<ShopSyncResult | { ok: true; skipped: "unchanged" }> {
+  const statusUrl = (await loadBusinessSettings(db, accountId)).shopFeedStatusUrl;
+  if (!statusUrl) return syncShopProducts(db, accountId);
+  const generation = await feedGeneration(statusUrl);
+  if (generation && loadedGeneration.get(accountId) === generation) {
+    const { data } = await db
+      .from("shop_products")
+      .select("synced_at")
+      .eq("account_id", accountId)
+      .order("synced_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const last = (data as { synced_at?: string } | null)?.synced_at;
+    if (last && Date.now() - new Date(last).getTime() < SHOP_MAX_AGE_MS) return { ok: true, skipped: "unchanged" };
+  }
+  const result = await syncShopProducts(db, accountId);
+  if (result.ok && generation) loadedGeneration.set(accountId, generation);
+  return result;
+}
+
 /** Starts a background sync when the stored copy is older than SHOP_MAX_AGE_MS. Never throws. */
 export async function refreshShopIfStale(db: SupabaseClient, accountId: string): Promise<void> {
   try {

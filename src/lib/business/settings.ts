@@ -86,6 +86,12 @@ export interface BusinessSettings {
   publicAppUrl: string
   /** The web shop's product feed (CSV), for the product picker. '' = picker off. */
   shopFeedUrl: string
+  /**
+   * Optional: a JSON address that tells when the feed was last generated
+   * (field `generado`). With it the scheduled sync reloads only when that
+   * changed, so the cron can run every 15 min cheaply. '' = always reload.
+   */
+  shopFeedStatusUrl: string
   /** The business's WhatsApp number (digits, with country code), for "Volver a WhatsApp" links. */
   whatsappNumber: string
   /**
@@ -378,6 +384,7 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
   woocommerceUrl: '',
   publicAppUrl: '',
   shopFeedUrl: '',
+  shopFeedStatusUrl: '',
   whatsappNumber: '',
   newConversationAlert: 'off',
   allowPaidTemplates: false,
@@ -564,6 +571,7 @@ export function sanitizeSettings(stored: unknown): BusinessSettings {
     newConversationAlert: (['off', 'app', 'whatsapp'] as const).includes(s.newConversationAlert) ? s.newConversationAlert : 'off',
     publicAppUrl: s.publicAppUrl.trim().replace(/\/+$/, ''),
     shopFeedUrl: s.shopFeedUrl.trim(),
+    shopFeedStatusUrl: /^https:\/\/\S+$/.test(s.shopFeedStatusUrl.trim()) ? s.shopFeedStatusUrl.trim() : '',
     shopName: s.shopName.trim().slice(0, 40) || DEFAULT_BUSINESS_SETTINGS.shopName,
     shopButton: [...(s.shopButton.trim() || DEFAULT_BUSINESS_SETTINGS.shopButton)].slice(0, 20).join(''),
     shopTagline: s.shopTagline.trim().slice(0, 120),

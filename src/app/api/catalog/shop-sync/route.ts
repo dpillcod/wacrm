@@ -2,11 +2,12 @@ import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { requireRole } from "@/lib/auth/account";
-import { syncShopProducts } from "@/lib/catalog/shop-sync";
+import { syncShopIfChanged, syncShopProducts } from "@/lib/catalog/shop-sync";
 
 // GET /api/catalog/shop-sync
 //   Cron (X-Cron-Secret = AUTOMATION_CRON_SECRET): syncs every account
-//   that has a shop feed set. An admin signed in to the CRM can also
+//   that has a shop feed set — only when the feed changed, for accounts
+//   with a feed status address (see syncShopIfChanged). An admin signed in to the CRM can also
 //   call it to sync their own account now.
 
 function cronAuthorized(request: Request): boolean {
@@ -25,7 +26,7 @@ export async function GET(request: Request) {
     const results: Record<string, unknown> = {};
     for (const row of (data ?? []) as { account_id: string; settings: { shopFeedUrl?: string } }[]) {
       if (!row.settings?.shopFeedUrl) continue;
-      results[row.account_id] = await syncShopProducts(db, row.account_id);
+      results[row.account_id] = await syncShopIfChanged(db, row.account_id);
     }
     return NextResponse.json({ results });
   }

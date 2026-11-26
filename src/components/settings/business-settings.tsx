@@ -352,6 +352,9 @@ export function BusinessSettingsPanel() {
           <Field label={t("links.shopFeedUrl")} hint={t("links.shopFeedUrlHint")}>
             {text("shopFeedUrl", { placeholder: "https://…/feed-whatsapp.csv" })}
           </Field>
+          <Field label={t("links.shopFeedStatusUrl")} hint={t("links.shopFeedStatusUrlHint")}>
+            {text("shopFeedStatusUrl", { placeholder: "https://…/wp-json/…/feed-whatsapp" })}
+          </Field>
           <Field label={t("links.birthdayField")} hint={t("links.birthdayFieldHint")}>
             {text("birthdayFieldName")}
           </Field>
