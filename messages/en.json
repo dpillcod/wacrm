@@ -1925,6 +1925,7 @@
         "resumeOrder": "Says hello again in the middle of an order",
         "photoNotUnderstood": "Photo with no products in it",
         "receiptReceived": "Payment receipt received (the team is notified; with {catalogo} it carries the catalog button; once every 10 min)",
+        "receiptPrompt": "Customer says they will send a payment receipt (counter QR), before the photo",
         "documentReceived": "Customer file, e.g. a PDF to print (the team is notified)",
         "vendorReply": "Suppliers, salespeople and proposals (sponsorships) writing to the customer chat",
         "idleNudgeGeneral": "Customer went quiet (outside an order list)",

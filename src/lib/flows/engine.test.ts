@@ -3,6 +3,7 @@ import {
   isAckOnly,
   isHumanRequest,
   isPlainGreeting,
+  announcesReceipt,
   looksLikeSeveralItems,
   stripOrderLeadIn,
   optionByText,
@@ -773,5 +774,19 @@ describe("real conversations 2026-10-21", () => {
     expect(isPlainGreeting("Buenas tarded")).toBe(true);
     expect(isPlainGreeting("hola veci")).toBe(true);
     expect(isPlainGreeting("buenas tardes quiero 2 panes")).toBe(false);
+  });
+});
+
+describe("announcesReceipt", () => {
+  it.each([
+    "Hola, le envío mi comprobante de pago 🧾",
+    "adjunto la transferencia",
+    "ya hice la transferencia",
+    "Buenas, le mando el voucher",
+  ])("knows %s announces a receipt", (t) => {
+    expect(announcesReceipt(t)).toBe(true);
+  });
+  it.each(["Quisiera 2 panes", "¿Aceptan pago con tarjeta?", "Hola"])("%s is not a receipt", (t) => {
+    expect(announcesReceipt(t)).toBe(false);
   });
 });

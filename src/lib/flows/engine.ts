@@ -323,6 +323,18 @@ export function isPlainGreeting(text: string): boolean {
     !words.every((w) => w === "que" || w === "tal" || w === "como" || w === "esta" || w === "estas");
 }
 
+/**
+ * "Hola, le envío mi comprobante de pago", "adjunto la transferencia":
+ * the customer is about to send a receipt photo (counter QR). Short
+ * messages only — a long one with a receipt mention is something else.
+ */
+export function announcesReceipt(text: string): boolean {
+  const t = normalizeForMatch(text);
+  if (t.split(" ").filter(Boolean).length > 14) return false;
+  return /\b(comprobante|voucher|deposito)\b/.test(t) ||
+    /\b(envio|envie|mando|adjunto|paso|hice|realice)\b.*\b(transferencia|pago)\b/.test(t);
+}
+
 const ACK_ONLY = new Set([
   "si", "sii", "sip", "ok", "oki", "okey", "okay", "vale", "bueno", "bien", "perfecto", "dale",
   "claro", "gracias", "muchas gracias", "ok gracias", "si gracias", "listo gracias", "de acuerdo",
@@ -3911,6 +3923,25 @@ async function dispatchInboundToFlowsInner(
           conversationId: input.conversationId,
           contactId: input.contactId,
           text: welcomeBack,
+        });
+        return { consumed: true, outcome: "no_match" };
+      }
+    }
+    // "Hola, le envío mi comprobante de pago" (the counter QR): ask for the
+    // photo — not the order greeting. The photo then gets the receipt thanks.
+    if (
+      input.message.kind === "text" &&
+      announcesReceipt(input.message.text) &&
+      (await botOwnsConversation(db, input.conversationId))
+    ) {
+      const prompt = (await bizOf(db, input.accountId)).texts.receiptPrompt.trim();
+      if (prompt) {
+        await engineSendText({
+          accountId: input.accountId,
+          userId: input.userId,
+          conversationId: input.conversationId,
+          contactId: input.contactId,
+          text: prompt,
         });
         return { consumed: true, outcome: "no_match" };
       }

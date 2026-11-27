@@ -173,6 +173,8 @@ export interface BusinessSettings {
     photoNotUnderstood: string
     /** A payment receipt photo (the team is notified). */
     receiptReceived: string
+    /** The customer says they're sending a receipt (the counter QR) before the photo. */
+    receiptPrompt: string
     /** A file from the customer (PDF, Word…); {archivo} = " *name*" or "". The team is notified. */
     documentReceived: string
     /** A supplier, salesperson or sponsorship request writing to the customer chat. */
@@ -423,6 +425,7 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
     photoNotUnderstood:
       'Recibí su foto 🙂 pero no logré leer productos en ella. ¿Me escribe qué necesita, o me envía una foto más clara de su lista?',
     receiptReceived: '🧾 Recibimos su comprobante, ¡gracias! Nuestro equipo lo revisará y le confirmará por aquí 🙂',
+    receiptPrompt: '¡Claro! 🙂 Envíeme por aquí la foto o captura de su comprobante y se lo confirmamos.',
     vendorReply:
       'Gracias por escribirnos 🙂 Por este chat atendemos pedidos de clientes. Las propuestas comerciales, proveedores y empleo las atiende nuestro equipo administrativo: un asesor le indicará a dónde escribir.',
     documentReceived:

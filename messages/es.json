@@ -1925,6 +1925,7 @@
         "resumeOrder": "Vuelve a saludar en medio de un pedido",
         "photoNotUnderstood": "Foto sin productos",
         "receiptReceived": "Comprobante de pago recibido (se avisa al equipo; con {catalogo} va con el botón del catálogo; 1 vez cada 10 min)",
+        "receiptPrompt": "Cliente avisa que enviará su comprobante (QR de caja), antes de la foto",
         "documentReceived": "Archivo del cliente, ej. PDF para imprimir (se avisa al equipo)",
         "vendorReply": "Proveedores, vendedores y propuestas (auspicios) que escriben al chat de clientes",
         "idleNudgeGeneral": "El cliente dejó de responder (fuera de un pedido)",
