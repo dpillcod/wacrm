@@ -1924,7 +1924,7 @@
         "humanRequest": "Pide hablar con una persona mientras escribe el pedido",
         "resumeOrder": "Vuelve a saludar en medio de un pedido",
         "photoNotUnderstood": "Foto sin productos",
-        "receiptReceived": "Comprobante de pago recibido (se avisa al equipo; con {catalogo} va con el botón del catálogo; 1 vez cada 10 min)",
+        "receiptReceived": "Comprobante de pago recibido (se avisa al equipo; con {catalogo} va con el botón del catálogo; 1 vez cada 10 min; vacío = no se le responde al cliente)",
         "receiptPrompt": "Cliente avisa que enviará su comprobante (QR de caja), antes de la foto",
         "documentReceived": "Archivo del cliente, ej. PDF para imprimir (se avisa al equipo)",
         "vendorReply": "Proveedores, vendedores y propuestas (auspicios) que escriben al chat de clientes",

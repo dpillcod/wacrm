@@ -2088,7 +2088,11 @@ export function looksLikeSeveralItems(text: string, voice: boolean): boolean {
   return words.length >= 7 && /,|;| y | e | tambien | ademas /.test(` ${normalizeForMatch(text)} `.replace(/,/g, " , "));
 }
 
-/** A payment receipt photo: thank the customer, tell the team. */
+/**
+ * A payment receipt photo: tell the team; thank the customer only when
+ * texts.receiptReceived has a text (empty = silent — most receipts arrive
+ * as a bare picture shared from the bank app, nothing to answer).
+ */
 const receiptAcked = new Map<string, number>();
 const RECEIPT_ACK_EVERY_MS = 10 * 60_000;
 
@@ -2101,7 +2105,7 @@ async function acknowledgeReceipt(
   const biz = await bizOf(db, input.accountId);
   // Several receipts in a row (two transfers, a blurry one again): one thank-you.
   const last = receiptAcked.get(input.conversationId) ?? 0;
-  if (Date.now() - last > RECEIPT_ACK_EVERY_MS) {
+  if (biz.texts.receiptReceived.trim() && Date.now() - last > RECEIPT_ACK_EVERY_MS) {
     receiptAcked.set(input.conversationId, Date.now());
     const send = {
       accountId: input.accountId,
