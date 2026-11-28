@@ -1,7 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Barlow, Barlow_Semi_Condensed } from "next/font/google";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
-import { readOrderLinkToken } from "@/lib/catalog/order-link";
+import { redirect } from "next/navigation";
+import { createOrderLinkToken, readOrderLinkToken } from "@/lib/catalog/order-link";
 import { searchShop, shopFacets, type ShopFacets, type ShopItem } from "@/lib/catalog/shop-search";
 import { refreshShopIfStale } from "@/lib/catalog/shop-sync";
 import { loadBusinessSettings } from "@/lib/business/settings";
@@ -12,7 +13,11 @@ import styles from "@/components/shop/shop-picker.module.css";
 
 // /pedir/<token> — the customer's product picker. The signed link (sent
 // by the bot, valid 24 h) is the only key: it names the account, the
-// contact and the chat the picked products go back to.
+// contact and the chat the picked products go back to. A genuine link
+// that expired less than RENEW_DAYS ago is renewed on the spot (an old
+// RAPIDITO button in the chat still works) — the signature is the proof.
+
+const RENEW_DAYS = 30;
 
 const barlow = Barlow({ subsets: ["latin"], weight: ["500", "600", "700"], variable: "--shop-font", display: "swap" });
 const barlowCond = Barlow_Semi_Condensed({ subsets: ["latin"], weight: ["700"], variable: "--shop-font-cond", display: "swap" });
@@ -60,11 +65,25 @@ export default async function PedirPage({ params }: { params: Promise<{ token: s
   const { token } = await params;
   const check = readOrderLinkToken(token);
   if (!check.ok) {
+    let href = "https://wa.me/";
+    if (check.reason === "expired") {
+      const recent = readOrderLinkToken(token, new Date(Date.now() - RENEW_DAYS * 86_400_000));
+      if (recent.ok) {
+        const fresh = createOrderLinkToken({ ...recent.link, expiresAt: Math.floor(Date.now() / 1000) + 24 * 3600 });
+        redirect(`/pedir/${fresh}`);
+      }
+      // Older still: the WhatsApp button at least opens the store's chat.
+      const ancient = readOrderLinkToken(token, new Date(0));
+      if (ancient.ok) {
+        const biz = await loadBusinessSettings(supabaseAdmin(), ancient.link.accountId).catch(() => null);
+        if (biz) href = waLink(biz.whatsappNumber);
+      }
+    }
     return (
       <Message
         title={check.reason === "expired" ? "Este enlace ya venció" : "Enlace no válido"}
         text="Escríbanos por WhatsApp y le enviamos un enlace nuevo para elegir sus productos."
-        href="https://wa.me/"
+        href={href}
       />
     );
   }
